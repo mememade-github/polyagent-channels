@@ -1,0 +1,45 @@
+services:
+  polyagent-channels:
+    container_name: ${INSTANCE_NAME:-polyagent-channels}
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    init: true
+    user: vscode
+    working_dir: /workspaces
+    environment:
+      SKIP_CLAUDE_UPDATE: "1"
+      SKIP_CODEX_UPDATE: "1"
+      SKIP_AGY_UPDATE: "1"
+      CHANNEL_URL: http://127.0.0.1:8080
+      CHANNEL_RETENTION_DAYS: "${CHANNEL_RETENTION_DAYS:-30}"
+      REDIS_URL: redis://redis:6379/0
+      CHANNEL_KEY_FILE: /workspaces/.env/channel.key
+    ports:
+      - "${CHANNEL_BIND:-127.0.0.1}:${CHANNEL_PORT:-18765}:8080"
+    volumes:
+      - type: bind
+        source: ${HOST_WORKSPACE_PATH:-..}
+        target: /workspaces
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - channel-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  channel-data:

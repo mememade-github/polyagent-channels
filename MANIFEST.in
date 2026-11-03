@@ -1,0 +1,3 @@
+include requirements.txt requirements.lock requirements-dev.txt compose.yaml
+recursive-include .devcontainer Dockerfile *.sh *.json *.yml .env.example
+recursive-include tests *.py

@@ -1,0 +1,2 @@
+include:
+  - .devcontainer/docker-compose.yml
