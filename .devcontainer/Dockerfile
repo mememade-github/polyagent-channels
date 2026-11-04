@@ -189,6 +189,7 @@ RUN git config --global core.quotepath false \
 # =============================================================================
 USER root
 COPY .devcontainer/LICENSE /usr/share/doc/polyagent-devcontainer/LICENSE
+COPY LICENSE /usr/share/doc/polyagent-channels/LICENSE
 COPY .devcontainer/codex-launcher.sh /usr/local/bin/codex-launcher
 COPY .devcontainer/setup-env.sh /usr/local/bin/
 COPY .devcontainer/entrypoint.sh /usr/local/bin/
@@ -210,7 +211,7 @@ CMD ["sleep", "infinity"]
 # Polyagent Channels product layer; no prebuilt local image is required.
 WORKDIR /opt/polyagent-channels
 RUN uv python install 3.12
-COPY --chown=vscode:vscode requirements.lock requirements.txt pyproject.toml README.md ./
+COPY --chown=vscode:vscode requirements.lock requirements.txt pyproject.toml README.md LICENSE ./
 RUN uv venv --python 3.12 /home/vscode/channels-venv && uv pip install --python /home/vscode/channels-venv/bin/python -r requirements.lock
 COPY --chown=vscode:vscode src ./src
 RUN uv pip install --python /home/vscode/channels-venv/bin/python --no-deps .

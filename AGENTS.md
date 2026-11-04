@@ -6,7 +6,7 @@ Use descriptive, searchable names, explicit failures and clear error boundaries.
 
 The supplied guide below retains the original code smells, solution alternatives and every Clean Code category. Use it for review and refactoring; it is not a claim that current source mechanically satisfies every item. C009 literally prohibits classes with **two or more** instance variables (not merely more than two). When an item conflicts with a required library interface or minimal standard idiom, surface the specific conflict and its consequences for resolution within the task's authorized scope; do not assume a blanket waiver or silently redefine the item.
 
-Preserve upstream attribution when distributing inherited files. The inherited DevContainer files and `.dockerignore` are identified in README's licensing section. Include `.devcontainer/LICENSE` and `.dockerignore` explicitly in source distributions and retain the existing notice at `/usr/share/doc/polyagent-devcontainer/LICENSE` in images containing inherited scripts. The new product's license choice is pending; do not extend the upstream MIT grant to it.
+Preserve upstream attribution when distributing inherited files. The inherited DevContainer files and `.dockerignore` are identified in README's licensing section. Include `.devcontainer/LICENSE` and `.dockerignore` explicitly in source distributions and retain the existing notice at `/usr/share/doc/polyagent-devcontainer/LICENSE` in images containing inherited scripts. The product is licensed under the MIT License in [LICENSE](LICENSE), copyright (c) 2026 the polyagent-channels authors. Preserve the separate upstream notice.
 
 ## Supplied code guide (original wording)
 

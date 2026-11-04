@@ -176,7 +176,7 @@ Follow the portable [AGENTS.md](AGENTS.md) for change scope, code review and ver
 
 ## Licensing
 
-The license and copyright holder for new product code are pending the administrator's choice.
+The product is licensed under the MIT License; see [LICENSE](LICENSE). Copyright (c) 2026 the polyagent-channels authors.
 
 The inherited `.devcontainer/Dockerfile`, `.devcontainer/devcontainer.json`, `.devcontainer/docker-compose.yml`, `.devcontainer/.env.example`, `.devcontainer/setup-env.sh`, `.devcontainer/entrypoint.sh`, `.devcontainer/codex-launcher.sh` and `.dockerignore` derive from [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer), with local product adaptations. Retain its existing [MIT notice](.devcontainer/LICENSE). Source distributions include that notice and `.dockerignore`; the image installs the notice at `/usr/share/doc/polyagent-devcontainer/LICENSE` alongside the inherited scripts' distribution.
 
