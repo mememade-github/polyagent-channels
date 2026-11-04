@@ -9,6 +9,9 @@ from starlette.responses import JSONResponse
 
 from channels.identity import authenticate, current_agent
 
+ERRORS = {400: 'invalid Content-Length', 401: 'Unauthorized', 411: 'Content-Length required',
+          413: 'request exceeds size limit', 503: 'Redis unavailable'}
+
 
 def load_key():
     path = Path(os.environ.get('CHANNEL_KEY_FILE', '.env/channel.key'))
@@ -29,15 +32,19 @@ def load_key():
 
 
 class CredentialAuth:
-    def __init__(self, application, key):
+    def __init__(self, application, key, max_body):
         self.application = application
         self.authorization = ('Bearer ' + key).encode()
+        self.max_body = max_body
 
     async def __call__(self, scope, receive, send):
         if scope['type'] not in ('http', 'websocket'):
             return await self.application(scope, receive, send)
         if scope['type'] == 'http' and scope['path'] in ('/help', '/health'):
             return await self.application(scope, receive, send)
+        body_status = self.mcp_body_status(scope)
+        if body_status:
+            return await self.reject(scope, receive, send, body_status)
         supplied = dict(scope.get('headers', [])).get(b'authorization', b'')
         if scope['type'] == 'http' and scope['path'] == '/agents':
             if hmac.compare_digest(supplied, self.authorization):
@@ -58,9 +65,20 @@ class CredentialAuth:
         finally:
             current_agent.reset(token)
 
+    def mcp_body_status(self, scope):
+        if (scope['type'], scope.get('method'), scope['path']) != ('http', 'POST', '/mcp'):
+            return None
+        values = [value for name, value in scope['headers'] if name == b'content-length']
+        if any(name == b'transfer-encoding' for name, _ in scope['headers']) or not values:
+            return 411
+        if len(set(values)) != 1 or not values[0].isdigit() or len(values[0]) > 20:
+            return 400
+        if int(values[0]) > self.max_body:
+            return 413
+        return None
+
     async def reject(self, scope, receive, send, status=401):
         if scope['type'] == 'websocket':
             await send({'type': 'websocket.close', 'code': 1008})
             return
-        error = 'Redis unavailable' if status == 503 else 'Unauthorized'
-        await JSONResponse({'error': error}, status_code=status)(scope, receive, send)
+        await JSONResponse({'error': ERRORS[status]}, status_code=status)(scope, receive, send)

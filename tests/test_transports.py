@@ -1,8 +1,12 @@
+import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
 from redis.exceptions import RedisError
 from starlette.websockets import WebSocketDisconnect
+
+from channels.auth import CredentialAuth
 
 
 @pytest.mark.parametrize('authorization', [None, 'Bearer wrong'])
@@ -13,6 +17,45 @@ def test_http_rejects_missing_or_wrong_key(client, authorization):
 
 def test_mcp_requires_authentication(client):
     assert client.post('/mcp', json={}).status_code == 401
+
+
+def test_mcp_rejects_oversized_request(client, headers, server_module):
+    assert client.post('/mcp', headers=headers, content=b'x' * (server_module.MAX_BODY + 1)).status_code == 413
+
+
+def test_mcp_rejects_oversized_request_before_authentication(client, server_module):
+    assert client.post('/mcp', content=b'x' * (server_module.MAX_BODY + 1)).status_code == 413
+
+
+def test_mcp_rejects_chunked_request_with_411(client, headers):
+    assert client.post('/mcp', headers=headers, content=iter([b'{}'])).status_code == 411
+
+
+def test_mcp_rejects_missing_content_length_with_411(client, headers):
+    request = client.build_request('POST', '/mcp', headers=headers, content=b'{}')
+    del request.headers['Content-Length']
+    assert client.send(request).status_code == 411
+
+
+@pytest.mark.parametrize('headers,status', [
+    *(([(b'content-length', value)], 400) for value in (b'abc', b'', b'-1', b'+5', b'1_0', b' 7 ',
+                                                        b'9' * 4301, b'0' * 4999 + b'2', b'1' * 21)),
+    ([(b'content-length', b'99999999'), (b'content-length', b'2')], 400), ([(b'content-length', b'2')] * 2, None),
+    ([(b'content-length', b'2'), (b'transfer-encoding', b'chunked')], 411), ([], 411),
+    ([(b'content-length', b'33')], 413), ([(b'content-length', b'32')], None),
+    ([(b'content-length', b'0' * 20)], None), ([(b'content-length', b'0002')], None), ([(b'content-length', b'00033')], 413)])
+def test_mcp_body_status_validates_content_length(headers, status):
+    assert CredentialAuth(None, 'k', 32).mcp_body_status({'type': 'http', 'method': 'POST', 'path': '/mcp', 'headers': headers}) == status
+
+
+@pytest.mark.parametrize('headers,status,error', [([(b'content-length', b'33')], 413, 'request exceeds size limit'),
+                                                  ([(b'content-length', b'abc')], 400, 'invalid Content-Length'),
+                                                  ([(b'transfer-encoding', b'chunked')], 411, 'Content-Length required')])
+def test_mcp_guard_rejects_without_calling_application(headers, status, error):
+    application, send = AsyncMock(), AsyncMock()
+    asyncio.run(CredentialAuth(application, 'k', 32)({'type': 'http', 'method': 'POST', 'path': '/mcp', 'headers': headers}, AsyncMock(), send))
+    start, body = (message.args[0] for message in send.await_args_list)
+    assert (start['status'], json.loads(body['body']), application.await_count) == (status, {'error': error}, 0)
 
 
 def test_websocket_requires_authentication(client):
@@ -130,3 +173,26 @@ def test_retention_task_starts_and_stops_before_redis_closes(server_module, stor
         assert started.wait(1)
     assert stopped.is_set()
     storage.aclose.assert_awaited_once()
+
+
+def test_production_app_wires_guard_with_message_body_limit(server_module):
+    app = server_module.app
+    assert isinstance(app, CredentialAuth) and app.application is server_module.inner
+    assert app.max_body == server_module.MAX_BODY == server_module.MAX_TEXT + 65536
+
+
+@pytest.mark.parametrize('scope_type,method,path', [('http', 'GET', '/mcp'), ('http', 'DELETE', '/mcp'),
+                                                    ('http', 'POST', '/agents'),
+                                                    ('http', 'POST', '/channels/general/messages'),
+                                                    ('websocket', None, '/mcp')])
+def test_mcp_body_status_ignores_other_methods_paths_and_websockets(scope_type, method, path):
+    scope = {'type': scope_type, 'path': path, 'headers': []}
+    if method is not None:
+        scope['method'] = method
+    assert CredentialAuth(None, 'k', 32).mcp_body_status(scope) is None
+
+
+def test_full_app_registration_accepts_chunked_body(client):
+    response = client.post('/agents', headers={'Authorization': 'Bearer synthetic-admin-key'},
+                           content=iter([b'{"display_name":"client"}']))
+    assert response.status_code == 201

@@ -157,11 +157,11 @@ def test_admission_rotation_preserves_registered_identity(server_module, storage
 
     from channels.auth import CredentialAuth
 
-    with TestClient(CredentialAuth(server_module.inner, 'synthetic-admin-key')) as original:
+    with TestClient(CredentialAuth(server_module.inner, 'synthetic-admin-key', server_module.MAX_BODY)) as original:
         identity = register(original)
     importlib.reload(server_module)
     monkeypatch.setattr(server_module, 'redis', storage)
-    with TestClient(CredentialAuth(server_module.inner, 'synthetic-replacement-admin')) as restarted:
+    with TestClient(CredentialAuth(server_module.inner, 'synthetic-replacement-admin', server_module.MAX_BODY)) as restarted:
         assert restarted.post('/agents', headers=ADMIN, json={'display_name': 'new'}).status_code == 401
         response = restarted.post('/channels/general/messages', headers=authorization(identity), json={'text': 'after restart'})
         assert response.json()['agent_id'] == identity['agent_id']

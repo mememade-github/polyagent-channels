@@ -48,7 +48,7 @@ def server_module(monkeypatch, tmp_path, storage):
 
 @pytest.fixture
 def client(server_module):
-    with TestClient(CredentialAuth(server_module.inner, 'synthetic-admin-key')) as client:
+    with TestClient(CredentialAuth(server_module.inner, 'synthetic-admin-key', server_module.MAX_BODY)) as client:
         yield client
 
 

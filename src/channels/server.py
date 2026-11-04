@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.websockets import WebSocketDisconnect
 
-from channels.auth import CredentialAuth, load_key
+from channels.auth import ERRORS, CredentialAuth, load_key
 from channels.identity import register
 from channels.persistence import (
     MAX_TEXT,
@@ -85,7 +85,8 @@ Channels/conversations: 1..128 ASCII letters, digits, _ or -; sender: non-whites
 <=256 UTF-8 bytes. Text: nonempty, <=8 MiB UTF-8. HTTP JSON body: <=8 MiB +64 KiB;
 JSON escaping consumes that limit. Transport capacity is not model context capacity.
 HTTP errors: 400 invalid input, 401 unauthorized, 413 body too large, 503 Redis
-unavailable. The request limit and 413 apply to /channels/{channel}/messages.
+unavailable. HTTP JSON body limit applies to messages and /mcp (413); POST /mcp
+requires Content-Length (411).
 WS validation/storage errors send error then close 1008/1011; unauthorized
 handshake is refused with HTTP 403. MCP validation/storage failures are tool errors.
 CHANNEL_RETENTION_DAYS: default 7; 0 disables age expiration only.
@@ -168,7 +169,7 @@ async def messages(request):
                                    query_parameters.get('conversation_id'))
         return JSONResponse(result)
     except RequestTooLarge:
-        return JSONResponse({'error': 'request exceeds size limit'}, status_code=413)
+        return JSONResponse({'error': ERRORS[413]}, status_code=413)
     except (ValueError, TypeError, UnicodeError) as exc:
         return JSONResponse({'error': str(exc)}, status_code=400)
     except RedisError:
@@ -224,4 +225,4 @@ inner = Starlette(routes=[Route('/agents', agents, methods=['POST']), Route('/he
     WebSocketRoute('/channels/{channel}/subscribe', subscribe), Mount('/', app=mcp_app)], lifespan=lifespan)
 
 
-app = CredentialAuth(inner, load_key())
+app = CredentialAuth(inner, load_key(), MAX_BODY)
