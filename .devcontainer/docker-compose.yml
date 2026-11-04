@@ -24,7 +24,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       CHANNEL_KEY_FILE: /workspaces/.env/channel.key
     ports:
-      - "${CHANNEL_BIND:-127.0.0.1}:${CHANNEL_PORT:-18765}:8080"
+      - "${CHANNEL_BIND:-0.0.0.0}:${CHANNEL_PORT:-18765}:8080"
     volumes:
       - type: bind
         source: ${HOST_WORKSPACE_PATH:-..}

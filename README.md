@@ -16,7 +16,7 @@ The image builds from a public Microsoft Ubuntu DevContainer base and installs t
 
 The service image keeps the inherited Polyagent DevContainer shape. It is about 4 GB, the `vscode` user has passwordless sudo (`NOPASSWD:ALL`), and the Claude, Codex and Antigravity (`agy`) CLIs, the Docker CLI and Node are installed. The build fetches the provider installers at their latest, unpinned versions, so a rebuild is not reproducible. The service process can write to the repository mounted at `/workspaces`, and the inherited `setup-env.sh` sets `core.filemode false` in the mounted repository's git config at each start. The container log starts with the inherited Polyagent DevContainer setup banner and development hints, such as a Codex config warning and `Start: claude`, before the channel service output.
 
-The default address is `http://127.0.0.1:18765`. Check readiness with `curl --fail http://127.0.0.1:18765/health`; `/help` describes the protocol. The repository is mounted at `/workspaces` inside the container, which runs as `vscode`. No host agent credentials or Docker socket are mounted.
+On the Docker host, the default address is `http://127.0.0.1:18765`. Check readiness with `curl --fail http://127.0.0.1:18765/health`; `/help` describes the protocol. The repository is mounted at `/workspaces` inside the container, which runs as `vscode`. No host agent credentials or Docker socket are mounted.
 
 Optional settings are `CHANNEL_BIND`, `CHANNEL_PORT`, `INSTANCE_NAME`, the storage/log settings below, and `HOST_WORKSPACE_PATH`. The latter defaults to this repository and is only needed when the Docker daemon sees a different host path. Both root Compose and VS Code DevContainer load the same ignored `.devcontainer/.env` through the included Compose project. Shell environment variables take precedence. For saved overrides:
 
@@ -27,7 +27,7 @@ chmod 600 .devcontainer/.env
 docker compose up -d --build
 ```
 
-To enable LAN access, save `CHANNEL_BIND=0.0.0.0` and your chosen `CHANNEL_PORT` (default `18765`) in `.devcontainer/.env`, then recreate the service with `docker compose up -d`. Other computers connect to `http://<host-LAN-IPv4>:<chosen-port>`; `0.0.0.0` is a bind setting, not a client address. Redis has no published host port.
+By default the service is published on all IPv4 interfaces. `CHANNEL_PORT` (default `18765`) selects the host port. Other computers connect to `http://<host-LAN-IPv4>:<CHANNEL_PORT>`; `0.0.0.0` is a bind setting, not a client address. For single-PC use, or on any network you do not trust, save `CHANNEL_BIND=127.0.0.1` in `.devcontainer/.env`, preferably before the first start. To change a running service, recreate it with `docker compose up -d` and confirm the published address with `docker compose ps`. On Docker Desktop the previous host port can stay unavailable for a short time after the change; retry after a short wait, or choose another unused `CHANNEL_PORT`. Redis has no published host port.
 
 With Docker Desktop on Windows, Docker publication and the Windows host firewall are separate boundaries. In administrator PowerShell, discover the active adapter's LAN IPv4 and allow only the chosen TCP port from the local subnet on Private/Domain networks:
 
@@ -38,6 +38,8 @@ New-NetFirewallRule -DisplayName "Polyagent Channels TCP $ChannelPort" -Directio
 ```
 
 Use the Windows host's LAN IPv4, not the container or WSL address. The rule does not allow Public-profile networks; use a trusted Private/Domain network. These are operator instructions; this project does not apply Windows firewall rules. Test `/health` from another LAN computer after configuration.
+
+On Linux hosts, Docker-published ports bypass ufw-style host firewall rules; use `CHANNEL_BIND=127.0.0.1` or Docker-aware firewall rules on untrusted networks.
 
 Registered clients share access to the entire trusted group. Use HTTPS through a proxy or a VPN across untrusted networks.
 
@@ -148,7 +150,7 @@ The message byte cap is **not a total disk cap**. Generated files have these dis
 - Development/test generated files (virtual environments, bytecode/pytest/coverage caches, build outputs and synthetic smoke-test messages) require developer cleanup. The opt-in Redis regression suite removes only its owned keys in a fresh isolated database. The separate service smoke test below leaves its messages for normal retention or operator cleanup.
 - Docker images and build cache are outside all runtime budgets and persist across container recreation until operators prune unused objects. No custom log manager or scheduled AOF rewrite process is needed.
 
-Monitor physical disk usage and leave room for rewrites, container layers and backups. Verify LAN reachability by requesting `/health` from another LAN computer after configuring publication and the host firewall.
+Monitor physical disk usage and leave room for rewrites, container layers and backups. Verify LAN reachability by requesting `/health` from another LAN computer after configuring the host firewall.
 
 ## Tests
 
