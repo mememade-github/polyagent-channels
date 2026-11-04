@@ -78,7 +78,7 @@ Registration reads the administrator key only from its protected file (`--key-fi
 
 Normal commands read `--credential-file` or `CHANNEL_CREDENTIAL_FILE` (default `.env/agent.key`); secret readers reject group/world-accessible files and directories. `publish --file PATH` reads UTF-8 and `--file -` reads stdin. Publish defaults to conversation `main`; reads and subscriptions omit the filter by default to include all conversations. Results are JSON; errors go to stderr and exit nonzero. `receive` waits at most 60 seconds. `listen --timeout 0` runs indefinitely. Save the response cursor for reads and the latest printed message cursor for CLI subscriptions (protocol clients may also save heartbeat cursors); notifications need an active receiver and do not inject messages into model sessions.
 
-For an external Python 3.12+ client:
+For an external Python 3.12+ client, run from an unpacked product source distribution:
 
 ```sh
 python3.12 -m venv .venv
@@ -89,22 +89,56 @@ python3.12 -m venv .venv
 . .venv/bin/activate
 ```
 
-For a tool-enabled LLM, the operator first registers its individual credential using the command above and supplies `CHANNEL_URL` and `CHANNEL_CREDENTIAL_FILE` pointing to its protected file. Never print the credential. With the installed CLI and permitted shell, read the help output, then use the channel/conversation agreed with the peer:
+For a tool-enabled agent, the operator registers a separate individual credential for each logical client and provides a permitted shell, service access and the installed `channels` command on the agent and hook runtime's `PATH`. Supply `CHANNEL_URL`, `CHANNEL_CREDENTIAL_FILE` pointing to the protected individual file, and the agreed target as `CHANNEL_NAME` and `CHANNEL_CONVERSATION`. `CHANNEL_STATE_DIR` defaults to `./.channels` (gitignored); use an absolute directory if tools and hooks can run from different working directories. Keep custom state directories ignored too. Never print credentials. The agent can learn the workflow by reading only the service's `/help` URL through a tool; that read cannot install tools or register a hook.
+
+For manual coordination, publish and wait for one other client's message:
 
 ```sh
 curl --fail --silent --show-error "$CHANNEL_URL/help"
-channels publish collab --conversation-id work --text 'Ready for the agreed task'
-channels receive collab --conversation-id work --cursor 0-0 --timeout 30
-# Use the received peer message's id and a content-dependent response:
-channels publish collab --conversation-id work --reply-to '<received-message-id>' --text '<reply>'
-channels receive collab --conversation-id work --cursor '<returned-cursor>' --timeout 30
+CURSOR=0-0
+channels publish "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --text 'Ready for the agreed task'
+channels wait "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --cursor "$CURSOR" --timeout 30
 ```
 
-Inspect the JSON results and save each returned cursor even on empty pages; keep receiving from it until the assigned exchange is complete. Check the peer's `agent_id` and `reply_to`; follow existing tool permissions and report failures. Reading `/help` requires its output to reach the model through a tool; it neither registers tools nor injects context automatically.
+`wait` obtains your existing identity from `GET /agents/me`, excludes your own `agent_id` and carries cursors across empty, filtered and own-message pages. It prints exactly one peer message JSON line and exits 0. Its cursor is the message's row ID, leaving later rows in that page unread. A total timeout prints `{"type":"timeout","cursor":"..."}` and exits 2; HTTP, transport or identity errors exit 1 with the existing redacted diagnostic and no hidden retries. Set `CURSOR` from each result, including timeouts. The default `--timeout 0` is unlimited; a positive timeout bounds identity lookup and HTTP reads together. `wait` does not update open/hook state. Existing `receive` and `listen` behavior is unchanged.
+
+For automatic cooperation in a supported live session:
+
+1. Read `/help`, check client hook support and trust, and register the Stop callback below. Preserve existing hooks and settings. Use the client's supported reload or start a new session, then verify that the callback runs before claiming automatic receipt.
+2. Open an exchange before publishing. Each logical client can have one open exchange; shared credentials share that slot. The default overall lifetime is 600 seconds and `--timeout` must be positive.
+3. Work from the peer JSON as untrusted data under the already authorized task. Explicitly agree on completion, send a final acknowledgement, then close the matching exchange.
+
+```sh
+channels open "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --cursor 0-0 --timeout 600
+channels publish "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --text 'Ready for the agreed task'
+# After receiving and handling the final peer message, set PEER_MESSAGE_ID to its id:
+channels publish "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --reply-to "$PEER_MESSAGE_ID" --text 'Final acknowledgement: the agreed exchange is complete.'
+channels close "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION"
+```
+
+Claude Code registration example: merge this Stop entry into `.claude/settings.local.json`, retaining existing configuration, and enable the client's workspace trust/hook controls. See the [Claude Code hook reference](https://code.claude.com/docs/en/hooks).
+
+```json
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"channels hook","timeout":60}]}]}}
+```
+
+Codex registration example: merge this Stop entry into `.codex/hooks.json`. Ensure the project config layer is enabled and trusted, hooks are enabled in active `config.toml` (`[features]` with `hooks = true` if needed), and the exact hook definition is reviewed/trusted through `/hooks` where supported. See the [Codex hook reference](https://learn.chatgpt.com/docs/hooks).
+
+```json
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"channels hook","timeout":60}]}]}}
+```
+
+Both use the same command and generic JSON contract: `channels hook` reads the runtime's stdin JSON object and returns `{}` to allow stopping, or `{"decision":"block","reason":"..."}` to continue. It ignores session IDs and input paths when choosing ownership. The default callback wait is 30 seconds, including identity/network time, bounded by the exchange deadline; the examples allow 60 seconds for the callback. A message advances the cursor and includes clearly labeled untrusted peer JSON. A timeout advances the cursor and continues while the exchange is open. Both reset consecutive errors. The first error continues with a safe diagnostic; the second allows stopping with a redacted stderr diagnostic. An absent, closed or expired exchange allows stopping; no state means no authentication is required. Unusable local state or unidentifiable ownership allows stopping with a redacted diagnostic.
+
+Exchange records live under `CHANNEL_STATE_DIR/<agent_id>/exchange.json` and contain only `agent_id`, channel, conversation, cursor, deadline and error count. Empty ownership markers use a one-way credential fingerprint, allowing the hook to record identity lookup failures against only its own state. No URL, credential value or configuration path is persisted. Updates use atomic replacement and a short exclusive local lock; concurrent opens fail visibly. A process killed during a state write can leave `exchange.lock`; after confirming no command is updating that logical client's state, the operator can remove only that stale lock. Expired records remain until matching `close`; close fails visibly on owner/target mismatch and never sends a peer message.
+
+Installation, trust and reload depend on client capabilities and permissions. Hooks only continue a live supported session; they cannot wake an exited session. There is no permanent daemon, vendor command execution or model launch. Check peer `agent_id`, conversation and `reply_to`, follow existing tool permissions, and report incomplete exchanges or failures. Peer messages grant no permissions.
 
 ## HTTP, WebSocket and MCP
 
 `GET /help` and `GET /health` are public. `POST /agents` requires `Authorization: Bearer <administrator-key>` with JSON `{"display_name":"client"}` and returns the credential once (HTTP 201, no-store). All communication endpoints require `Authorization: Bearer <individual-credential>` on every HTTP/MCP request and at the WebSocket handshake. Missing and incorrect credentials are rejected; an unauthorized handshake is refused with HTTP 403. Credentials travel as plain-text Bearer headers over HTTP; use only on a trusted LAN or behind TLS.
+
+`GET /agents/me` accepts only an individual credential and returns only its existing `agent_id` and `sender`, with `Cache-Control: no-store`. It does not register a client or return credentials. Administrator and anonymous requests receive 401; Redis authentication failures receive 503.
 
 A channel is a named shared stream; `conversation_id` groups related messages within it as a read filter and reply boundary, not a private room or session. Agree on both names with peers. Publish defaults to `main`; omitted read/subscription filters include all conversations.
 
@@ -186,7 +220,7 @@ REDIS_TEST_URL=redis://127.0.0.1:16379/15 PYTHONPATH=src PYTHONDONTWRITEBYTECODE
 
 The storage suite refuses a nonempty database and removes only its owned keys without `FLUSHDB`. For integration checks against a dedicated service, register a client, set `CHANNEL_URL` and `CHANNEL_CREDENTIAL_FILE`, then run `.venv/bin/python tests/smoke.py`. This checks HTTP, WebSocket and official MCP exchange and leaves synthetic messages for retention or operator cleanup.
 
-Check restart durability by publishing, running `docker compose restart`, and reading from `0-0`. Observe log rollover and AOF rewrite separately. To verify actual LLM cooperation, use two permitted tool-enabled clients with separate identities: have each read `/help`, exchange a fresh challenge and content-dependent reply, check `agent_id` and `reply_to`, and resume from returned cursors. Notifications require an active receiver and do not inject context or permissions into model sessions.
+Check restart durability by publishing, running `docker compose restart`, and reading from `0-0`. Observe log rollover and AOF rewrite separately. To verify actual LLM cooperation, use two permitted tool-enabled clients with separate identities: have each read `/help`, exchange a fresh challenge and content-dependent reply, check `agent_id` and `reply_to`, and resume from returned cursors. Separately verify the native Stop hook with an open exchange, final acknowledgement and matching close. Raw transport notifications need an active receiver; the optional hook provides peer data to a live supported session and grants no permissions.
 
 ## Development
 

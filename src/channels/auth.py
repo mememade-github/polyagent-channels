@@ -50,6 +50,8 @@ class CredentialAuth:
             if hmac.compare_digest(supplied, self.authorization):
                 return await self.application(scope, receive, send)
             return await self.reject(scope, receive, send)
+        if scope['path'] == '/agents/me' and hmac.compare_digest(supplied, self.authorization):
+            return await self.reject(scope, receive, send)
         try:
             credential = supplied.removeprefix(b'Bearer ').decode('ascii') if supplied.startswith(b'Bearer ') else ''
             identity = await authenticate(credential)
@@ -81,4 +83,5 @@ class CredentialAuth:
         if scope['type'] == 'websocket':
             await send({'type': 'websocket.close', 'code': 1008})
             return
-        await JSONResponse({'error': ERRORS[status]}, status_code=status)(scope, receive, send)
+        headers = {'Cache-Control': 'no-store'} if scope['path'] == '/agents/me' else None
+        await JSONResponse({'error': ERRORS[status]}, status_code=status, headers=headers)(scope, receive, send)

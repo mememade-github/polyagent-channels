@@ -1,4 +1,5 @@
 .env/
+.channels/
 .devcontainer/.env
 .venv/
 __pycache__/

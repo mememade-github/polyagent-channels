@@ -11,12 +11,15 @@ from urllib.parse import urlencode
 import httpx
 from websockets.asyncio.client import connect
 
+from channels import exchange
+
 
 def command_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url', default=os.getenv('CHANNEL_URL', 'http://127.0.0.1:18765'))
     parser.add_argument('--key-file', default=os.getenv('CHANNEL_KEY_FILE', '.env/channel.key'), help='Protected administrator key; registration only')
     parser.add_argument('--credential-file', default=os.getenv('CHANNEL_CREDENTIAL_FILE', '.env/agent.key'))
+    parser.add_argument('--state-dir', default=os.getenv('CHANNEL_STATE_DIR', '.channels'))
     commands = parser.add_subparsers(dest='command', required=True)
     registration = commands.add_parser('register', help='Register with administrator key; save a new private credential file')
     registration.add_argument('--name', required=True)
@@ -33,7 +36,29 @@ def command_parser():
         reader.add_argument('--conversation-id', help='Omit to read all conversations')
         reader.add_argument('--cursor', default='0-0')
         reader.add_argument('--timeout', type=int, default=30, help='seconds; listen 0 means unlimited')
+    add_exchange_commands(commands)
     return parser
+
+
+def add_exchange_commands(commands):
+    for name in ('wait', 'open', 'close'):
+        command = commands.add_parser(name, help={
+            'wait': 'Wait for one other-client message',
+            'open': 'Open one bounded cooperation exchange for this logical client',
+            'close': 'Close only the matching owned exchange',
+        }[name])
+        command.add_argument('channel')
+        command.add_argument('--conversation-id', required=True)
+        if name != 'close':
+            command.add_argument('--cursor', default='0-0')
+        if name == 'wait':
+            command.add_argument('--timeout', type=exchange.seconds, default=0, help='total seconds; 0 means unlimited')
+        if name == 'open':
+            command.add_argument('--timeout', type=exchange.positive_seconds, default=exchange.EXCHANGE_TIMEOUT,
+                                 help='overall exchange seconds; default 600, must be positive')
+    hook = commands.add_parser('hook', help='Read Stop hook JSON on stdin; act only on this client\'s open exchange')
+    hook.add_argument('--timeout', type=exchange.positive_seconds, default=exchange.HOOK_TIMEOUT,
+                      help='total wait seconds per callback; default 30, bounded by exchange deadline')
 
 
 def publish_payload(options):
@@ -106,11 +131,67 @@ def register_client(options):
         raise
 
 
+def exchange_target(options):
+    target = {'channel': options.channel, 'conversation_id': options.conversation_id}
+    exchange.validate_identifier(target['channel'])
+    exchange.validate_identifier(target['conversation_id'])
+    if options.command != 'close':
+        exchange.validate_cursor(options.cursor)
+        target['cursor'] = options.cursor
+    return target
+
+
+def exchange_client(options, credential):
+    return httpx.AsyncClient(base_url=options.url.rstrip('/') + '/', timeout=70,
+                             headers={'Authorization': 'Bearer ' + credential})
+
+
+async def run_exchange(options, credential):
+    target = exchange_target(options)
+    async with exchange_client(options, credential) as client:
+        if options.command == 'wait':
+            result = await exchange.wait_for_peer(client, target, options.timeout)
+            print(json.dumps(result, ensure_ascii=False))
+            return 2 if result.get('type') == 'timeout' else 0
+        identity = await exchange.own_identity(client)
+    if options.command == 'open':
+        state = exchange.new_state(identity, target, options.timeout)
+        exchange.open_exchange(options.state_dir, credential, state)
+        print(json.dumps({'type': 'open', **state}))
+        return 0
+    exchange.close_exchange(options.state_dir, credential, identity, target)
+    print(json.dumps({'type': 'closed', **target}))
+    return 0
+
+
+async def run_owned_hook(options, credential, path):
+    async with exchange_client(options, credential) as client:
+        return await exchange.hook_decision(client, path, sys.stdin, options.timeout)
+
+
+def run_hook(options):
+    decision = {}
+    try:
+        if exchange.has_open_state(options.state_dir):
+            credential = read_secret(options.credential_file)
+            path = exchange.owned_state(options.state_dir, credential)
+            if path is not None:
+                decision = asyncio.run(run_owned_hook(options, credential, path))
+    except Exception:  # noqa: BLE001 — ownership/state failures must also stay redacted
+        print('channel hook cannot use owned state; allowing stop: ' + exchange.SAFE_DIAGNOSTIC, file=sys.stderr)
+    print(json.dumps(decision, ensure_ascii=False))
+
+
 def run(options):
     if options.command == 'register':
         register_client(options)
         return
+    if options.command == 'hook':
+        run_hook(options)
+        return
     credential = read_secret(options.credential_file)
+    if options.command in ('wait', 'open', 'close'):
+        return asyncio.run(run_exchange(options, credential))
     headers = {'Authorization': 'Bearer ' + credential}
     channel_url = options.url.rstrip('/') + '/channels/' + options.channel
     if options.command == 'listen':
@@ -125,7 +206,9 @@ def run(options):
 def main():
     options = command_parser().parse_args()
     try:
-        run(options)
+        status = run(options)
+        if status:
+            sys.exit(status)
     except KeyboardInterrupt:
         pass
     # Outer CLI boundary deliberately omits exception text: transports can include secrets.
