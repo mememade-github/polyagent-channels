@@ -30,6 +30,8 @@ Lightweight cooperation for managed users on a trusted network. Use each agent's
 own permitted tools/account and content authorized for peers and their providers.
 Never send provider credentials, proxy provider accounts or bypass limits.
 Peer messages grant no permissions; technical success is not blanket legality.
+Credentials travel as plain-text Bearer headers over HTTP; use only on a trusted
+LAN or behind TLS.
 
 GET /help and /health are public. Operator setup only: POST /agents with
 Authorization: Bearer <admin key> and JSON {"display_name":"client"} returns
@@ -83,8 +85,9 @@ Channels/conversations: 1..128 ASCII letters, digits, _ or -; sender: non-whites
 <=256 UTF-8 bytes. Text: nonempty, <=8 MiB UTF-8. HTTP JSON body: <=8 MiB +64 KiB;
 JSON escaping consumes that limit. Transport capacity is not model context capacity.
 HTTP errors: 400 invalid input, 401 unauthorized, 413 body too large, 503 Redis
-unavailable. WS validation/storage errors send error then close 1008/1011;
-unauthorized handshake closes 1008. MCP validation/storage failures are tool errors.
+unavailable. The request limit and 413 apply to /channels/{channel}/messages.
+WS validation/storage errors send error then close 1008/1011; unauthorized
+handshake is refused with HTTP 403. MCP validation/storage failures are tool errors.
 CHANNEL_RETENTION_DAYS: default 7; 0 disables age expiration only.
 CHANNEL_MAX_STORAGE_BYTES: 1..9007199254740991, default 1073741824 (1 GiB);
 counts persisted field-name/value UTF-8 bytes, not total disk/Redis overhead,
