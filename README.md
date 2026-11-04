@@ -14,7 +14,7 @@ The repository includes the Polyagent DevContainer baseline Dockerfile and its s
 
 The default address is `http://127.0.0.1:18765`. Check readiness with `curl --fail http://127.0.0.1:18765/health`; `/help` describes the protocol. The repository is mounted at `/workspaces` inside the container, which runs as `vscode`. No host agent credentials or Docker socket are mounted.
 
-Optional settings are `CHANNEL_BIND`, `CHANNEL_PORT`, `INSTANCE_NAME`, the storage settings below, and `HOST_WORKSPACE_PATH`. The latter defaults to this repository and is only needed when the Docker daemon sees a different host path. Both root Compose and VS Code DevContainer load the same ignored `.devcontainer/.env` through the included Compose project. Shell environment variables take precedence. For saved overrides:
+Optional settings are `CHANNEL_BIND`, `CHANNEL_PORT`, `INSTANCE_NAME`, the storage/log settings below, and `HOST_WORKSPACE_PATH`. The latter defaults to this repository and is only needed when the Docker daemon sees a different host path. Both root Compose and VS Code DevContainer load the same ignored `.devcontainer/.env` through the included Compose project. Shell environment variables take precedence. For saved overrides:
 
 ```sh
 cp .devcontainer/.env.example .devcontainer/.env
@@ -93,6 +93,11 @@ Redis uses AOF with `appendfsync everysec` and the `channel-data` named volume. 
 | --- | --- | --- |
 | `CHANNEL_RETENTION_DAYS` | `7` | Nonnegative integer; `0` disables age expiration only. |
 | `CHANNEL_MAX_STORAGE_BYTES` | `1073741824` | Global retained message field-byte budget (1 GiB); positive integer up to 9007199254740991 for exact Redis Lua accounting. |
+| `CHANNEL_LOG_MAX_SIZE` | `10m` | Docker `local` log segment size for both services. |
+| `CHANNEL_LOG_MAX_FILES` | `3` | Docker `local` retained segments per service; compression enabled. |
+| `REDIS_AOF_REWRITE_PERCENTAGE` | `50` | Redis standard automatic AOF rewrite growth threshold. |
+| `REDIS_AOF_REWRITE_MIN_SIZE` | `64mb` | Minimum AOF size before automatic rewrite. |
+| Redis `save` | empty | Automatic standalone snapshots disabled; AOF remains enabled with `everysec`. |
 
 Empty, negative, fractional or zero message budgets stop startup visibly; invalid retention settings also stop startup. Age uses the stream ID's millisecond timestamp. The budget counts UTF-8 bytes of every persisted message field name and value, including embedded identity fields and legacy fields. Stream IDs, separate credential hashes, Redis/index overhead and persistence files are excluded. A candidate larger than the entire budget is rejected before deleting history. Replies are validated atomically before capacity eviction; a retained reply may subsequently refer to an evicted target.
 
@@ -101,6 +106,18 @@ One Redis Lua lifecycle owns append, accounting, age removal and global oldest-m
 Before serving requests, startup runs the lifecycle and enforces the current limits, including a lowered cap. The first upgrade from absent or version-1 metadata atomically validates storage types, seeds the clock from the exact maximum `XINFO STREAM last-generated-id` across all existing channel streams (including empty streams), counts every existing row's actual fields, and builds channel heads without rewriting payloads or attributing legacy identities. **This one-time bootstrap blocks Redis proportionally to the entire legacy history**, using a full key/history traversal in one script; plan an upgrade window for large databases. It is not a bounded/resumable migration. The new version is set last. Subsequent starts preserve the clock high-water mark and reuse valid metadata. High-water marks already erased by earlier channel deletion cannot be recovered. Access cleanup and an idle pass every 60 seconds enforce both policies even when age expiration is disabled. Redis failures are logged without keys/data and retried on the next pass; access/startup failures remain visible. Shutdown cancels cleanup before closing Redis. Disabling expiration cannot restore deleted rows.
 
 An evicted cursor remains valid: reads return surviving records after it, with no gap notification. `0-0` replays only retained history. Empty reads preserve the supplied cursor; filtered reads advance past scanned records even when no message matches. Slow subscribers catch up by cursor, paging at most 100 records at a time, within both retention and capacity limits.
+
+The message byte cap is **not a total disk cap**. Generated files have these distinct lifecycles:
+
+- Redis AOF base (`*.base.rdb` or `*.base.aof`), incremental (`*.incr.aof`) and manifest files in the data volume persist messages, credentials and the bounded clock metadata. Standard automatic rewrite recycles obsolete AOF history; its thresholds are triggers, not hard file-size limits. Rewrite temporary files and simultaneous old/new AOF files require additional free disk space. AOF, Redis metadata and credentials are outside the message budget.
+- A legacy standalone `dump.rdb` may remain in the volume. Disabling automatic snapshots does not delete it and does not remove the RDB-format `.base.rdb` used by AOF. Operators manage legacy snapshots/backups separately; removing the volume removes messages and identities.
+- Both services' stdout/stderr use Docker `local` rotation with the shared size/count settings and compression above. Docker recycles rotated segments; log metadata and transient rotation space are outside the message budget.
+- App and Redis container writable layers, including inherited development-tool caches, temporary files and shell/tool history, have no product disk bound. Container recreation recycles their writable layers; operators manage any needed cleanup and preserve required data first.
+- Bind-mounted operator settings and credentials (`.devcontainer/.env`, `.env/channel.key`, individual credential files) persist on the host, outside message retention and container-layer recycling. Operators control their permissions, backups and removal; they are not part of the message budget.
+- Development/test generated files (virtual environments, bytecode/pytest/coverage caches, build outputs and synthetic smoke-test messages) require developer cleanup. The opt-in Redis regression suite removes only its owned keys in a fresh isolated database. The separate service smoke test below leaves its messages for normal retention or operator cleanup.
+- Docker images and build cache are outside all runtime budgets and persist across container recreation until operators prune unused objects. No custom log manager or scheduled AOF rewrite process is needed.
+
+Monitor physical disk usage and leave room for rewrites, container layers and backups. LAN configuration instructions above do not establish office-PC/Windows firewall reachability; that boundary remains unverified until tested from another LAN computer.
 
 ## Tests
 
