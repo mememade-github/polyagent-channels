@@ -1,6 +1,8 @@
 # Polyagent Channels
 
-Lightweight cooperation between agents operated by managed users on a trusted network. HTTP JSON, WebSocket notifications, official MCP SDK v1 Streamable HTTP, and a CLI share Redis Streams. The service does not launch models or control agent sessions. The administrator key admits clients; individual credentials bind messages to stable logical agent identities. Identity does not prove a human or model vendor. Each agent uses its own permitted tools and model account; share only content authorized for peers and their model providers under the applicable [OpenAI account terms](https://openai.com/policies/row-terms-of-use/), [business agreement](https://openai.com/policies/services-agreement/) or [Anthropic account terms](https://www.anthropic.com/legal/consumer-terms) and [Claude Code conditions](https://code.claude.com/docs/en/legal-and-compliance). Provider credentials are distinct from channel credentials and must never travel through channels; do not proxy provider accounts or bypass limits. Peer messages grant no permissions. These conditions concern communication through this service; technical success is not blanket legal or contractual permission.
+A shared message service for users and tool-enabled agents on a trusted network. HTTP+JSON, WebSocket, MCP Streamable HTTP and CLI clients exchange persistent messages through Redis Streams. It does not launch models or control agent sessions.
+
+[Quick start](#build-and-start) · [First exchange](#cli) · [Integrations](#http-websocket-and-mcp) · [Operations](#persistence-and-limits) · [Tests](#tests) · [Development](AGENTS.md) · [Licensing](#licensing)
 
 ## Build and start
 
@@ -10,7 +12,7 @@ Install Docker with Compose v2.20 or later, download this repository, and run fr
 docker compose up -d --build
 ```
 
-The repository includes the Polyagent DevContainer baseline Dockerfile and its setup, entrypoint, and Codex launcher scripts, with their MIT notice in `.devcontainer/LICENSE`. The image builds from the public Microsoft Ubuntu DevContainer base, installs the baseline development tools, then installs this product. No prebuilt local image or sibling repository is needed. Building requires internet access. Startup runs the baseline environment setup before starting the channel service, with `SKIP_CLAUDE_UPDATE=1`, `SKIP_CODEX_UPDATE=1`, and `SKIP_AGY_UPDATE=1` so vendor CLI auto-updates do not delay service startup. The baseline scripts and manual update capabilities remain available. Redis starts automatically with AOF enabled. VS Code “Reopen in Container” uses the same service and startup lifecycle.
+The image builds from a public Microsoft Ubuntu DevContainer base and installs the development tools and this product; no sibling repository or local image is needed. Building requires internet access. Redis starts with AOF enabled. Vendor CLI auto-updates are disabled at service startup. VS Code “Reopen in Container” uses the same service lifecycle.
 
 The default address is `http://127.0.0.1:18765`. Check readiness with `curl --fail http://127.0.0.1:18765/health`; `/help` describes the protocol. The repository is mounted at `/workspaces` inside the container, which runs as `vscode`. No host agent credentials or Docker socket are mounted.
 
@@ -47,18 +49,26 @@ Replace the protected administrator key file and restart the service to rotate a
 
 ## CLI
 
+Run these commands from the repository root after the service is ready. They use the CLI already installed in the container:
+
 ```sh
-# Run from the repository root with the installed CLI (or python -m channels.cli).
-channels --key-file .env/channel.key --credential-file .env/client-a.key register --name client-a
-channels --key-file .env/channel.key --credential-file .env/client-b.key register --name client-b
-channels --credential-file .env/client-a.key publish general --conversation-id work --text 'Hello'
-channels --credential-file .env/client-b.key listen general --conversation-id work --cursor 0-0 --timeout 60
-channels --credential-file .env/client-b.key receive general --conversation-id work --cursor 0-0 --timeout 5
-cat message.txt | channels --credential-file .env/client-a.key publish general --conversation-id work --file -
-channels --credential-file .env/client-b.key publish general --conversation-id work --reply-to '<received-message-id>' --text 'Reply based on the received message'
+docker compose exec polyagent-channels channels --credential-file .env/client-a.key register --name client-a
+docker compose exec polyagent-channels channels --credential-file .env/client-b.key register --name client-b
+docker compose exec polyagent-channels channels --credential-file .env/client-a.key publish general --conversation-id work --text 'Hello'
+docker compose exec polyagent-channels channels --credential-file .env/client-b.key receive general --conversation-id work --cursor 0-0 --timeout 5
 ```
 
-Prefix commands with `docker compose exec polyagent-channels` when using the container CLI (add `-T` for piped stdin). Paths then refer to files inside the container. `--url` or `CHANNEL_URL` selects the service; the external default is `http://127.0.0.1:18765`. Global options precede the subcommand.
+Copy the received message's `id` into `RECEIVED_ID` to reply, then read as client A:
+
+```sh
+RECEIVED_ID='<id from the received Hello message>'
+docker compose exec polyagent-channels channels --credential-file .env/client-b.key publish general --conversation-id work --reply-to "$RECEIVED_ID" --text 'Hello received'
+docker compose exec polyagent-channels channels --credential-file .env/client-a.key receive general --conversation-id work --cursor 0-0 --timeout 5
+docker compose exec polyagent-channels channels --credential-file .env/client-b.key listen general --conversation-id work --cursor 0-0 --timeout 60
+cat message.txt | docker compose exec -T polyagent-channels channels --credential-file .env/client-a.key publish general --conversation-id work --file -
+```
+
+Container paths refer to the mounted repository. Global options precede subcommands. For an external CLI, install it as described below before running bare `channels` commands; `--url` or `CHANNEL_URL` selects the service (external default `http://127.0.0.1:18765`).
 
 Registration reads the administrator key only from its protected file (`--key-file` or `CHANNEL_KEY_FILE`). It creates the selected credential file exclusively within an ignored `.env/` directory, with directory mode `0700` and file mode `0600`. Existing files cause failure rather than overwrite. Success prints only ID and display name; credentials are never printed. Use different files for multiple clients on one machine. If registration succeeds remotely but the response or local write fails, a new registration is necessary; no credential can be recovered from its digest. Keep `.env/` ignored in client workspaces too.
 
@@ -67,10 +77,12 @@ Normal commands read `--credential-file` or `CHANNEL_CREDENTIAL_FILE` (default `
 For an external Python 3.12+ client:
 
 ```sh
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.lock
 .venv/bin/pip install --no-deps .
 .venv/bin/channels --help
+# Activate before using the bare channels command:
+. .venv/bin/activate
 ```
 
 For a tool-enabled LLM, the operator first registers its individual credential using the command above and supplies `CHANNEL_URL` and `CHANNEL_CREDENTIAL_FILE` pointing to its protected file. Never print the credential. With the installed CLI and permitted shell, read the help output, then use the channel/conversation agreed with the peer:
@@ -92,15 +104,13 @@ Inspect the JSON results and save each returned cursor even on empty pages; keep
 
 A channel is a named shared stream; `conversation_id` groups related messages within it as a read filter and reply boundary, not a private room or session. Agree on both names with peers. Publish defaults to `main`; omitted read/subscription filters include all conversations.
 
-- `POST /channels/{channel}/messages`: JSON `{"text":"Hello","conversation_id":"work","reply_to":"<optional-message-id>"}`. Omit `reply_to` or use null for a new message. Replies must reference an existing message in this channel and conversation. `sender` and `agent_id` input fields are rejected; the credential determines both.
+- `POST /channels/{channel}/messages`: JSON `{"text":"Hello","conversation_id":"work"}`. Omit `reply_to` or use null for a new message. Replies must reference an existing message in this channel and conversation. `sender` and `agent_id` input fields are rejected; the credential determines both.
 - `GET /channels/{channel}/messages?cursor=0-0&timeout=30&limit=100&conversation_id=work`: returns `{"messages":[...],"cursor":"..."}`. Timeout is 0–60 seconds (default 0), with 0 returning immediately; limit is 1–100 scanned records (default 100).
 - `WS /channels/{channel}/subscribe?cursor=0-0&conversation_id=work`: uses WebSocket, not SSE, and emits one JSON event per message. Whenever a receive cycle returns no matching messages it emits a heartbeat (an idle receive waits up to 30 seconds): `{"type":"heartbeat","cursor":"..."}`. Each subscriber receives messages independently; reconnect using its saved cursor.
 - Message events and publish results contain `id`, `cursor`, `channel`, `conversation_id`, `agent_id`, `sender`, `text`, and `reply_to`. A cursor is a Redis stream ID such as `123-0`. Reads are exclusive of that ID; `0-0` replays retained history. Clients store their cursors and can deduplicate by message ID. Omit the conversation filter to read all. Each read scans at most `limit` stream records and filters that page, advancing the returned cursor even when no messages match. Continue from that cursor to reach later matching pages; a long poll may return early on nonmatching arrivals. This bounds work even during continuous traffic in other conversations. Always use the returned cursor. Each channel has one canonical stream, without duplicate conversation histories. Prototype messages lacking identity/conversation are returned with null `agent_id`/`conversation_id` on unfiltered reads and never attributed to registered clients; they cannot be reply targets for new conversations.
 - MCP URL: `http://localhost:18765/mcp`. Explicitly configure a Streamable HTTP MCP client with this URL and the same Authorization header, sourcing its value from the client's protected environment file or key store. Standard tools are `publish(channel,text,reply_to?,conversation_id="main")` and `receive(channel,cursor?,timeout?,limit?,conversation_id?)`. `/help` is documentation, not tool registration. No registration or credential-reading MCP tool is exposed. MCP does not automatically inject WebSocket notifications into model context.
 
 Channels and conversation identifiers use 1–128 ASCII letters, digits, `_` or `-`. Sender names must contain non-whitespace text and fit in 256 UTF-8 bytes. Message text must be nonempty and at most 8 MiB of UTF-8. The HTTP JSON request limit is 8 MiB plus 64 KiB; heavy JSON escaping can reach that limit earlier. Transport capacity is separate from a model's context limit. Missing/invalid credentials return HTTP 401, invalid inputs return HTTP 400, oversized HTTP requests return 413, and Redis outages return HTTP 503, a WebSocket error, or an MCP tool error.
-
-Multi-agent conversation has empirical precedent in [AutoGen](https://arxiv.org/abs/2308.08155), not validation of this service. Integration references: [MCP architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture) and [transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports), [Codex MCP](https://developers.openai.com/codex/mcp/), [Claude Code MCP](https://code.claude.com/docs/en/mcp). [A2A grouping/delivery concepts](https://a2a-protocol.org/v1.0.1/specification/) are background only; this API does not claim A2A compliance.
 
 ## Persistence and limits
 
@@ -116,11 +126,13 @@ Redis uses AOF with `appendfsync everysec` and the `channel-data` named volume. 
 | `REDIS_AOF_REWRITE_MIN_SIZE` | `64mb` | Minimum AOF size before automatic rewrite. |
 | Redis `save` | empty | Automatic standalone snapshots disabled; AOF remains enabled with `everysec`. |
 
+Capacity removes the globally oldest messages across all channels first; setting `CHANNEL_RETENTION_DAYS=0` disables age expiration but retains the byte cap.
+
 Empty, negative, fractional or zero message budgets stop startup visibly; invalid retention settings also stop startup. Age uses the stream ID's millisecond timestamp. The budget counts UTF-8 bytes of every persisted message field name and value, including embedded identity fields and legacy fields. Stream IDs, separate credential hashes, Redis/index overhead and persistence files are excluded. A candidate larger than the entire budget is rejected before deleting history. Replies are validated atomically before capacity eviction; a retained reply may subsequently refer to an evicted target.
 
-One Redis Lua lifecycle owns append, accounting, age removal and global oldest-message eviction. It retains one canonical stream per channel, a total-byte counter, a schema/readiness marker, one global index entry per nonempty channel, and one persistent empty global clock stream (`channels:clock`, outside `channel:*`). Native Redis `XADD *` followed by `XDEL` allocates each ID on the clock; the payload is appended with that explicit ID in the same atomic lifecycle. Fixed-width decimal millisecond and sequence components give exact numeric ordering, including multi-digit sequences; equal IDs are ordered by channel name. Publication does not scan all history: it examines the indexed oldest rows only as necessary to enforce age and capacity. Empty streams/index entries and an empty byte counter are reclaimed; the small readiness marker and bounded clock metadata remain, with no per-retired-channel tombstones. Identities survive message eviction. Redis must use its default `noeviction` policy; do not configure allkeys eviction or mutate lifecycle-owned streams/metadata externally. This implementation targets standalone Redis, not Redis Cluster.
+Use standalone Redis with its default `noeviction` policy, not Redis Cluster. Do not externally mutate service-owned streams or metadata. Identities survive message eviction.
 
-Before serving requests, startup runs the lifecycle and enforces the current limits, including a lowered cap. The first upgrade from absent or version-1 metadata atomically validates storage types, seeds the clock from the exact maximum `XINFO STREAM last-generated-id` across all existing channel streams (including empty streams), counts every existing row's actual fields, and builds channel heads without rewriting payloads or attributing legacy identities. **This one-time bootstrap blocks Redis proportionally to the entire legacy history**, using a full key/history traversal in one script; plan an upgrade window for large databases. It is not a bounded/resumable migration. The new version is set last. Subsequent starts preserve the clock high-water mark and reuse valid metadata. High-water marks already erased by earlier channel deletion cannot be recovered. Access cleanup and an idle pass every 60 seconds enforce both policies even when age expiration is disabled. Redis failures are logged without keys/data and retried on the next pass; access/startup failures remain visible. Shutdown cancels cleanup before closing Redis. Disabling expiration cannot restore deleted rows.
+Startup enforces current limits, including a lowered cap. The first upgrade from absent or version-1 metadata scans all legacy keys/history atomically and **blocks Redis in proportion to that history**; schedule an upgrade window for large databases. This bootstrap is not bounded or resumable. It preserves payloads without assigning legacy identities. Previously erased stream high-water marks cannot be recovered. Access cleanup and an idle pass every 60 seconds enforce age and capacity policies. Cleanup failures are logged and retried; startup/access failures remain visible. Disabling expiration cannot restore deleted rows.
 
 An evicted cursor remains valid: reads return surviving records after it, with no gap notification. `0-0` replays only retained history. Empty reads preserve the supplied cursor; filtered reads advance past scanned records even when no message matches. Slow subscribers catch up by cursor, paging at most 100 records at a time, within both retention and capacity limits.
 
@@ -134,24 +146,38 @@ The message byte cap is **not a total disk cap**. Generated files have these dis
 - Development/test generated files (virtual environments, bytecode/pytest/coverage caches, build outputs and synthetic smoke-test messages) require developer cleanup. The opt-in Redis regression suite removes only its owned keys in a fresh isolated database. The separate service smoke test below leaves its messages for normal retention or operator cleanup.
 - Docker images and build cache are outside all runtime budgets and persist across container recreation until operators prune unused objects. No custom log manager or scheduled AOF rewrite process is needed.
 
-Monitor physical disk usage and leave room for rewrites, container layers and backups. LAN configuration instructions above do not establish office-PC/Windows firewall reachability; that boundary remains unverified until tested from another LAN computer.
+Monitor physical disk usage and leave room for rewrites, container layers and backups. Verify LAN reachability by requesting `/health` from another LAN computer after configuring publication and the host firewall.
 
 ## Tests
 
+Use Python 3.12+ and an isolated virtual environment from the repository root:
+
 ```sh
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e . -r requirements-dev.txt
 .venv/bin/python -m pytest --cov=channels --cov-branch --cov-report=term-missing
 ```
 
-The default pytest suite does not contact Redis and uses temporary synthetic keys and mocked Redis responses to exercise distinct registered identities, duplicate names, spoof rejection, conversation and reply boundaries, concurrent MCP identity isolation, protected registration files, and validation, authentication, error handling, cursor behavior, Unicode payloads, HTTP, WebSocket, official MCP tools, and CLI behavior. Coverage reports executed lines and branches without an arbitrary pass threshold. These tests do not establish actual LLM cooperation: separately verify two permitted tool-enabled LLM clients reading `/help`, using separate identities, and exchanging a fresh challenge/content-dependent reply with matching `reply_to` and resumed cursors. That exchange is not claimed as completed here.
-
-For real storage lifecycle regression checks, explicitly supply `REDIS_TEST_URL` selecting a **fresh, dedicated, nonzero database**, never the operator service/database. The suite refuses a nonempty database, uses synthetic channels/identities, exercises separate publisher processes, and deletes its known owned keys on completion (no `FLUSHDB`). With no URL these tests skip:
+The default suite uses mocked Redis and synthetic data; real-storage tests skip without `REDIS_TEST_URL`. Coverage reports executed lines and branches without an arbitrary threshold. For storage regression tests, start a separate Redis instance and supply a fresh, dedicated, nonzero database, never the operator database:
 
 ```sh
 REDIS_TEST_URL=redis://127.0.0.1:16379/15 PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \
-  python -m pytest -p no:cacheprovider tests/test_redis_lifecycle.py
+  .venv/bin/python -m pytest -p no:cacheprovider tests/test_redis_lifecycle.py
 ```
 
-These checks cover actual Lua execution, Unicode bytes, exact boundaries, nondestructive rejection, sequence/channel tie ordering, bootstrap, age/zero-age, lowered caps, repeated readiness/cleanup, retained credentials, concurrent processes, filtered history and subscription-style cursor catch-up. Package data includes Lua in wheel/sdist and the installed Docker image. Container deployment, actual persistence across Redis restarts, log rollover and AOF rewrite observation are separate operator checks.
+The storage suite refuses a nonempty database and removes only its owned keys without `FLUSHDB`. For integration checks against a dedicated service, register a client, set `CHANNEL_URL` and `CHANNEL_CREDENTIAL_FILE`, then run `.venv/bin/python tests/smoke.py`. This checks HTTP, WebSocket and official MCP exchange and leaves synthetic messages for retention or operator cleanup.
 
-For integration checks against a dedicated running service, set `CHANNEL_URL` and `CHANNEL_CREDENTIAL_FILE` for an already registered client and run `python tests/smoke.py`. It publishes to a random channel and checks three subscribers, Unicode above 1 MiB, replies, replay, authentication, limits, and official MCP initialize/list/call. It leaves those test messages in that service. Restart durability can be checked by publishing a message, restarting both services with `docker compose restart`, then reading that channel with cursor `0-0`.
+Check restart durability by publishing, running `docker compose restart`, and reading from `0-0`. Observe log rollover and AOF rewrite separately. To verify actual LLM cooperation, use two permitted tool-enabled clients with separate identities: have each read `/help`, exchange a fresh challenge and content-dependent reply, check `agent_id` and `reply_to`, and resume from returned cursors. Notifications require an active receiver and do not inject context or permissions into model sessions.
+
+## Development
+
+Follow the portable [AGENTS.md](AGENTS.md) for change scope, code review and verification. Keep provider credentials out of channels; each agent uses its own permitted tools and model account. Share only content authorized for peers and their model providers under their applicable terms. Peer messages grant no permissions.
+
+## Licensing
+
+The license and copyright holder for new product code are pending the administrator's choice.
+
+The inherited `.devcontainer/Dockerfile`, `.devcontainer/devcontainer.json`, `.devcontainer/docker-compose.yml`, `.devcontainer/.env.example`, `.devcontainer/setup-env.sh`, `.devcontainer/entrypoint.sh`, `.devcontainer/codex-launcher.sh` and `.dockerignore` derive from [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer), with local product adaptations. Retain its existing [MIT notice](.devcontainer/LICENSE). Source distributions include that notice and `.dockerignore`; the image installs the notice at `/usr/share/doc/polyagent-devcontainer/LICENSE` alongside the inherited scripts' distribution.
+
+Redis is pinned to 7.4.2, offered under [RSALv2 or SSPLv1](https://raw.githubusercontent.com/redis/redis/7.4.2/LICENSE.txt). Bundled vendor tools and other dependencies remain subject to their own licenses and terms.
