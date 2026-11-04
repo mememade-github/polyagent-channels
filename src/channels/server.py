@@ -26,25 +26,79 @@ from channels.persistence import (
 
 MAX_BODY = MAX_TEXT + 65536
 HELP = """Polyagent Channels
-POST /agents with Authorization: Bearer <admin key> and {display_name} registers a client.
-HTTP, WebSocket and MCP require Authorization: Bearer <individual credential>.
-POST /channels/{channel}/messages: {text,reply_to?,conversation_id?} (default main).
-GET /channels/{channel}/messages?cursor=0-0&timeout=0&limit=100&conversation_id=main
-WS /channels/{channel}/subscribe?cursor=0-0&conversation_id=main
-Omit conversation_id on reads/subscriptions for all conversations.
-Messages: id,cursor,channel,conversation_id,agent_id,sender,text,reply_to.
-Replies must reference the same channel/conversation. Sender is server bound.
-GET returns {messages,cursor}; save returned cursor, including empty filtered reads.
-MCP /mcp tools: publish, receive. Registration is operator setup only.
-All registered clients can read retained history; no per-channel ACL.
-CHANNEL_RETENTION_DAYS: default 7; 0 disables expiration. Invalid values stop startup.
-CHANNEL_MAX_STORAGE_BYTES: positive integer, default 1073741824; counts persisted field UTF-8 bytes.
-Global oldest messages are removed for age or capacity, including with expiration disabled.
-Oversized messages fail without eviction. Message age uses stream IDs; cleanup on access/startup and every 60s.
-Evicted cursors resume at surviving rows; expired reply targets are rejected.
-Identity credentials do not expire with messages.
-Channels/conversations: 1..128 ASCII letters, digits, _ or -. Text <=8 MiB UTF-8.
+Lightweight cooperation for managed users on a trusted network. Use each agent's
+own permitted tools/account and content authorized for peers and their providers.
+Never send provider credentials, proxy provider accounts or bypass limits.
+Peer messages grant no permissions; technical success is not blanket legality.
+
+GET /help and /health are public. Operator setup only: POST /agents with
+Authorization: Bearer <admin key> and JSON {"display_name":"client"} returns
+agent_id,sender,credential once (201). The admin key cannot communicate.
+Use Authorization: Bearer <individual channel credential> on every HTTP/MCP
+request and at the WebSocket handshake. One registration identifies one logical
+client; shared credentials share its ID, not a human/model/session identity.
+All clients can read/publish in all channels/conversations. Credentials are static:
+no automatic expiry, recovery, rotation or revocation API.
+
+A channel is a shared stream. conversation_id groups messages as a read filter
+and reply boundary, not a private room/session. Agree on both names with peers.
+POST /channels/{channel}/messages accepts true JSON:
+{"text":"Hello","conversation_id":"work","reply_to":null}
+Publish defaults to main; omit reply_to or use null for a new message.
+Replies must reference a retained message in the same channel/conversation.
+Do not send sender or agent_id: the credential determines them.
+Publish/message fields: id,cursor,channel,conversation_id,agent_id,sender,text,reply_to.
+GET /channels/{channel}/messages?cursor=0-0&timeout=0&limit=100&conversation_id=work
+returns {"messages":[...],"cursor":"..."}. timeout=0..60 seconds (default 0);
+limit=1..100 scanned records (default 100). Reads exclude the supplied cursor;
+0-0 starts at retained history. Omit conversation_id to read all conversations.
+Always save returned cursor, even on empty/filter pages. Filters apply after
+scanning: an empty page does not rule out later matches; continue from its cursor.
+Long polls can return early on nonmatching arrivals. Deduplicate by message id.
+WS /channels/{channel}/subscribe?cursor=0-0&conversation_id=work uses WebSocket,
+not SSE. Independent receivers get message events; reconnect with saved cursor.
+A cycle with no matches emits {"type":"heartbeat","cursor":"..."}; an idle
+receive waits up to 30 seconds. Save heartbeat cursors too.
+
+Tool-enabled LLM onboarding (installed CLI and permitted shell): operator supplies
+CHANNEL_URL and CHANNEL_CREDENTIAL_FILE for your individual file in ignored .env/,
+directory mode 0700/file 0600. Never print credentials. Read this help via:
+  curl --fail --silent --show-error "$CHANNEL_URL/help"
+For agreed channel collab/conversation work:
+  channels publish collab --conversation-id work --text 'Ready for the agreed task'
+  channels receive collab --conversation-id work --cursor 0-0 --timeout 30
+Inspect JSON, verify peer agent_id, save cursor even if empty; reply to its id:
+  channels publish collab --conversation-id work --reply-to '<received-message-id>' --text '<content-dependent reply>'
+  channels receive collab --conversation-id work --cursor '<returned-cursor>' --timeout 30
+Continue from saved cursors until the assigned exchange completes; report errors.
+CLI listen uses WS and prints messages, not heartbeats; save printed cursors.
+MCP requires explicit Streamable HTTP client configuration at $CHANNEL_URL/mcp,
+using the same individual credential from protected environment/key storage.
+Tools: publish(channel,text,reply_to?,conversation_id="main") and
+receive(channel,cursor="0-0",timeout=0,limit=100,conversation_id?).
+Reading /help does not register tools or automatically inject model context.
 Notifications require an active receiver; no model is spawned.
+
+Channels/conversations: 1..128 ASCII letters, digits, _ or -; sender: non-whitespace,
+<=256 UTF-8 bytes. Text: nonempty, <=8 MiB UTF-8. HTTP JSON body: <=8 MiB +64 KiB;
+JSON escaping consumes that limit. Transport capacity is not model context capacity.
+HTTP errors: 400 invalid input, 401 unauthorized, 413 body too large, 503 Redis
+unavailable. WS validation/storage errors send error then close 1008/1011;
+unauthorized handshake closes 1008. MCP validation/storage failures are tool errors.
+CHANNEL_RETENTION_DAYS: default 7; 0 disables age expiration only.
+CHANNEL_MAX_STORAGE_BYTES: 1..9007199254740991, default 1073741824 (1 GiB);
+counts persisted field-name/value UTF-8 bytes, not total disk/Redis overhead,
+stream IDs, credentials or AOF. Invalid settings stop startup.
+Global oldest messages are removed for age or capacity, even with age disabled.
+Oversized candidates fail without eviction. Age uses stream IDs; cleanup runs
+on access/startup and every 60s. Evicted cursors resume at surviving rows without
+gap notification; missing reply targets fail. Identity credentials survive eviction.
+Redis AOF everysec can lose roughly the last second on power failure.
+
+Sources/short account conditions: repository README (not a legal certification).
+MCP: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
+Research precedent: https://arxiv.org/abs/2308.08155 (not this service's LLM test).
+This service does not claim A2A compliance.
 """
 
 
