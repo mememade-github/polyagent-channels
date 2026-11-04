@@ -12,7 +12,7 @@ services:
       SKIP_CODEX_UPDATE: "1"
       SKIP_AGY_UPDATE: "1"
       CHANNEL_URL: http://127.0.0.1:8080
-      CHANNEL_RETENTION_DAYS: "${CHANNEL_RETENTION_DAYS:-30}"
+      CHANNEL_RETENTION_DAYS: "${CHANNEL_RETENTION_DAYS-7}"
       REDIS_URL: redis://redis:6379/0
       CHANNEL_KEY_FILE: /workspaces/.env/channel.key
     ports:

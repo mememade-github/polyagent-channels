@@ -37,7 +37,7 @@ Replies must reference the same channel/conversation. Sender is server bound.
 GET returns {messages,cursor}; save returned cursor, including empty filtered reads.
 MCP /mcp tools: publish, receive. Registration is operator setup only.
 All registered clients can read retained history; no per-channel ACL.
-CHANNEL_RETENTION_DAYS: default 30; 0 disables expiration. Invalid values stop startup.
+CHANNEL_RETENTION_DAYS: default 7; 0 disables expiration. Invalid values stop startup.
 Message age uses stream IDs. Trim on access; idle sweep at startup and 60s after each pass.
 Expired cursors resume at surviving rows; expired reply targets are rejected.
 Identity credentials do not expire with messages.

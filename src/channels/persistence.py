@@ -10,7 +10,7 @@ from redis.exceptions import RedisError
 
 
 def retention_days():
-    value = os.environ.get('CHANNEL_RETENTION_DAYS', '30')
+    value = os.environ.get('CHANNEL_RETENTION_DAYS', '7')
     if not re.fullmatch(r'[0-9]+', value):
         raise ValueError('CHANNEL_RETENTION_DAYS must be a nonnegative integer (0 disables expiration)')
     return int(value)

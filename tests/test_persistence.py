@@ -72,7 +72,7 @@ def test_storage_failure_is_not_hidden(storage):
         asyncio.run(publish('general', 'hello'))
 
 
-@pytest.mark.parametrize('value,expected', [(None, 30), ('0', 0), ('7', 7)])
+@pytest.mark.parametrize('value,expected', [(None, 7), ('0', 0), ('14', 14)])
 def test_retention_setting(monkeypatch, value, expected):
     from channels.persistence import retention_days
 
