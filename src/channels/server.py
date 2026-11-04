@@ -1,6 +1,8 @@
 """HTTP, WebSocket and official MCP transports over shared channel operations."""
 import contextlib
+import functools
 import json
+import logging
 
 import anyio
 from mcp.server.fastmcp import FastMCP
@@ -15,6 +17,7 @@ from channels.auth import ERRORS, CredentialAuth, load_key
 from channels.identity import register
 from channels.persistence import (
     MAX_TEXT,
+    StorageStateError,
     lifecycle,
     channel_key,
     publish,
@@ -25,6 +28,7 @@ from channels.persistence import (
 )
 
 MAX_BODY = MAX_TEXT + 65536
+logger = logging.getLogger(__name__)
 HELP = """Polyagent Channels
 Lightweight cooperation for managed users on a trusted network. Use each agent's
 own permitted tools/account and content authorized for peers and their providers.
@@ -85,8 +89,8 @@ Channels/conversations: 1..128 ASCII letters, digits, _ or -; sender: non-whites
 <=256 UTF-8 bytes. Text: nonempty, <=8 MiB UTF-8. HTTP JSON body: <=8 MiB +64 KiB;
 JSON escaping consumes that limit. Transport capacity is not model context capacity.
 HTTP errors: 400 invalid input, 401 unauthorized, 413 body too large, 503 Redis
-unavailable. HTTP JSON body limit applies to messages and /mcp (413); POST /mcp
-requires Content-Length (411).
+unavailable or storage state: <cause> (operator repair; see README). HTTP JSON body
+limit applies to messages and /mcp (413); POST /mcp requires Content-Length (411).
 WS validation/storage errors send error then close 1008/1011; unauthorized
 handshake is refused with HTTP 403. MCP validation/storage failures are tool errors.
 CHANNEL_RETENTION_DAYS: default 7; 0 disables age expiration only.
@@ -124,18 +128,55 @@ async def read_message(request):
     return message
 
 
+def report_storage_failure(exc):
+    """Log a storage state and return client text; raw Redis text never leaves the process."""
+    if isinstance(exc, StorageStateError):
+        logger.error('Channel request failed: %s', exc)
+        return str(exc)
+    return 'Redis unavailable'
+
+
+def storage_masked_tool(operation):
+    @functools.wraps(operation)
+    async def tool(*arguments, **options):
+        try:
+            return await operation(*arguments, **options)
+        except RedisError as exc:
+            raise RedisError(report_storage_failure(exc)) from None
+    return tool
+
+
 mcp = FastMCP('Polyagent Channels', stateless_http=True, json_response=True,
               transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
-mcp.tool()(publish)
-mcp.tool()(receive)
+mcp.tool()(storage_masked_tool(publish))
+mcp.tool()(storage_masked_tool(receive))
 mcp_app = mcp.streamable_http_app()
+
+
+async def initialize_storage():
+    try:
+        await lifecycle()
+    except StorageStateError:
+        raise
+    except RedisError as exc:
+        address = configured_address(redis.connection_pool.connection_kwargs)
+        raise RuntimeError(f'Storage initialization failed: {type(exc).__name__} at {address}') from None
+
+
+def configured_address(settings):
+    """Connection target exactly as configured: no library defaults, and never credentials."""
+    database = settings.get('db', 0)
+    if 'path' in settings:
+        return f"unix:{settings['path']}/{database}"
+    return f"{settings.get('host', '')}:{settings.get('port', '')}/{database}"
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app):
     try:
+        # Before the task groups, so startup failures propagate without an exception group.
+        await initialize_storage()
         async with mcp.session_manager.run(), anyio.create_task_group() as tasks:
-            await lifecycle()
             tasks.start_soon(sweep_history)
             try:
                 yield
@@ -172,8 +213,8 @@ async def messages(request):
         return JSONResponse({'error': ERRORS[413]}, status_code=413)
     except (ValueError, TypeError, UnicodeError) as exc:
         return JSONResponse({'error': str(exc)}, status_code=400)
-    except RedisError:
-        return JSONResponse({'error': 'Redis unavailable'}, status_code=503)
+    except RedisError as exc:
+        return JSONResponse({'error': report_storage_failure(exc)}, status_code=503)
 
 
 async def subscribe(websocket):
@@ -193,7 +234,7 @@ async def subscribe(websocket):
     except WebSocketDisconnect:
         pass
     except (ValueError, RedisError) as exc:
-        await websocket.send_json({'error': 'Redis unavailable' if isinstance(exc, RedisError) else str(exc)})
+        await websocket.send_json({'error': report_storage_failure(exc) if isinstance(exc, RedisError) else str(exc)})
         await websocket.close(code=1011 if isinstance(exc, RedisError) else 1008)
 
 

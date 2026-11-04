@@ -7,7 +7,7 @@ import time
 from importlib.resources import files
 
 from redis.asyncio import Redis
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ResponseError
 
 
 def retention_days():
@@ -30,11 +30,33 @@ STORAGE_KEYS = ('channels:heads', 'channels:bytes', 'channels:version', 'channel
 RETENTION_DAYS = retention_days()
 RETENTION_SWEEP_SECONDS = 60
 MAX_TEXT = 8 * 1024 * 1024
+STORAGE_STATE_REPLIES = frozenset({
+    'Invalid message lifecycle arguments', 'Unsupported message storage version', 'Message clock must be empty',
+    'Invalid message byte counter', 'Missing message clock', 'Stream ID exhausted',
+})
+# Lua error() adds the script position; Redis and redis-py add the script SHA and source suffix.
+STORAGE_TYPE_ERROR = re.compile(
+    r'user_script:[0-9]+: Unexpected storage key type script: [0-9a-f]{40}, on @user_script:[0-9]+\.')
 redis = Redis.from_url(
     os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0'),
     decode_responses=True, max_connections=256,
     socket_connect_timeout=3, socket_timeout=65,
 )
+
+
+class StorageStateError(RedisError):
+    """Service-owned Redis metadata needs operator repair (see the README recovery table)."""
+
+    def __init__(self, phrase):
+        super().__init__(f'storage state: {phrase}')
+
+
+def storage_state_phrase(message):
+    if message in STORAGE_STATE_REPLIES:
+        return message
+    if STORAGE_TYPE_ERROR.fullmatch(message):
+        return 'Unexpected storage key type'
+    return None
 
 
 def retention_cutoff():
@@ -46,7 +68,13 @@ async def lifecycle(key='', fields=None, reply_to=None, conversation_id=''):
                  str(retention_cutoff()), str(MAX_STORAGE_BYTES), reply_to or '', conversation_id]
     if fields is not None:
         arguments.extend(value for pair in fields.items() for value in pair)
-    result = await redis.eval(LIFECYCLE, len(STORAGE_KEYS), *STORAGE_KEYS, *arguments)
+    try:
+        result = await redis.eval(LIFECYCLE, len(STORAGE_KEYS), *STORAGE_KEYS, *arguments)
+    except ResponseError as error:
+        phrase = storage_state_phrase(str(error))
+        if phrase is None:
+            raise
+        raise StorageStateError(phrase) from None
     if result[0] == 'oversized':
         raise ValueError('message exceeds CHANNEL_MAX_STORAGE_BYTES')
     if result[0] == 'reply':
@@ -58,8 +86,10 @@ async def sweep_history():
     while True:
         try:
             await lifecycle()
-        except RedisError:
-            logging.getLogger(__name__).error('Message retention sweep failed: Redis unavailable; retry in 60 seconds')
+        except RedisError as error:
+            # Only canonical storage states carry text; other Redis errors log their class alone.
+            reason = error if isinstance(error, StorageStateError) else type(error).__name__
+            logging.getLogger(__name__).error('Message retention sweep failed: %s; retry in 60 seconds', reason)
         await asyncio.sleep(RETENTION_SWEEP_SECONDS)
 
 

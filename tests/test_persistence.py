@@ -166,7 +166,7 @@ def test_idle_sweep_retries_visibly_and_cancels(retention, monkeypatch, caplog, 
     assert retention.eval.call_args.args[6] == 'cleanup'
     sleep.assert_awaited_once_with(60)
     if outage:
-        assert 'retention sweep failed' in caplog.text
+        assert 'Message retention sweep failed: RedisError; retry in 60 seconds' in caplog.text
         assert 'private data' not in caplog.text
     else:
         assert retention.eval.await_count == 1
