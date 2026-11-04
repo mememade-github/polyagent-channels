@@ -188,6 +188,7 @@ RUN git config --global core.quotepath false \
 # Setup scripts + Entrypoint
 # =============================================================================
 USER root
+COPY .devcontainer/LICENSE /usr/share/doc/polyagent-devcontainer/LICENSE
 COPY .devcontainer/codex-launcher.sh /usr/local/bin/codex-launcher
 COPY .devcontainer/setup-env.sh /usr/local/bin/
 COPY .devcontainer/entrypoint.sh /usr/local/bin/
