@@ -25,3 +25,6 @@ testpaths = ["tests"]
 [tool.coverage.run]
 branch = true
 source = ["channels"]
+
+[tool.setuptools.package-data]
+channels = ["*.lua"]

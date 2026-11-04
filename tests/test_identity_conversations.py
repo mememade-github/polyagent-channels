@@ -51,11 +51,11 @@ def test_published_identity_is_bound_and_spoof_fields_rejected(client):
 
 @pytest.mark.parametrize('conversation,referenced', [('other', [('1-0', {'conversation_id': 'main'})]), ('main', [])])
 def test_reply_must_exist_in_same_channel_and_conversation(storage, conversation, referenced):
-    storage.xrange.return_value = referenced
+    storage.eval.return_value = ['reply']
     with pytest.raises(ValueError, match='same channel and conversation'):
         asyncio.run(persistence.publish('other-channel', 'reply', '1-0', conversation))
-    storage.xadd.assert_not_awaited()
-    assert storage.xrange.call_args.args == ('channel:other-channel',)
+    assert storage.eval.call_args.args[7] == 'channel:other-channel'
+    assert storage.eval.call_args.args[10:12] == ('1-0', conversation)
 
 
 def test_filtered_history_scans_nonmatching_pages_and_preserves_matching_cursor(storage):
@@ -83,12 +83,13 @@ def test_empty_filtered_scan_advances_and_legacy_is_unattributed(storage):
 def test_concurrent_mcp_requests_keep_individual_identity(client, storage):
     identities = [register(client) for _ in range(2)]
 
-    async def delayed_publish(key, fields):
+    async def delayed_publish(*args):
+        fields = dict(zip(args[12::2], args[13::2]))
         await asyncio.sleep(0.01)
         assert current_agent.get()['agent_id'] == fields['agent_id']
-        return '1-0'
+        return ['ok', '1-0']
 
-    storage.xadd.side_effect = delayed_publish
+    storage.eval.side_effect = delayed_publish
 
     def call(identity):
         response = client.post('/mcp', headers={**authorization(identity), 'Accept': 'application/json, text/event-stream'},
@@ -148,7 +149,7 @@ def test_core_publish_requires_identity(storage):
             asyncio.run(persistence.publish('general', 'hello'))
     finally:
         current_agent.reset(token)
-    storage.xadd.assert_not_awaited()
+    storage.eval.assert_not_awaited()
 
 
 def test_admission_rotation_preserves_registered_identity(server_module, storage, monkeypatch):

@@ -21,7 +21,7 @@ def storage(monkeypatch):
     # Existing transport fixtures use synthetic stream IDs, without wall-clock expiration.
     monkeypatch.setattr(persistence, 'RETENTION_DAYS', 0)
     connection = AsyncMock()
-    connection.xadd.return_value = '1-0'
+    connection.eval.return_value = ['ok', '1-0']
     connection.xread.return_value = []
     connection.xrange.return_value = [('0-1', {'conversation_id': 'main'})]
     identities = {credential_key('synthetic-client-key'): {'agent_id': 'synthetic-agent', 'sender': 'writer'}}

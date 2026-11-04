@@ -125,7 +125,6 @@ def test_retention_task_starts_and_stops_before_redis_closes(server_module, stor
             assert storage.aclose.await_count == 0
             stopped.set()
 
-    monkeypatch.setattr(server_module, 'RETENTION_DAYS', 7)
     monkeypatch.setattr(server_module, 'sweep_history', sweep)
     with TestClient(server_module.inner):
         assert started.wait(1)

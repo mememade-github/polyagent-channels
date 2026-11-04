@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from importlib.resources import files
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -16,6 +17,16 @@ def retention_days():
     return int(value)
 
 
+def max_storage_bytes():
+    value = os.environ.get('CHANNEL_MAX_STORAGE_BYTES', '1073741824')
+    if not re.fullmatch(r'[0-9]+', value) or not 0 < int(value) <= 2**53 - 1:
+        raise ValueError('CHANNEL_MAX_STORAGE_BYTES must be a positive integer <= 9007199254740991')
+    return int(value)
+
+
+MAX_STORAGE_BYTES = max_storage_bytes()
+LIFECYCLE = files('channels').joinpath('lifecycle.lua').read_text(encoding='utf-8')
+STORAGE_KEYS = ('channels:heads', 'channels:bytes', 'channels:version', 'channels:clock')
 RETENTION_DAYS = retention_days()
 RETENTION_SWEEP_SECONDS = 60
 MAX_TEXT = 8 * 1024 * 1024
@@ -30,17 +41,23 @@ def retention_cutoff():
     return max(0, int(time.time() * 1000) - RETENTION_DAYS * 86_400_000) if RETENTION_DAYS else 0
 
 
-async def trim_history(key):
-    cutoff = retention_cutoff()
-    if cutoff:
-        await redis.xtrim(key, minid=f'{cutoff}-0', approximate=False)
+async def lifecycle(key='', fields=None, reply_to=None, conversation_id=''):
+    arguments = ['append' if fields is not None else 'cleanup', key,
+                 str(retention_cutoff()), str(MAX_STORAGE_BYTES), reply_to or '', conversation_id]
+    if fields is not None:
+        arguments.extend(value for pair in fields.items() for value in pair)
+    result = await redis.eval(LIFECYCLE, len(STORAGE_KEYS), *STORAGE_KEYS, *arguments)
+    if result[0] == 'oversized':
+        raise ValueError('message exceeds CHANNEL_MAX_STORAGE_BYTES')
+    if result[0] == 'reply':
+        raise ValueError('reply_to must exist in the same channel and conversation')
+    return result[1]
 
 
 async def sweep_history():
     while True:
         try:
-            async for key in redis.scan_iter(match='channel:*', count=100):
-                await trim_history(key)
+            await lifecycle()
         except RedisError:
             logging.getLogger(__name__).error('Message retention sweep failed: Redis unavailable; retry in 60 seconds')
         await asyncio.sleep(RETENTION_SWEEP_SECONDS)
@@ -77,16 +94,10 @@ async def publish(channel: str, text: str, reply_to: str | None = None,
         raise ValueError('text exceeds 8 MiB UTF-8 limit')
     if reply_to is not None:
         validate_cursor(reply_to)
-    await trim_history(key)
-    if reply_to is not None:
-        referenced = await redis.xrange(key, min=reply_to, max=reply_to, count=1)
-        if (not referenced or int(reply_to.split('-')[0]) < retention_cutoff()
-                or referenced[0][1].get('conversation_id') != conversation_id):
-            raise ValueError('reply_to must exist in the same channel and conversation')
     fields = {**identity, 'channel': channel, 'conversation_id': conversation_id, 'text': text}
     if reply_to is not None:
         fields['reply_to'] = reply_to
-    message_id = await redis.xadd(key, fields)
+    message_id = await lifecycle(key, fields, reply_to, conversation_id)
     return {**fields, 'reply_to': reply_to, 'id': message_id, 'cursor': message_id}
 
 
@@ -99,7 +110,7 @@ async def receive(channel: str, cursor: str = '0-0', timeout: int = 0, limit: in
         validate_conversation(conversation_id)
     if not 0 <= timeout <= 60 or not 1 <= limit <= 100:
         raise ValueError('timeout must be 0..60; limit must be 1..100')
-    await trim_history(key)
+    await lifecycle(key)
     rows = await redis.xread({key: cursor}, count=limit, block=timeout * 1000 if timeout else None)
     cutoff = retention_cutoff()
     messages = []

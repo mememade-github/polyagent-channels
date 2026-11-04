@@ -31,7 +31,7 @@ def test_invalid_cursor_is_rejected(cursor):
 def test_invalid_publish_is_rejected_before_storage(storage, fields):
     with pytest.raises(ValueError):
         asyncio.run(publish('general', **fields))
-    storage.xadd.assert_not_awaited()
+    storage.eval.assert_not_awaited()
 
 
 def test_unicode_message_larger_than_one_mib_is_preserved(storage):
@@ -67,7 +67,7 @@ def test_read_normalizes_stream_entries(storage):
 
 
 def test_storage_failure_is_not_hidden(storage):
-    storage.xadd.side_effect = RedisError('synthetic outage')
+    storage.eval.side_effect = RedisError('synthetic outage')
     with pytest.raises(RedisError):
         asyncio.run(publish('general', 'hello'))
 
@@ -109,7 +109,7 @@ def test_retention_filters_expired_rows_and_keeps_conversation_cursor(retention)
     result = asyncio.run(receive('general', '1-0', conversation_id='main'))
     assert [row['id'] for row in result['messages']] == ['86400000-0']
     assert result['cursor'] == '86400001-0'
-    retention.xtrim.assert_awaited_once_with('channel:general', minid='86400000-0', approximate=False)
+    assert retention.eval.call_args.args[8] == '86400000'
 
 
 def test_rows_expiring_during_long_poll_are_excluded(retention, monkeypatch):
@@ -121,16 +121,16 @@ def test_rows_expiring_during_long_poll_are_excluded(retention, monkeypatch):
     assert asyncio.run(receive('general', timeout=1)) == {'messages': [], 'cursor': '86400000-0'}
 
 
-def test_reply_to_expired_row_is_rejected_even_if_trim_races(retention):
-    retention.xrange.return_value = [('1-0', {'conversation_id': 'main'})]
+def test_atomic_reply_rejection_is_visible(retention):
+    retention.eval.return_value = ['reply']
     with pytest.raises(ValueError, match='reply_to'):
         asyncio.run(publish('general', 'reply', '1-0'))
-    retention.xadd.assert_not_awaited()
+    assert retention.eval.call_args.args[10] == '1-0'
 
 
 def test_publish_trims_without_expiring_credentials(retention):
     asyncio.run(publish('general', 'fresh'))
-    retention.xtrim.assert_awaited_once_with('channel:general', minid='86400000-0', approximate=False)
+    assert retention.eval.call_args.args[8] == '86400000'
     retention.expire.assert_not_awaited()
     retention.hset.assert_not_awaited()
 
@@ -139,11 +139,12 @@ def test_disabled_retention_keeps_old_history(storage):
     storage.xread.return_value = [('channel:general', [('1-0', {'text': 'old'})])]
     assert asyncio.run(receive('general'))['messages'][0]['text'] == 'old'
     asyncio.run(publish('general', 'reply', '0-1'))
-    storage.xtrim.assert_not_awaited()
+    assert storage.eval.call_args.args[8] == '0'
+    assert int(storage.eval.call_args.args[9]) > 0
 
 
 def test_trim_failure_is_visible_to_reader(retention):
-    retention.xtrim.side_effect = RedisError('synthetic outage')
+    retention.eval.side_effect = RedisError('synthetic outage')
     with pytest.raises(RedisError):
         asyncio.run(receive('general'))
     retention.xread.assert_not_awaited()
@@ -151,24 +152,46 @@ def test_trim_failure_is_visible_to_reader(retention):
 
 @pytest.mark.parametrize('outage', [False, True])
 def test_idle_sweep_retries_visibly_and_cancels(retention, monkeypatch, caplog, outage):
-    from unittest.mock import AsyncMock, Mock
+    from unittest.mock import AsyncMock
 
     from channels import persistence
 
-    async def streams(**kwargs):
-        if outage:
-            raise RedisError('private data must not be logged')
-        yield 'channel:idle'
+    if outage:
+        retention.eval.side_effect = RedisError('private data must not be logged')
 
-    retention.scan_iter = Mock(side_effect=streams)
     sleep = AsyncMock(side_effect=asyncio.CancelledError)
     monkeypatch.setattr(persistence.asyncio, 'sleep', sleep)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(persistence.sweep_history())
-    retention.scan_iter.assert_called_once_with(match='channel:*', count=100)
+    assert retention.eval.call_args.args[6] == 'cleanup'
     sleep.assert_awaited_once_with(60)
     if outage:
         assert 'retention sweep failed' in caplog.text
         assert 'private data' not in caplog.text
     else:
-        retention.xtrim.assert_awaited_once_with('channel:idle', minid='86400000-0', approximate=False)
+        assert retention.eval.await_count == 1
+
+
+@pytest.mark.parametrize('value,expected', [(None, 1073741824), ('1', 1), ('2048', 2048)])
+def test_storage_budget_setting(monkeypatch, value, expected):
+    from channels.persistence import max_storage_bytes
+
+    monkeypatch.delenv('CHANNEL_MAX_STORAGE_BYTES', raising=False)
+    if value is not None:
+        monkeypatch.setenv('CHANNEL_MAX_STORAGE_BYTES', value)
+    assert max_storage_bytes() == expected
+
+
+@pytest.mark.parametrize('value', ['', '0', '-1', '1.5', ' 10', '1e9', '9007199254740992'])
+def test_invalid_storage_budget_is_visible(monkeypatch, value):
+    from channels.persistence import max_storage_bytes
+
+    monkeypatch.setenv('CHANNEL_MAX_STORAGE_BYTES', value)
+    with pytest.raises(ValueError, match='CHANNEL_MAX_STORAGE_BYTES'):
+        max_storage_bytes()
+
+
+def test_oversized_storage_rejection_is_visible(storage):
+    storage.eval.return_value = ['oversized']
+    with pytest.raises(ValueError, match='CHANNEL_MAX_STORAGE_BYTES'):
+        asyncio.run(publish('general', 'hello'))

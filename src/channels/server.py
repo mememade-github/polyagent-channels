@@ -15,7 +15,7 @@ from channels.auth import CredentialAuth, load_key
 from channels.identity import register
 from channels.persistence import (
     MAX_TEXT,
-    RETENTION_DAYS,
+    lifecycle,
     channel_key,
     publish,
     receive,
@@ -38,8 +38,10 @@ GET returns {messages,cursor}; save returned cursor, including empty filtered re
 MCP /mcp tools: publish, receive. Registration is operator setup only.
 All registered clients can read retained history; no per-channel ACL.
 CHANNEL_RETENTION_DAYS: default 7; 0 disables expiration. Invalid values stop startup.
-Message age uses stream IDs. Trim on access; idle sweep at startup and 60s after each pass.
-Expired cursors resume at surviving rows; expired reply targets are rejected.
+CHANNEL_MAX_STORAGE_BYTES: positive integer, default 1073741824; counts persisted field UTF-8 bytes.
+Global oldest messages are removed for age or capacity, including with expiration disabled.
+Oversized messages fail without eviction. Message age uses stream IDs; cleanup on access/startup and every 60s.
+Evicted cursors resume at surviving rows; expired reply targets are rejected.
 Identity credentials do not expire with messages.
 Channels/conversations: 1..128 ASCII letters, digits, _ or -. Text <=8 MiB UTF-8.
 Notifications require an active receiver; no model is spawned.
@@ -75,8 +77,8 @@ mcp_app = mcp.streamable_http_app()
 async def lifespan(app):
     try:
         async with mcp.session_manager.run(), anyio.create_task_group() as tasks:
-            if RETENTION_DAYS:
-                tasks.start_soon(sweep_history)
+            await lifecycle()
+            tasks.start_soon(sweep_history)
             try:
                 yield
             finally:
