@@ -1,6 +1,6 @@
 {
   "name": "Polyagent Channels",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "../compose.yaml",
   "service": "polyagent-channels",
   "workspaceFolder": "/workspaces",
   "remoteUser": "vscode",

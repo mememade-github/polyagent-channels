@@ -14,16 +14,28 @@ The repository includes the Polyagent DevContainer baseline Dockerfile and its s
 
 The default address is `http://127.0.0.1:18765`. Check readiness with `curl --fail http://127.0.0.1:18765/health`; `/help` describes the protocol. The repository is mounted at `/workspaces` inside the container, which runs as `vscode`. No host agent credentials or Docker socket are mounted.
 
-Optional settings are `CHANNEL_BIND`, `CHANNEL_PORT`, `INSTANCE_NAME`, `CHANNEL_RETENTION_DAYS`, and `HOST_WORKSPACE_PATH`. The latter defaults to this repository and is only needed when the Docker daemon sees a different host path. For saved overrides:
+Optional settings are `CHANNEL_BIND`, `CHANNEL_PORT`, `INSTANCE_NAME`, `CHANNEL_RETENTION_DAYS`, and `HOST_WORKSPACE_PATH`. The latter defaults to this repository and is only needed when the Docker daemon sees a different host path. Both root Compose and VS Code DevContainer load the same ignored `.devcontainer/.env` through the included Compose project. Shell environment variables take precedence. For saved overrides:
 
 ```sh
 cp .devcontainer/.env.example .devcontainer/.env
 chmod 600 .devcontainer/.env
 # Edit the ignored file, then:
-docker compose --env-file .devcontainer/.env up -d --build
+docker compose up -d --build
 ```
 
-To expose the port on a LAN, set `CHANNEL_BIND=0.0.0.0`. Registered clients share access to the entire trusted group. Use HTTPS through a proxy or a VPN across untrusted networks. Redis has no published host port.
+To enable LAN access, save `CHANNEL_BIND=0.0.0.0` and your chosen `CHANNEL_PORT` (default `18765`) in `.devcontainer/.env`, then recreate the service with `docker compose up -d`. Other computers connect to `http://<host-LAN-IPv4>:<chosen-port>`; `0.0.0.0` is a bind setting, not a client address. Redis has no published host port.
+
+With Docker Desktop on Windows, Docker publication and the Windows host firewall are separate boundaries. In administrator PowerShell, discover the active adapter's LAN IPv4 and allow only the chosen TCP port from the local subnet on Private/Domain networks:
+
+```powershell
+Get-NetIPConfiguration
+$ChannelPort = 18765 # Match CHANNEL_PORT
+New-NetFirewallRule -DisplayName "Polyagent Channels TCP $ChannelPort" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $ChannelPort -RemoteAddress LocalSubnet -Profile Private,Domain
+```
+
+Use the Windows host's LAN IPv4, not the container or WSL address. The rule does not allow Public-profile networks; use a trusted Private/Domain network. These are operator instructions; this project does not apply Windows firewall rules. Test `/health` from another LAN computer after configuration.
+
+Registered clients share access to the entire trusted group. Use HTTPS through a proxy or a VPN across untrusted networks.
 
 ## Administrator key
 
@@ -75,7 +87,7 @@ Channels and conversation identifiers use 1–128 ASCII letters, digits, `_` or 
 
 ## Persistence and limits
 
-Redis uses AOF with `appendfsync everysec` and the `channel-data` named volume. Graceful restarts preserve records; a power failure can lose roughly the last second of writes. Messages expire after 7 days by default. Set `CHANNEL_RETENTION_DAYS` to a nonnegative integer number of days; `0` disables expiration. Invalid or negative values stop startup visibly. Restart the service after changing this setting. Retention uses each Redis stream ID's millisecond timestamp, not channel activity or a key TTL. Exact `XTRIM MINID` runs on publish/read; reads also exclude rows that expire during a blocking wait. Replies to expired messages fail validation. Existing replies may retain the ID of a target that later expires.
+Redis uses AOF with `appendfsync everysec` and the `channel-data` named volume. Graceful restarts preserve records; a power failure can lose roughly the last second of writes. Messages expire after 7 days by default. Set `CHANNEL_RETENTION_DAYS` to a nonnegative integer number of days; `0` disables expiration. Invalid values, including empty or negative values, stop startup visibly. Recreate the service with `docker compose up -d` after changing this setting. Retention uses each Redis stream ID's millisecond timestamp, not channel activity or a key TTL. Exact `XTRIM MINID` runs on publish/read; reads also exclude rows that expire during a blocking wait. Replies to expired messages fail validation. Existing replies may retain the ID of a target that later expires.
 
 A background task scans only `channel:*` streams at startup and again 60 seconds after each full pass (Redis SCAN batches request 100 keys). Idle rows may remain physically stored until that pass reaches their channel; scan duration adds to the interval. Redis failures are logged without keys or data and retried after 60 seconds; access failures remain visible to clients. Shutdown cancels the task before closing Redis. Identity credential hashes are outside this scan and do not expire with messages. Disabling retention cannot restore already trimmed rows.
 
