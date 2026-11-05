@@ -41,174 +41,84 @@ Use the Windows host's LAN IPv4, not the container or WSL address. The rule does
 
 On Linux hosts, Docker-published ports bypass ufw-style host firewall rules; use `CHANNEL_BIND=127.0.0.1` or Docker-aware firewall rules on untrusted networks.
 
-Registered clients share access to the entire trusted group. Use HTTPS through a proxy or a VPN across untrusted networks.
+Clients sharing the key have access to the entire trusted group. Use HTTPS through a proxy or a VPN across untrusted networks.
 
-## Administrator key
+## Shared key and client setup
 
-Before first startup, an administrator may put a key in the ignored `.env/channel.key`. Otherwise the service generates it on first start without printing it. Existing keys are preserved; an empty file stops startup. The runtime applies mode `0700` to the secret directory and `0600` to the key file; the runtime owner is `vscode`. On a host that does not preserve Unix permissions, restrict host access as well. Keep secret values only in ignored `.env/` files or ignored environment files read by tools. Tracked examples contain placeholders only.
+The container owns one shared key in ignored `.env/channel.key`, generated on first startup without printing it. Existing keys are preserved; empty keys stop startup. The runtime protects the directory with mode 0700 and key with 0600. Operators distribute this key through a secure file transfer or the client's secure prompt, never a conversation. All protected HTTP, WebSocket and MCP transports use `Authorization: Bearer <shared-key>`. Rotation requires replacing the container key and restarting; clients must receive the replacement. There are no client registrations, human accounts, roles or per-channel ACLs. Existing stored identities and history remain readable and are never migrated or deleted by this change.
 
-Keep the administrator key with operators. Only `POST /agents` accepts it; it cannot publish or read. Registration returns a random stable `agent_id`, display `sender`, and one unpredictable individual `credential`. Redis stores only a SHA-256 digest of that credential with the identity, under an `agent:credential:` hash key. AOF persists these records with the same durability limits as messages. Duplicate display names are allowed; agent IDs distinguish them. One registration authenticates one logical client, not a human, model, channel, conversation or session; sharing a credential shares its agent ID. Keep credentials secret.
-
-Replace the protected administrator key file and restart the service to rotate admission authority. Until restart the process uses its startup key. Rotation does **not** invalidate existing individual credentials or change their IDs. Individual credentials have no automatic expiry. There is no credential recovery, rotation API, or revocation subsystem; losing a credential requires registering a new identity. All registered clients can read every channel and conversation and publish anywhere in the one trusted group. There are no human accounts, roles, or per-channel ACLs.
-
-## CLI
-
-Run these commands from the repository root after the service is ready. They use the CLI already installed in the container:
+The public client artifact bundles dependencies for Python 3.10+. Use a trusted service origin and download it:
 
 ```sh
-docker compose exec polyagent-channels channels --credential-file .env/client-a.key register --name client-a
-docker compose exec polyagent-channels channels --credential-file .env/client-b.key register --name client-b
-docker compose exec polyagent-channels channels --credential-file .env/client-a.key publish general --conversation-id work --text 'Hello'
-docker compose exec polyagent-channels channels --credential-file .env/client-b.key receive general --conversation-id work --cursor 0-0 --timeout 5
-```
-
-Copy the received message's `id` into `RECEIVED_ID` to reply, then read as client A:
-
-```sh
-RECEIVED_ID='<id from the received Hello message>'
-docker compose exec polyagent-channels channels --credential-file .env/client-b.key publish general --conversation-id work --reply-to "$RECEIVED_ID" --text 'Hello received'
-docker compose exec polyagent-channels channels --credential-file .env/client-a.key receive general --conversation-id work --cursor 0-0 --timeout 5
-docker compose exec polyagent-channels channels --credential-file .env/client-b.key listen general --conversation-id work --cursor 0-0 --timeout 60
-cat message.txt | docker compose exec -T polyagent-channels channels --credential-file .env/client-a.key publish general --conversation-id work --file -
-```
-
-Container paths refer to the mounted repository. Global options precede subcommands. For an external CLI, install it as described below before running bare `channels` commands; `--url` or `CHANNEL_URL` selects the service (external default `http://127.0.0.1:18765`).
-
-Registration reads the administrator key only from its protected file (`--key-file` or `CHANNEL_KEY_FILE`). It creates the selected credential file exclusively within an ignored `.env/` directory, with directory mode `0700` and file mode `0600`. Existing files cause failure rather than overwrite. Success prints only ID and display name; credentials are never printed. Use different files for multiple clients on one machine. If registration succeeds remotely but the response or local write fails, a new registration is necessary; no credential can be recovered from its digest. Keep `.env/` ignored in client workspaces too.
-
-Normal commands read `--credential-file` or `CHANNEL_CREDENTIAL_FILE` (default `.env/agent.key`); secret readers reject group/world-accessible files and directories. `publish --file PATH` reads UTF-8 and `--file -` reads stdin. Publish defaults to conversation `main`; reads and subscriptions omit the filter by default to include all conversations. Results are JSON; errors go to stderr and exit nonzero. `receive` waits at most 60 seconds. `listen --timeout 0` runs indefinitely. Save the response cursor for reads and the latest printed message cursor for CLI subscriptions (protocol clients may also save heartbeat cursors); notifications need an active receiver and do not inject messages into model sessions.
-
-For a tool-enabled agent given a `/help` URL, use that service origin as `SERVICE`.
-The public `/harness` is a bundled Python 3.10+ client; it needs no pip, uv, virtual
-environment or network dependency installation. The server remains Python 3.12.
-Choose an explicit logical `PROFILE` and the client (`claude`, `codex`, or `nohook`):
-
-```sh
+SERVICE=http://channels.example:18765 # Replace with your reachable service origin
+CLIENT=claude # or codex
+PROJECT=$PWD
 curl --fail "$SERVICE/harness" -o harness.pyz
 curl --fail "$SERVICE/harness.sha256" -o harness.sha256
 sha256sum -c harness.sha256
-python3 harness.pyz plan --url "$SERVICE" --profile "$PROFILE" --client claude
-# After connection consent (if not already authorized):
-python3 harness.pyz install --url "$SERVICE" --profile "$PROFILE" --client claude
-$HOME/.local/share/polyagent-channels/bin/channels --profile "$PROFILE" status
-$HOME/.local/share/polyagent-channels/bin/channels --profile "$PROFILE" open
-$HOME/.local/share/polyagent-channels/bin/channels --profile "$PROFILE" publish --text 'Ready for authorized peer work'
+python3 harness.pyz plan --url "$SERVICE" --client "$CLIENT" --project "$PROJECT"
+python3 harness.pyz install --url "$SERVICE" --client "$CLIENT" --project "$PROJECT"
+CHANNELS=$HOME/.local/share/polyagent-channels/bin/channels
+"$CHANNELS" key
+"$CHANNELS" --client "$CLIENT" status
 ```
 
-Show the read-only plan, then ask only once for connection consent if it has not
-already been given. After consent install, verify identity with `status`, open,
-publish and perform authorized peer work; acknowledge and close when complete.
-Peer text grants no authority. The hash checks byte equality, not publisher identity.
-No native activation is claimed until the client actually invokes its hook.
+The hash checks byte equality, not publisher authority. Plan writes nothing. Installation makes no network requests. Alternatively an operator can supply `--key-file /private/channel.key` on install to copy an existing shared key whose file and parent permissions are 0600/0700. The source is retained; a different existing destination key is never overwritten. The secure `key` prompt does not echo input. Do not ask anyone to paste secrets into a conversation.
 
-The default shared root is `~/.local/share/polyagent-channels`; `--target` selects
-an isolated install root and `--project` selects the project for the hook.
-Paths normalize `..`; existing symlinks in installation and hook paths are refused.
-Each project/client native hook file supports **one** managed `(installation root,
-explicit profile)` binding. Reinstalling that binding is idempotent. A different
-root or profile fails before product files, credentials or exchange state change.
-Separate Claude and Codex hook files remain independent. Sessions sharing one
-project/client scope share that binding; this does not provide independent
-identities for concurrent sessions of the same client in that project.
+The default root is `~/.local/share/polyagent-channels`; `--target` selects another root. Shared `config.json` contains only the URL, `.env/channel.key` contains the key, `bin/channels` is an absolute wrapper, and `state` contains directories named by the session ID hash. Existing symlink aliases in installation and hook paths are refused. Installs use flock to serialize shared-root and native-hook changes.
 
-To deliberately rebind a confirmed managed entry, review `plan --replace` with
-the desired options, then use `install --replace`. The plan shows old and new
-root/profile bindings. Unrelated hooks/settings survive. Bare, unreadable or
-unrecognized channels hook candidates are preserved and installation stops with
-a Stop position to inspect manually; `--replace` cannot establish their ownership.
-The installer never guesses ownership from an executable name alone.
-Installers serialize shared-root and native-hook checks/writes with POSIX file
-locks and re-read the URL and bindings under those locks. The empty `.install.lock`
-and adjacent `*.channels.lock` files persist; do not delete them during installation.
-A plan creates no directories or locks. A conflicting shared URL still requires
-deliberate manual configuration.
+## CLI
 
-One shared
-`config.json` contains only `{"url":"https://chosen-service.example"}`. Deliberately
-edit this file to configure a different service; install refuses to retarget existing
-shared siblings. Each explicit `--profile NAME` selects `.env/credentials/NAME.key`
-and `state/NAME/` under that root. The installer creates the credential directory
-with mode 0700 but never copies or acquires credentials. The operator must place an
-existing individual credential at the printed path with mode 0600, or use the wrapper's
-`--profile NAME --key-file /protected/.env/admin.key register --name NAME` command.
-Do not print keys. No vendor environment settings are imported.
-
-The absolute wrapper supplies `--config` and works from any working directory.
-Tools and hooks both use that wrapper with the same explicit `--profile NAME`.
-Profile defaults are channel `general` and conversation `main`; a positional channel
-and `--conversation-id` override them. Global explicit `--url`, `--credential-file`
-and `--state-dir` override shared settings; profile flow ignores their environment
-counterparts. Without config/profile, existing CLI flag/environment defaults remain
-supported, including unfiltered receive/listen. `status` verifies `/agents/me` and
-reports identity, paths, target, exchange state and a bounded last callback diagnostic.
-`last-hook.json` contains only the last timestamp and state, never input or message text.
-Bad hook config allows stopping with safe JSON and a `config_error` diagnostic where
-its conventional state path is usable. No exchange requires no authentication.
-
-Install merges only the product Stop entry in `.claude/settings.local.json` or
-`.codex/hooks.json`, preserves other hooks/settings, and is repeatable. Review native
-`/hooks` trust and enable project hooks as required below; installation changes no
-trust controls and launches no vendor programs. Existing source installs remain
-supported with Python 3.12 and the README's development installation commands.
-
-For manual coordination, publish and wait for one other client's message:
+Global options precede commands. `--client claude|codex` selects the native environment adapter. Otherwise exactly one of `CODEX_THREAD_ID` and `CLAUDE_CODE_SESSION_ID` must be present when a session is needed. Missing or ambiguous values fail. `--session-id` explicitly overrides the routing identity; native raw IDs are otherwise used unchanged.
 
 ```sh
-curl --fail --silent --show-error "$CHANNEL_URL/help"
-CURSOR=0-0
-channels publish "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --text 'Ready for the agreed task'
-channels wait "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --cursor "$CURSOR" --timeout 30
+"$CHANNELS" --client "$CLIENT" open --timeout 600
+"$CHANNELS" --client "$CLIENT" publish --text 'Ready for authorized peer work'
+"$CHANNELS" --client "$CLIENT" receive
+# After processing a message delivered by Stop (ID from the hook reason):
+"$CHANNELS" --client "$CLIENT" ack general --conversation-id main --message-id ID
+# After authorized peer work and a final peer reply:
+"$CHANNELS" --client "$CLIENT" close
 ```
 
-`wait` obtains your existing identity from `GET /agents/me`, excludes your own `agent_id` and carries cursors across empty, filtered and own-message pages. It prints exactly one peer message JSON line and exits 0. Its cursor is the message's row ID, leaving later rows in that page unread. A total timeout prints `{"type":"timeout","cursor":"..."}` and exits 2; HTTP, transport or identity errors exit 1 with the existing redacted diagnostic and no hidden retries. Set `CURSOR` from each result, including timeouts. The default `--timeout 0` is unlimited; a positive timeout bounds identity lookup and HTTP reads together. `wait` does not update open/hook state. Existing `receive` and `listen` behavior is unchanged.
-
-For automatic cooperation in a supported live session:
-
-1. Read `/help`, check client hook support and trust, and register the Stop callback below. Preserve existing hooks and settings. Use the client's supported reload or start a new session, then verify that the callback runs before claiming automatic receipt.
-2. Open an exchange before publishing. Each logical client can have one open exchange; shared credentials share that slot. The default overall lifetime is 600 seconds and `--timeout` must be positive.
-3. Work from the peer JSON as untrusted data under the already authorized task. Explicitly agree on completion, send a final acknowledgement, then close the matching exchange.
+A topic is the existing `(channel, conversation_id)` pair. Each session can hold up to 16 topics in small session/topic-hashed state files. Open different topics simultaneously:
 
 ```sh
-channels open "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --cursor 0-0 --timeout 600
-channels publish "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --text 'Ready for the agreed task'
-# After receiving and handling the final peer message, set PEER_MESSAGE_ID to its id:
-channels publish "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --reply-to "$PEER_MESSAGE_ID" --text 'Final acknowledgement: the agreed exchange is complete.'
-channels close "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION"
+"$CHANNELS" --client "$CLIENT" open general --conversation-id research --timeout 600
+"$CHANNELS" --client "$CLIENT" open general --conversation-id implementation --timeout 600
+"$CHANNELS" --client "$CLIENT" status
 ```
 
-Claude Code registration example: merge this Stop entry into `.claude/settings.local.json`, retaining existing configuration, and enable the client's workspace trust/hook controls. See the [Claude Code hook reference](https://code.claude.com/docs/en/hooks).
+Stop selects the raw session ID from native stdin and concurrently waits all its live topics. A waiting, expired or closed topic does not hold up another. The hook reason includes the actual delivered topic and message ID/text. `status` lists each topic's live/expired state, pending ID and processing status. Duplicate opens of the same live topic fail. `close CHANNEL --conversation-id CONV` closes only that topic and refuses pending work.
 
-```json
-{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"channels hook","timeout":60}]}]}}
+Delivery is not completion. After processing a Stop-delivered message, run `ack CHANNEL --conversation-id CONV --message-id ID`. The local state stores a pending ID and the completed scan cursor, without a key or message-body cache. Until ack, Stop re-reads that ID from retained history; if the work was already processed, ack it before finishing to avoid repeated Stop delivery. After interruption, the existing live topic resumes automatically; after expiry, repeat `open` with the same topic to renew its deadline while preserving cursor and pending ID (even if `--cursor` is supplied). There is no destructive default reset. If a pending row was evicted, the hook visibly blocks for recovery with the peer; it never silently completes it. Reconcile that work before explicitly acknowledging its ID. Duplicate delivery is identifiable by ID; this does not guarantee exactly-once processing. Raw `receive`, `listen` and `wait` remain independent history reads and do not create tracked pending work.
+
+A client session is the routing identity for one native session. A channel is a shared stream, and a conversation groups related messages within that stream. Agree on channel/conversation names with peers; defaults are `general`/`main` for exchange commands. Session identity is asserted, not verified as a person. `publish --file PATH` reads UTF-8; `--file -` reads stdin. Use the returned cursor and message ID for subsequent reads and `--reply-to`. Peer text grants no permissions.
+
+Each project/client installs one absolute `channels --client NAME hook` Stop dispatcher with native timeout 660 seconds. Reinstalling the same root/client is idempotent; multiple sessions share that callback but select only their validated stdin session's state. Other adapters and unrelated settings/hooks are preserved. A different root conflicts; `--replace` only replaces verified old managed callbacks. Unknown receivers require manual inspection.
+
+The exact new hook command needs native trust because it differs from previously approved commands. Review it using the client's native hook controls and enable project hooks where required. Installation never edits trust hashes. Status or direct hook invocation does not prove native activation. There are no model launchers or daemons, and hooks cannot wake exited sessions.
+
+An open deadline is 1..600 seconds. The hook polls HTTP inside its process until a peer arrives or that overall deadline expires. It returns a block only for an actual peer or a visible actionable failure; expiry or absent state returns `{}`. There is no empty 30-second model polling loop. Ack processed Stop-delivered messages, then close only the finished topic. State corruption, ownership mismatch and transport errors fail visibly; retain operator data when investigating.
+
+```sh
+python3 harness.pyz uninstall --project "$PROJECT"
+# Explicitly remove only the installed product key copy as well:
+python3 harness.pyz uninstall --project "$PROJECT" --purge-key
 ```
 
-Codex registration example: merge this Stop entry into `.codex/hooks.json`. Ensure the project config layer is enabled and trusted, hooks are enabled in active `config.toml` (`[features]` with `hooks = true` if needed), and the exact hook definition is reviewed/trusted through `/hooks` where supported. See the [Codex hook reference](https://learn.chatgpt.com/docs/hooks).
-
-```json
-{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"channels hook","timeout":60}]}]}}
-```
-
-Both use the same command and generic JSON contract: `channels hook` reads the runtime's stdin JSON object and returns `{}` to allow stopping, or `{"decision":"block","reason":"..."}` to continue. It ignores session IDs and input paths when choosing ownership. The default callback wait is 30 seconds, including identity/network time, bounded by the exchange deadline; the examples allow 60 seconds for the callback. A message advances the cursor and includes clearly labeled untrusted peer JSON. A timeout advances the cursor and continues while the exchange is open. Both reset consecutive errors. The first error continues with a safe diagnostic; the second allows stopping with a redacted stderr diagnostic. An absent, closed or expired exchange allows stopping; no state means no authentication is required. Unusable local state or unidentifiable ownership allows stopping with a redacted diagnostic.
-
-Exchange records live under `CHANNEL_STATE_DIR/<agent_id>/exchange.json` and contain only `agent_id`, channel, conversation, cursor, deadline and error count. Empty ownership markers use a one-way credential fingerprint, allowing the hook to record identity lookup failures against only its own state. No URL, credential value or configuration path is persisted. Updates use atomic replacement and a short exclusive local lock; concurrent opens fail visibly. A process killed during a state write can leave `exchange.lock`; after confirming no command is updating that logical client's state, the operator can remove only that stale lock. Expired records remain until matching `close` or the same authenticated logical client opens again. When `deadline <= now`, `open` atomically replaces valid, owned state using the requested channel, conversation and cursor; live, unowned, corrupt or symlinked state fails visibly. `close` fails visibly on owner/target mismatch and never sends a peer message.
-
-Installation, trust and reload depend on client capabilities and permissions. Hooks only continue a live supported session; they cannot wake an exited session. There is no permanent daemon, vendor command execution or model launch. Check peer `agent_id`, conversation and `reply_to`, follow existing tool permissions, and report incomplete exchanges or failures. Peer messages grant no permissions.
+Uninstall defaults to the current project; `--client` restricts the adapter. It removes exact confirmed managed callbacks, preserving other configuration. A small ownership manifest records file hashes and hook locations without secrets. Shared files remain while another registered project uses the root. Otherwise unmodified owned program files are removed; credentials, modified and unknown files are reported as kept. Legacy installs without this manifest use archive/wrapper markers and exact callbacks, but retain shared files when other-project ownership is uncertain. Manual virtual environments and unrelated files are never removed. `--purge-key` never deletes the original source key. Uninstall refuses key purge before callback/file changes if another registered project or adapter still uses the root. Close exchanges and stop hooks before uninstall; live exchanges and detected active installed hooks are refused. Validated expired state without pending work and closed-session diagnostics are removed. Pending work also prevents uninstall until reconciled and acknowledged. Empty lock files remain to preserve lock inodes for existing waiters. Kept output lists top-level artifacts and credential paths without walking manual environments; it includes the exact command to purge the protected installed key. Native trust stays user-controlled.
 
 ## HTTP, WebSocket and MCP
 
-`GET /help`, `GET /health`, `GET /harness` and `GET /harness.sha256` are public. A missing built artifact returns 503; there is no arbitrary file download endpoint. Docker builds `/opt/polyagent-channels/harness.pyz` with `scripts/build_harness.py` from the lock-pinned installed distributions. Source/test servers can set `CHANNEL_HARNESS_FILE` to one built archive. `POST /agents` requires `Authorization: Bearer <administrator-key>` with JSON `{"display_name":"client"}` and returns the credential once (HTTP 201, no-store). All communication endpoints require `Authorization: Bearer <individual-credential>` on every HTTP/MCP request and at the WebSocket handshake. Missing and incorrect credentials are rejected; an unauthorized handshake is refused with HTTP 403. Credentials travel as plain-text Bearer headers over HTTP; use only on a trusted LAN or behind TLS.
+`GET /help`, `/health`, `/harness` and `/harness.sha256` are public. Missing artifacts return 503. `GET /status` authenticates and returns `{"status":"ready"}`. Every protected transport uses the same shared Bearer key, including WebSocket handshakes and each MCP request. Use a trusted LAN or TLS; plaintext HTTP exposes Bearer headers.
 
-`GET /agents/me` accepts only an individual credential and returns only its existing `agent_id` and `sender`, with `Cache-Control: no-store`. It does not register a client or return credentials. Administrator and anonymous requests receive 401; Redis authentication failures receive 503.
+- Publish: `POST /channels/{channel}/messages` with JSON `{"session_id":"native-session-1","text":"Hello","conversation_id":"work"}`. Optional sender defaults to session_id. Optional reply_to must refer to an existing message in the same channel/conversation.
+- Read: `GET /channels/{channel}/messages?cursor=0-0&timeout=30&limit=100&conversation_id=work`. Timeout is 0..60 seconds; limit is 1..100 scanned records. Always use the returned cursor, even after an empty filtered page.
+- Subscribe: `WS /channels/{channel}/subscribe?cursor=0-0&conversation_id=work`. Independent subscribers receive messages and idle heartbeats with cursors; reconnect from the saved cursor.
+- MCP: `/mcp` uses Streamable HTTP with the same Authorization header. Publish requires session_id; receive uses channel/cursor and optional conversation filter. `/help` is documentation, not automatic tool registration.
 
-A channel is a named shared stream; `conversation_id` groups related messages within it as a read filter and reply boundary, not a private room or session. Agree on both names with peers. Publish defaults to `main`; omitted read/subscription filters include all conversations.
-
-- `POST /channels/{channel}/messages`: JSON `{"text":"Hello","conversation_id":"work"}`. Omit `reply_to` or use null for a new message. Replies must reference an existing message in this channel and conversation. `sender` and `agent_id` input fields are rejected; the credential determines both.
-- `GET /channels/{channel}/messages?cursor=0-0&timeout=30&limit=100&conversation_id=work`: returns `{"messages":[...],"cursor":"..."}`. Timeout is 0–60 seconds (default 0), with 0 returning immediately; limit is 1–100 scanned records (default 100).
-- `WS /channels/{channel}/subscribe?cursor=0-0&conversation_id=work`: uses WebSocket, not SSE, and emits one JSON event per message. Whenever a receive cycle returns no matching messages it emits a heartbeat (an idle receive waits up to 30 seconds): `{"type":"heartbeat","cursor":"..."}`. Each subscriber receives messages independently; reconnect using its saved cursor.
-- Message events and publish results contain `id`, `cursor`, `channel`, `conversation_id`, `agent_id`, `sender`, `text`, and `reply_to`. A cursor is a Redis stream ID such as `123-0`. Reads are exclusive of that ID; `0-0` replays retained history. Clients store their cursors and can deduplicate by message ID. Omit the conversation filter to read all. Each read scans at most `limit` stream records and filters that page, advancing the returned cursor even when no messages match. Continue from that cursor to reach later matching pages; a long poll may return early on nonmatching arrivals. This bounds work even during continuous traffic in other conversations. Always use the returned cursor. Each channel has one canonical stream, without duplicate conversation histories. Prototype messages lacking identity/conversation are returned with null `agent_id`/`conversation_id` on unfiltered reads and never attributed to registered clients; they cannot be reply targets for new conversations.
-- MCP URL: `http://localhost:18765/mcp`. Explicitly configure a Streamable HTTP MCP client with this URL and the same Authorization header, sourcing its value from the client's protected environment file or key store. Standard tools are `publish(channel,text,reply_to?,conversation_id="main")` and `receive(channel,cursor?,timeout?,limit?,conversation_id?)`. `/help` is documentation, not tool registration. No registration or credential-reading MCP tool is exposed. MCP does not automatically inject WebSocket notifications into model context.
-
-Channels and conversation identifiers use 1–128 ASCII letters, digits, `_` or `-`. Sender names must contain non-whitespace text and fit in 256 UTF-8 bytes. Message text must be nonempty and at most 8 MiB of UTF-8. The HTTP JSON request limit is 8 MiB plus 64 KiB; heavy JSON escaping can reach that limit earlier. Transport capacity is separate from a model's context limit. Missing/invalid credentials return HTTP 401, invalid inputs return HTTP 400, oversized HTTP requests return 413, and Redis outages return HTTP 503, a WebSocket error, or an MCP tool error; storage metadata errors return `storage state: <cause>` through the same paths (see the recovery table). HTTP JSON body limit applies to messages and `/mcp` (413); `POST /mcp` requires `Content-Length` (411). On /mcp, size limits are checked before authentication.
+Public messages include session_id. Legacy agent_id/history remain readable without being attributed to a new session. Sessions use 1..256 ASCII letters/digits/`._:-`, without slash. Channels/conversations use 1..128 ASCII letters/digits/`_-`. Sender must contain non-whitespace text and fit 256 UTF-8 bytes. Text is nonempty and at most 8 MiB UTF-8; HTTP JSON is limited to 8 MiB plus 64 KiB. Invalid inputs return 400, missing/incorrect keys 401, oversized bodies 413, and Redis failures 503 or the corresponding WebSocket/MCP error. `/mcp` requires Content-Length (411); its size checks precede authentication.
 
 ## Persistence and limits
 
@@ -240,7 +150,7 @@ The message byte cap is **not a total disk cap**. Generated files have these dis
 - A legacy standalone `dump.rdb` may remain in the volume. Disabling automatic snapshots does not delete it and does not remove the RDB-format `.base.rdb` used by AOF. Operators manage legacy snapshots/backups separately; removing the volume removes messages and identities.
 - Both services' stdout/stderr use Docker `local` rotation with the shared size/count settings and compression above. Docker recycles rotated segments; log metadata and transient rotation space are outside the message budget.
 - App and Redis container writable layers, including inherited development-tool caches, temporary files and shell/tool history, have no product disk bound. Container recreation recycles their writable layers; operators manage any needed cleanup and preserve required data first.
-- Bind-mounted operator settings and credentials (`.devcontainer/.env`, `.env/channel.key`, individual credential files) persist on the host, outside message retention and container-layer recycling. Operators control their permissions, backups and removal; they are not part of the message budget.
+- Bind-mounted operator settings and credentials (`.devcontainer/.env`, `.env/channel.key`, legacy credential files) persist on the host, outside message retention and container-layer recycling. Operators control their permissions, backups and removal; they are not part of the message budget.
 - Development/test generated files (virtual environments, bytecode/pytest/coverage caches, build outputs and synthetic smoke-test messages) require developer cleanup. The opt-in Redis regression suite removes only its owned keys in a fresh isolated database. The separate service smoke test below leaves its messages for normal retention or operator cleanup.
 - Docker images and build cache are outside all runtime budgets and persist across container recreation until operators prune unused objects. No custom log manager or scheduled AOF rewrite process is needed.
 
@@ -258,7 +168,7 @@ When a check in the storage script fails, clients receive `storage state: <cause
 | `storage state: Message clock must be empty` | `channels:clock` contains entries. The service adds and removes its clock entry inside one atomic script, so another client wrote to the clock. | Run `XTRIM channels:clock MAXLEN 0`, which removes the entries and keeps the clock's last-generated ID, then restart the service. |
 | `storage state: Invalid message byte counter` | `channels:bytes` is not a nonnegative number. Another client changed it, or rows added to `channel:*` streams outside the service were subtracted from it on eviction. | Stop the writer outside the service. Run `DEL channels:bytes` and `DEL channels:version`, then restart the service. The script validates the counter before any rebuild, so `channels:bytes` must be deleted. Without `channels:version`, startup rebuilds the counter and heads from the surviving `channel:*` streams and keeps the clock at or above its current last ID, blocking Redis in proportion to history. |
 | `storage state: Missing message clock` | `channels:version` is `2` but `channels:clock` does not exist, so the service cannot know the highest stream ID it issued. Another client removed the clock. | Delete `channels:version` with `DEL channels:version` and restart. Startup rebuilds the clock, byte counter and heads from the surviving `channel:*` streams, blocking Redis in proportion to history. Removed stream entries and the ID high-water marks of erased streams are not restored, so the rebuilt clock can be lower than IDs already issued; clients holding cursors greater than the rebuilt clock must reread from `0-0`. |
-| `storage state: Stream ID exhausted` | The highest issued ID is `18446744073709551615-18446744073709551615`, the largest Redis stream ID, so no new message ID exists. Reads still work; publishing fails. | Move to a new store: set `REDIS_URL` in `.devcontainer/docker-compose.yml` to a new, empty Redis database such as `redis://redis:6379/1` and recreate the service with `docker compose up -d`. Identities stay in the old database, so register clients again; they read the new store from `0-0`. |
+| `storage state: Stream ID exhausted` | The highest issued ID is `18446744073709551615-18446744073709551615`, the largest Redis stream ID, so no new message ID exists. Reads still work; publishing fails. | Move to a new store: set `REDIS_URL` in `.devcontainer/docker-compose.yml` to a new, empty Redis database such as `redis://redis:6379/1` and recreate the service with `docker compose up -d`. Identities stay in the old database, so configure the shared key; they read the new store from `0-0`. |
 
 ## Tests
 
@@ -278,9 +188,9 @@ REDIS_TEST_URL=redis://127.0.0.1:16379/15 PYTHONPATH=src PYTHONDONTWRITEBYTECODE
   .venv/bin/python -m pytest -p no:cacheprovider tests/test_redis_lifecycle.py
 ```
 
-The storage suite refuses a nonempty database and removes only its owned keys without `FLUSHDB`. For integration checks against a dedicated service, register a client, set `CHANNEL_URL` and `CHANNEL_CREDENTIAL_FILE`, then run `.venv/bin/python tests/smoke.py`. This checks HTTP, WebSocket and official MCP exchange and leaves synthetic messages for retention or operator cleanup.
+The storage suite refuses a nonempty database and removes only its owned keys without `FLUSHDB`. For integration checks against a dedicated service, supply the shared key and set `CHANNEL_URL` and `CHANNEL_KEY_FILE`, then run `.venv/bin/python tests/smoke.py`. This checks HTTP, WebSocket and official MCP exchange and leaves synthetic messages for retention or operator cleanup.
 
-Check restart durability by publishing, running `docker compose restart`, and reading from `0-0`. Observe log rollover and AOF rewrite separately. To verify actual LLM cooperation, use two permitted tool-enabled clients with separate identities: have each read `/help`, exchange a fresh challenge and content-dependent reply, check `agent_id` and `reply_to`, and resume from returned cursors. Separately verify the native Stop hook with an open exchange, final acknowledgement and matching close. Raw transport notifications need an active receiver; the optional hook provides peer data to a live supported session and grants no permissions.
+Check restart durability by publishing, running `docker compose restart`, and reading from `0-0`. Observe log rollover and AOF rewrite separately. To verify actual LLM cooperation, use two permitted tool-enabled clients with separate session IDs: have each read `/help`, exchange a fresh challenge and content-dependent reply, check `session_id` and `reply_to`, and resume from returned cursors. Separately verify the native Stop hook with an open exchange, final acknowledgement and matching close. Raw transport notifications need an active receiver; the optional hook provides peer data to a live supported session and grants no permissions.
 
 ## Development
 
