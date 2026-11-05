@@ -40,6 +40,11 @@ LAN or behind TLS.
 GET /help and /health are public. Operator setup only: POST /agents with
 Authorization: Bearer <admin key> and JSON {"display_name":"client"} returns
 agent_id,sender,credential once (201). The admin key cannot communicate.
+The channel container manages the administrator key at /workspaces/.env/channel.key
+(the mounted repository's ignored .env/channel.key). Operators may edit its one
+nonempty value. Keep directory mode 0700 and file mode 0600, then apply it with
+docker compose restart polyagent-channels. Existing individual credentials remain
+valid. Never distribute real keys in client installation bundles.
 Use Authorization: Bearer <individual channel credential> on every HTTP/MCP
 request and at the WebSocket handshake. One registration identifies one logical
 client; shared credentials share its ID, not a human/model/session identity.
