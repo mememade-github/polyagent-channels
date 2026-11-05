@@ -15,7 +15,7 @@ end
 check(heads, 'zset'); check(usage, 'string'); check(ready, 'string'); check(clock, 'stream')
 if key ~= '' then check(key, 'stream') end
 local version = redis.call('GET', ready)
-if version and version ~= '1' and version ~= '2' then return redis.error_reply('Unsupported message storage version') end
+if version and version ~= '2' then return redis.error_reply('Unsupported message storage version') end
 local function padded(n) return string.rep('0', 20 - #n) .. n end
 local function parts(id)
     local ms, seq = string.match(id, '^(%d+)%-(%d+)$')

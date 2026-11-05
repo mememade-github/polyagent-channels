@@ -184,6 +184,67 @@ def test_wrong_legacy_type_fails_before_mutation(database):
     assert not connection.exists(*persistence.STORAGE_KEYS)
 
 
+@pytest.mark.parametrize('version', ['1', '3'])
+@pytest.mark.parametrize('fields', [None, {'text': 'new'}])
+def test_unsupported_version_fails_before_mutation(database, version, fields):
+    connection, key, run, owned = database
+    channel = key('unsupported-version')
+    connection.xadd(channel, {'text': 'old'}, id='1-0')
+    run(1000)
+    connection.set('channels:version', version)
+    before = {name: connection.dump(name) for name in owned}
+    with pytest.raises(ResponseError, match='Unsupported message storage version'):
+        run(5, cutoff=2, key=channel, fields=fields)
+    assert {name: connection.dump(name) for name in owned} == before
+
+
+def test_metadata_bootstrap_and_rebuild_preserve_history_and_cursors(database, monkeypatch):
+    connection, key, run, owned = database
+    channel = key('preserved-history')
+    credential = 'agent:credential:' + uuid.uuid4().hex
+    owned.add(credential)
+    connection.hset(credential, mapping={'agent_id': 'legacy-identity'})
+    rows = [('1-0', {'text': 'without identity or conversation'}),
+            ('2-0', {'text': 'old', 'agent_id': 'legacy-identity', 'conversation_id': 'main'}),
+            ('3-0', {'text': 'current', 'session_id': 'native:session', 'conversation_id': 'main'})]
+    for message_id, fields in rows:
+        connection.xadd(channel, fields, id=message_id)
+    monkeypatch.setattr(persistence, 'RETENTION_DAYS', 0)
+    monkeypatch.setattr(persistence, 'MAX_STORAGE_BYTES', 1000)
+
+    async def scenario():
+        client = persistence.Redis.from_url(os.environ['REDIS_TEST_URL'], decode_responses=True)
+        monkeypatch.setattr(persistence, 'redis', client)
+        try:
+            name = channel.removeprefix('channel:')
+            for _ in range(2):
+                batch = await persistence.receive(name)
+                assert [row['id'] for row in batch['messages']] == ['1-0', '2-0', '3-0']
+                assert [(row['agent_id'], row['session_id'], row['conversation_id'])
+                        for row in batch['messages']] == [
+                            (None, None, None), ('legacy-identity', None, 'main'),
+                            (None, 'native:session', 'main')]
+                filtered = await persistence.receive(name, '1-0', conversation_id='main')
+                assert ([row['id'] for row in filtered['messages']], filtered['cursor']) == (['2-0', '3-0'], '3-0')
+                with pytest.raises(ValueError, match='same channel and conversation'):
+                    await persistence.publish(name, 'reply', 'native:session', reply_to='1-0')
+                assert connection.xrange(channel) == rows
+                assert connection.hgetall(credential) == {'agent_id': 'legacy-identity'}
+                assert connection.get('channels:version') == '2'
+                assert_accounting(connection)
+            connection.delete('channels:version', 'channels:heads', 'channels:bytes')
+            resumed = await persistence.receive(name, '2-0')
+            assert ([row['id'] for row in resumed['messages']], resumed['cursor']) == (['3-0'], '3-0')
+            assert connection.xrange(channel) == rows
+            assert connection.hgetall(credential) == {'agent_id': 'legacy-identity'}
+            assert connection.get('channels:version') == '2'
+            assert connection.xinfo_stream('channels:clock')['last-generated-id'] == '3-0'
+            assert_accounting(connection)
+        finally:
+            await client.aclose()
+    asyncio.run(scenario())
+
+
 def test_ids_above_double_precision_keep_exact_order(database):
     connection, key, run, _ = database
     a, b = key('a'), key('b')
@@ -195,14 +256,11 @@ def test_ids_above_double_precision_keep_exact_order(database):
     assert_accounting(connection)
 
 
-@pytest.mark.parametrize('version', [None, '1'])
-def test_future_cursor_eviction_recreation_and_stale_reply(database, version):
+def test_future_cursor_eviction_recreation_and_stale_reply(database):
     connection, key, run, _ = database
     channel, other = key('future'), key('other')
     cursor = '9007199254740993-9007199254740993'
     connection.xadd(channel, {'text': 'x', 'conversation_id': 'main'}, id=cursor)
-    if version:
-        connection.set('channels:version', version)
     run(1000)
     run(5, key=other, fields={'text': 'y'})
     assert not connection.exists(channel)
@@ -215,15 +273,12 @@ def test_future_cursor_eviction_recreation_and_stale_reply(database, version):
     assert_accounting(connection)
 
 
-@pytest.mark.parametrize('version', [None, '1'])
-def test_empty_legacy_bootstrap_preserves_clock_across_restart(database, version):
+def test_empty_legacy_bootstrap_preserves_clock_across_restart(database):
     connection, key, run, _ = database
     empty = key('empty')
     cursor = '9007199254740993-17'
     connection.xadd(empty, {'text': 'gone'}, id=cursor)
     connection.xdel(empty, cursor)
-    if version:
-        connection.set('channels:version', version)
     run(5)
     assert not connection.exists(empty)
     assert connection.xinfo_stream('channels:clock')['last-generated-id'] == cursor
