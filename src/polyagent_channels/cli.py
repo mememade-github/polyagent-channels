@@ -128,7 +128,7 @@ def read_secret(path):
     return secret
 
 
-def save_key(options):
+def save_key(options, report=True):
     secret = read_secret(options.source_file) if options.source_file else getpass.getpass('Shared channel key: ').strip()
     if not secret or any(character.isspace() for character in secret):
         raise ValueError('key_invalid')
@@ -138,21 +138,27 @@ def save_key(options):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if path.parent.stat().st_mode & 0o077:
         raise ValueError('key_permissions')
-    if not options.replace_key:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    descriptor, temporary = tempfile.mkstemp(prefix='.channel-key-', dir=path.parent)
+    status = 'key_saved'
+    try:
         with os.fdopen(descriptor, 'w') as output:
             output.write(secret + '\n')
-    else:
-        descriptor, temporary = tempfile.mkstemp(prefix='.channel-key-', dir=path.parent)
-        try:
-            with os.fdopen(descriptor, 'w') as output:
-                output.write(secret + '\n')
-                output.flush()
-                os.fsync(output.fileno())
+            output.flush()
+            os.fsync(output.fileno())
+        if options.replace_key:
             os.replace(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
-    print(json.dumps({'status': 'key_saved', 'key_path': str(path)}))
+        if not options.replace_key:
+            try:
+                # Publish a complete file without exposing an empty O_EXCL-created key.
+                os.link(temporary, path)
+            except FileExistsError:
+                if read_secret(path) != secret:
+                    raise ValueError('key_exists_different: use key --replace-key to replace the existing key') from None
+                status = 'key_unchanged'
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    if report:
+        print(json.dumps({'status': status, 'key_path': str(path)}))
 
 
 def select_session(options, required=True):

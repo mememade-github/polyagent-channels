@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -77,8 +78,12 @@ def test_key_command_getpass_exclusive_and_replace(tmp_path, monkeypatch, capsys
     selected = options('--key-file', str(destination), 'key')
     monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'synthetic-key')
     cli.save_key(selected)
-    with pytest.raises(FileExistsError):
+    cli.save_key(selected)
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])['status'] == 'key_unchanged'
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'different-key')
+    with pytest.raises(ValueError, match='key_exists_different'):
         cli.save_key(selected)
+    assert cli.read_secret(destination) == 'synthetic-key'
     selected.replace_key = True
     monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'replacement-key')
     cli.save_key(selected)
@@ -215,3 +220,33 @@ def test_status_session_is_optional_even_when_native_environments_ambiguous(monk
     monkeypatch.setenv('CODEX_THREAD_ID', 'codex-id')
     monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'claude-id')
     assert cli.select_session(options('status'), required=False) is None
+
+
+def test_concurrent_identical_key_writers_never_observe_an_empty_key(tmp_path, monkeypatch):
+    destination = tmp_path / '.env/channel.key'
+    selected = options('--key-file', str(destination), 'key')
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'synthetic-concurrent-key')
+    opened, release = threading.Event(), threading.Event()
+    original = cli.os.fdopen
+    failures = []
+    def pause_first_writer(*args, **kwargs):
+        if threading.current_thread().name == 'key-writer':
+            opened.set()
+            assert release.wait(5)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(cli.os, 'fdopen', pause_first_writer)
+    def write_first():
+        try:
+            cli.save_key(selected, report=False)
+        except Exception as error:
+            failures.append(type(error).__name__)
+    worker = threading.Thread(target=write_first, name='key-writer')
+    worker.start()
+    try:
+        assert opened.wait(5)
+        cli.save_key(selected, report=False)
+    finally:
+        release.set()
+        worker.join(5)
+    assert not failures and not worker.is_alive() and cli.read_secret(destination) == 'synthetic-concurrent-key'
+
