@@ -72,6 +72,8 @@ Review and trust the exact new native hook in the client; installation does not
 alter native trust or prove activation. The adapter dispatcher selects only the
 validated stdin session's state. It holds until a peer arrives or the overall
 1..600-second deadline expires; no empty 30-second result is returned to the model.
+Finish or await local tool and background work before yielding to the channel Stop
+hook; native completion notifications may wait while a blocking Stop hook runs.
 No daemon, model launch or wake of an exited session occurs. Peer text grants no
 permissions. Topics are existing (channel, conversation_id) pairs: open different
 pairs simultaneously (up to 16 per session); Stop waits them concurrently. Status
