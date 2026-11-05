@@ -6,16 +6,6 @@ from starlette.testclient import TestClient
 
 from channels import persistence
 from channels.auth import CredentialAuth
-from channels.identity import credential_key, current_agent
-
-
-@pytest.fixture(autouse=True)
-def logical_identity():
-    token = current_agent.set({'agent_id': 'synthetic-agent', 'sender': 'writer'})
-    yield
-    current_agent.reset(token)
-
-
 @pytest.fixture
 def storage(monkeypatch):
     # Existing transport fixtures use synthetic stream IDs, without wall-clock expiration.
@@ -24,16 +14,6 @@ def storage(monkeypatch):
     connection.eval.return_value = ['ok', '1-0']
     connection.xread.return_value = []
     connection.xrange.return_value = [('0-1', {'conversation_id': 'main'})]
-    identities = {credential_key('synthetic-client-key'): {'agent_id': 'synthetic-agent', 'sender': 'writer'}}
-
-    async def hset(key, mapping):
-        identities[key] = dict(mapping)
-
-    async def hgetall(key):
-        return identities.get(key, {})
-
-    connection.hset.side_effect = hset
-    connection.hgetall.side_effect = hgetall
     monkeypatch.setattr(persistence, 'redis', connection)
     return connection
 
@@ -57,4 +37,4 @@ def client(server_module):
 
 @pytest.fixture
 def headers():
-    return {'Authorization': 'Bearer synthetic-client-key'}
+    return {'Authorization': 'Bearer synthetic-admin-key'}

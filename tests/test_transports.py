@@ -78,8 +78,8 @@ def test_health_exposes_storage_failure(client, storage):
 
 
 def test_http_publish_returns_message(client, headers):
-    response = client.post('/channels/general/messages', headers=headers, json={'text': 'hello'})
-    assert response.json() == {'channel': 'general', 'sender': 'writer', 'agent_id': 'synthetic-agent', 'conversation_id': 'main', 'text': 'hello', 'reply_to': None, 'id': '1-0', 'cursor': '1-0'}
+    response = client.post('/channels/general/messages', headers=headers, json={'text': 'hello', 'session_id': 'synthetic-session', 'sender': 'writer'})
+    assert response.json() == {'channel': 'general', 'sender': 'writer', 'session_id': 'synthetic-session', 'conversation_id': 'main', 'text': 'hello', 'reply_to': None, 'id': '1-0', 'cursor': '1-0'}
 
 
 def test_http_read_uses_cursor(client, headers):
@@ -139,7 +139,7 @@ def test_mcp_lists_standard_tools(client, headers):
 def test_mcp_publish_calls_shared_storage(client, headers):
     response = client.post('/mcp', headers={**headers, 'Accept': 'application/json, text/event-stream'}, json={
         'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
-        'params': {'name': 'publish', 'arguments': {'channel': 'general', 'text': 'hello'}},
+        'params': {'name': 'publish', 'arguments': {'channel': 'general', 'text': 'hello', 'session_id': 'synthetic-session'}},
     })
     assert not response.json()['result']['isError']
 
@@ -192,7 +192,6 @@ def test_mcp_body_status_ignores_other_methods_paths_and_websockets(scope_type, 
     assert CredentialAuth(None, 'k', 32).mcp_body_status(scope) is None
 
 
-def test_full_app_registration_accepts_chunked_body(client):
-    response = client.post('/agents', headers={'Authorization': 'Bearer synthetic-admin-key'},
-                           content=iter([b'{"display_name":"client"}']))
-    assert response.status_code == 201
+def test_removed_registration_routes_are_unavailable(client, headers):
+    assert client.post('/agents', headers=headers, json={'display_name': 'client'}).status_code == 404
+    assert client.get('/agents/me', headers=headers).status_code == 404

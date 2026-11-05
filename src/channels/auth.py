@@ -4,10 +4,8 @@ import os
 import secrets
 from pathlib import Path
 
-from redis.exceptions import RedisError
 from starlette.responses import JSONResponse
 
-from channels.identity import authenticate, current_agent
 
 ERRORS = {400: 'invalid Content-Length', 401: 'Unauthorized', 411: 'Content-Length required',
           413: 'request exceeds size limit', 503: 'Redis unavailable'}
@@ -27,7 +25,7 @@ def load_key():
     path.chmod(0o600)
     key = path.read_text().strip()
     if not key:
-        raise RuntimeError('Admin key file is empty')
+        raise RuntimeError('Shared key file is empty')
     return key
 
 
@@ -45,27 +43,11 @@ class CredentialAuth:
         body_status = self.mcp_body_status(scope)
         if body_status:
             return await self.reject(scope, receive, send, body_status)
-        supplied = dict(scope.get('headers', [])).get(b'authorization', b'')
-        if scope['type'] == 'http' and scope['path'] == '/agents':
-            if hmac.compare_digest(supplied, self.authorization):
-                return await self.application(scope, receive, send)
+        authorizations = [value for name, value in scope.get('headers', []) if name == b'authorization']
+        supplied = authorizations[0] if len(authorizations) == 1 else b''
+        if not hmac.compare_digest(supplied, self.authorization):
             return await self.reject(scope, receive, send)
-        if scope['path'] == '/agents/me' and hmac.compare_digest(supplied, self.authorization):
-            return await self.reject(scope, receive, send)
-        try:
-            credential = supplied.removeprefix(b'Bearer ').decode('ascii') if supplied.startswith(b'Bearer ') else ''
-            identity = await authenticate(credential)
-        except UnicodeError:
-            identity = None
-        except RedisError:
-            return await self.reject(scope, receive, send, 503)
-        if identity is None:
-            return await self.reject(scope, receive, send)
-        token = current_agent.set(identity)
-        try:
-            return await self.application(scope, receive, send)
-        finally:
-            current_agent.reset(token)
+        return await self.application(scope, receive, send)
 
     def mcp_body_status(self, scope):
         if (scope['type'], scope.get('method'), scope['path']) != ('http', 'POST', '/mcp'):
@@ -83,5 +65,5 @@ class CredentialAuth:
         if scope['type'] == 'websocket':
             await send({'type': 'websocket.close', 'code': 1008})
             return
-        headers = {'Cache-Control': 'no-store'} if scope['path'] == '/agents/me' else None
+        headers = {'Cache-Control': 'no-store'}
         await JSONResponse({'error': ERRORS[status]}, status_code=status, headers=headers)(scope, receive, send)

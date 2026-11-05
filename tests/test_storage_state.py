@@ -90,7 +90,7 @@ def test_sweep_logs_only_class_of_other_redis_failures(storage, monkeypatch, cap
 
 def request_messages(client, headers, method):
     if method == 'POST':
-        return client.post('/channels/general/messages', headers=headers, json={'text': 'hello'})
+        return client.post('/channels/general/messages', headers=headers, json={'text': 'hello', 'session_id': 'synthetic-session'})
     return client.get('/channels/general/messages', headers=headers)
 
 
@@ -133,7 +133,7 @@ def call_tool(client, headers, name, arguments):
     return response.json()['result']
 
 
-@pytest.mark.parametrize('name,arguments', [('publish', {'channel': 'general', 'text': 'hello'}),
+@pytest.mark.parametrize('name,arguments', [('publish', {'channel': 'general', 'text': 'hello', 'session_id': 'synthetic-session'}),
                                             ('receive', {'channel': 'general'})])
 @pytest.mark.parametrize('error_type,message,expected', [
     *((ResponseError, message, expected) for message, expected in STORAGE_STATES),
@@ -161,7 +161,7 @@ def test_mcp_tools_keep_operation_schemas_and_descriptions(client, headers):
     tools = {tool['name']: tool for tool in response.json()['result']['tools']}
     assert {name: (set(tool['inputSchema']['properties']), set(tool['inputSchema']['required']), tool['description'])
             for name, tool in tools.items()} == {
-        'publish': ({'channel', 'text', 'reply_to', 'conversation_id'}, {'channel', 'text'}, persistence.publish.__doc__),
+        'publish': ({'channel', 'text', 'session_id', 'sender', 'reply_to', 'conversation_id'}, {'channel', 'text', 'session_id'}, persistence.publish.__doc__),
         'receive': ({'channel', 'cursor', 'timeout', 'limit', 'conversation_id'}, {'channel'}, persistence.receive.__doc__),
     }
 

@@ -30,15 +30,15 @@ def test_invalid_cursor_is_rejected(cursor):
 ])
 def test_invalid_publish_is_rejected_before_storage(storage, fields):
     with pytest.raises(ValueError):
-        asyncio.run(publish('general', **fields))
+        asyncio.run(publish('general', session_id='synthetic-session', **fields))
     storage.eval.assert_not_awaited()
 
 
 def test_unicode_message_larger_than_one_mib_is_preserved(storage):
     text = '문맥🙂' * 150000
-    result = asyncio.run(publish('general', text, '0-1'))
+    result = asyncio.run(publish('general', text, 'synthetic-session', '0-1', sender='writer'))
     assert len(text.encode()) > 1024 * 1024 and result == {
-        'channel': 'general', 'sender': 'writer', 'agent_id': 'synthetic-agent', 'conversation_id': 'main', 'text': text,
+        'channel': 'general', 'sender': 'writer', 'session_id': 'synthetic-session', 'conversation_id': 'main', 'text': text,
         'reply_to': '0-1', 'id': '1-0', 'cursor': '1-0',
     }
 
@@ -62,14 +62,14 @@ def test_bounded_wait_passes_exclusive_cursor_to_redis(storage):
 def test_read_normalizes_stream_entries(storage):
     storage.xread.return_value = [('channel:general', [('4-0', {'text': 'reply', 'reply_to': '3-0'})])]
     assert asyncio.run(receive('general', '3-0')) == {
-        'messages': [{'id': '4-0', 'cursor': '4-0', 'text': 'reply', 'reply_to': '3-0', 'agent_id': None, 'conversation_id': None}], 'cursor': '4-0',
+        'messages': [{'id': '4-0', 'cursor': '4-0', 'text': 'reply', 'reply_to': '3-0', 'session_id': None, 'agent_id': None, 'conversation_id': None}], 'cursor': '4-0',
     }
 
 
 def test_storage_failure_is_not_hidden(storage):
     storage.eval.side_effect = RedisError('synthetic outage')
     with pytest.raises(RedisError):
-        asyncio.run(publish('general', 'hello'))
+        asyncio.run(publish('general', 'hello', 'synthetic-session'))
 
 
 @pytest.mark.parametrize('value,expected', [(None, 7), ('0', 0), ('14', 14)])
@@ -124,12 +124,12 @@ def test_rows_expiring_during_long_poll_are_excluded(retention, monkeypatch):
 def test_atomic_reply_rejection_is_visible(retention):
     retention.eval.return_value = ['reply']
     with pytest.raises(ValueError, match='reply_to'):
-        asyncio.run(publish('general', 'reply', '1-0'))
+        asyncio.run(publish('general', 'reply', 'synthetic-session', '1-0'))
     assert retention.eval.call_args.args[10] == '1-0'
 
 
 def test_publish_trims_without_expiring_credentials(retention):
-    asyncio.run(publish('general', 'fresh'))
+    asyncio.run(publish('general', 'fresh', 'synthetic-session'))
     assert retention.eval.call_args.args[8] == '86400000'
     retention.expire.assert_not_awaited()
     retention.hset.assert_not_awaited()
@@ -138,7 +138,7 @@ def test_publish_trims_without_expiring_credentials(retention):
 def test_disabled_retention_keeps_old_history(storage):
     storage.xread.return_value = [('channel:general', [('1-0', {'text': 'old'})])]
     assert asyncio.run(receive('general'))['messages'][0]['text'] == 'old'
-    asyncio.run(publish('general', 'reply', '0-1'))
+    asyncio.run(publish('general', 'reply', 'synthetic-session', '0-1'))
     assert storage.eval.call_args.args[8] == '0'
     assert int(storage.eval.call_args.args[9]) > 0
 
@@ -194,4 +194,4 @@ def test_invalid_storage_budget_is_visible(monkeypatch, value):
 def test_oversized_storage_rejection_is_visible(storage):
     storage.eval.return_value = ['oversized']
     with pytest.raises(ValueError, match='CHANNEL_MAX_STORAGE_BYTES'):
-        asyncio.run(publish('general', 'hello'))
+        asyncio.run(publish('general', 'hello', 'synthetic-session'))

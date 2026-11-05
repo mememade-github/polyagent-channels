@@ -156,9 +156,9 @@ def test_evicted_cursors_filtered_catchup_and_authenticated_payload(database, mo
         monkeypatch.setattr(persistence, 'redis', client)
         try:
             name = channel.removeprefix('channel:')
-            first = await persistence.publish(name, 'one', conversation_id='other')
-            second = await persistence.publish(name, 'two', conversation_id='main')
-            assert second['agent_id'] == 'synthetic-agent' and second['sender'] == 'writer'
+            first = await persistence.publish(name, 'one', 'synthetic-session', conversation_id='other')
+            second = await persistence.publish(name, 'two', 'synthetic-session', conversation_id='main')
+            assert second['session_id'] == 'synthetic-session' and second['sender'] == 'synthetic-session'
             batch = await persistence.receive(name, '1-0', limit=1, conversation_id='main')
             assert batch == {'messages': [], 'cursor': first['id']}
             batch = await persistence.receive(name, batch['cursor'], conversation_id='main')
@@ -166,7 +166,7 @@ def test_evicted_cursors_filtered_catchup_and_authenticated_payload(database, mo
             # Subscription uses the same exclusive-cursor receive operation.
             pending = asyncio.create_task(persistence.receive(name, second['id'], timeout=2))
             await asyncio.sleep(0.05)
-            third = await persistence.publish(name, 'three', reply_to=second['id'])
+            third = await persistence.publish(name, 'three', 'synthetic-session', reply_to=second['id'])
             assert [row['id'] for row in (await pending)['messages']] == [third['id']]
         finally:
             await client.aclose()

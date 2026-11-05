@@ -25,3 +25,31 @@ def test_empty_key_fails_startup(monkeypatch, tmp_path):
     monkeypatch.setenv('CHANNEL_KEY_FILE', str(key_path))
     with pytest.raises(RuntimeError, match='empty'):
         load_key()
+
+
+@pytest.mark.parametrize('scope_type', ['http', 'websocket'])
+@pytest.mark.parametrize('authorizations', [[], [b'Bearer wrong'],
+                                          [b'Bearer shared', b'Bearer shared'],
+                                          [b'Bearer wrong', b'Bearer shared']])
+def test_protected_transports_reject_missing_wrong_or_duplicate_bearer(scope_type, authorizations):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from channels.auth import CredentialAuth
+
+    application, send = AsyncMock(), AsyncMock()
+    scope = {'type': scope_type, 'method': 'GET', 'path': '/status',
+             'headers': [(b'authorization', value) for value in authorizations]}
+    asyncio.run(CredentialAuth(application, 'shared', 32)(scope, AsyncMock(), send))
+    assert application.await_count == 0
+
+
+def test_shared_key_rotation_invalidates_previous_key(server_module):
+    from starlette.testclient import TestClient
+
+    from channels.auth import CredentialAuth
+
+    with TestClient(CredentialAuth(server_module.inner, 'replacement', server_module.MAX_BODY)) as client:
+        previous = client.get('/status', headers={'Authorization': 'Bearer synthetic-admin-key'})
+        replacement = client.get('/status', headers={'Authorization': 'Bearer replacement'})
+    assert (previous.status_code, replacement.status_code, replacement.json()) == (401, 200, {'status': 'ready'})

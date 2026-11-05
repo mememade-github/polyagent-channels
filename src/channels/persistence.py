@@ -6,6 +6,8 @@ import re
 import time
 from importlib.resources import files
 
+from channels.identity import validate_sender, validate_session_id
+
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ResponseError
 
@@ -110,12 +112,13 @@ def validate_conversation(conversation_id):
     channel_key(conversation_id)
 
 
-async def publish(channel: str, text: str, reply_to: str | None = None,
-                  conversation_id: str = 'main') -> dict:
-    """Publish as the authenticated logical client in one conversation."""
-    from channels.identity import authenticated_agent
-
-    identity = authenticated_agent()
+async def publish(channel: str, text: str, session_id: str, reply_to: str | None = None,
+                  conversation_id: str = 'main', sender: str | None = None) -> dict:
+    """Publish with an asserted routing session, not a verified person identity."""
+    validate_session_id(session_id)
+    if sender is None:
+        sender = session_id
+    validate_sender(sender)
     key = channel_key(channel)
     validate_conversation(conversation_id)
     if not isinstance(text, str) or not text:
@@ -124,7 +127,7 @@ async def publish(channel: str, text: str, reply_to: str | None = None,
         raise ValueError('text exceeds 8 MiB UTF-8 limit')
     if reply_to is not None:
         validate_cursor(reply_to)
-    fields = {**identity, 'channel': channel, 'conversation_id': conversation_id, 'text': text}
+    fields = {'session_id': session_id, 'sender': sender, 'channel': channel, 'conversation_id': conversation_id, 'text': text}
     if reply_to is not None:
         fields['reply_to'] = reply_to
     message_id = await lifecycle(key, fields, reply_to, conversation_id)
@@ -149,7 +152,7 @@ async def receive(channel: str, cursor: str = '0-0', timeout: int = 0, limit: in
             cursor = message_id
             if int(message_id.split('-')[0]) < cutoff:
                 continue
-            message = {**fields, 'agent_id': fields.get('agent_id'),
+            message = {**fields, 'session_id': fields.get('session_id'), 'agent_id': fields.get('agent_id'),
                        'conversation_id': fields.get('conversation_id'),
                        'id': message_id, 'cursor': message_id, 'reply_to': fields.get('reply_to')}
             if conversation_id is None or message['conversation_id'] == conversation_id:
