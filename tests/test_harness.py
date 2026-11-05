@@ -59,7 +59,8 @@ def test_read_only_idempotent_secure_key_and_uninstall(artifact, tmp_path):
     assert (removed.returncode, (root / 'bin/channels').exists(), (root / '.env/channel.key').read_bytes(),
             source.read_bytes(), (root / 'unknown').read_text(), commands(hook), json.loads(hook.read_text())['keep']) == (
         0, False, source.read_bytes(), b'synthetic-key\n', 'preserve', [{'command': 'other'}], True)
-    purge = invoke(artifact, 'uninstall', '--target', root, '--project', tmp_path, '--purge-key', cwd=tmp_path)
+    purge = subprocess.run(shlex.split(json.loads(removed.stdout)['purge_key_command']),
+                           cwd=tmp_path, text=True, capture_output=True, timeout=15)
     assert (purge.returncode, (root / '.env/channel.key').exists(), source.exists()) == (0, False, True)
 
 
@@ -402,3 +403,23 @@ def test_expired_pending_topic_refuses_uninstall_and_preserves_unknown(artifact,
     removed = invoke(artifact, 'uninstall', '--target', root, '--project', tmp_path, cwd=tmp_path)
     assert (refused.returncode == 1 and 'pending work' in refused.stderr and preserved
             and removed.returncode == 0 and not path.exists() and unknown.read_text() == 'operator data')
+
+
+def test_installed_uninstall_emits_executable_key_only_removal(artifact, tmp_path):
+    root = tmp_path / "root with 'quotes'"
+    installed = invoke(artifact, 'install', '--target', root, '--client', 'claude',
+                       '--project', tmp_path, '--url', 'http://localhost:18765', cwd=tmp_path)
+    assert installed.returncode == 0
+    key = root / '.env/channel.key'
+    key.write_text('synthetic-key-never-print')
+    unrelated = root / 'manual/retained'
+    unrelated.parent.mkdir()
+    unrelated.write_text('retain')
+    result = invoke(root / 'harness.pyz', 'uninstall', '--target', root,
+                    '--project', tmp_path, cwd=tmp_path)
+    output = json.loads(result.stdout)
+    assert result.returncode == 0 and not (root / 'harness.pyz').exists()
+    purge = subprocess.run(shlex.split(output['purge_key_command']), cwd=tmp_path,
+                           capture_output=True, text=True, timeout=15)
+    assert (purge.returncode == 0 and not key.exists() and unrelated.read_text() == 'retain'
+            and 'synthetic-key-never-print' not in result.stdout + result.stderr + purge.stdout + purge.stderr)

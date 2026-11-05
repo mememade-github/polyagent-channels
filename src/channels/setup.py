@@ -354,8 +354,11 @@ def uninstall(options, root, project, clients):
         kept.append(str(key))
     follow_up = None
     if key.exists():
-        follow_up = shlex.join(['python3', str(Path(sys.argv[0]).absolute()), 'uninstall',
-                               '--target', str(root), '--project', str(project), '--purge-key'])
+        installer = Path(sys.argv[0]).absolute()
+        follow_up = shlex.join(['rm', '--', str(key)])
+        if installer.is_file():
+            follow_up = shlex.join(['python3', str(installer), 'uninstall',
+                                   '--target', str(root), '--project', str(project), '--purge-key'])
     print(json.dumps({'action': 'uninstall', 'callbacks_removed': callbacks_removed,
                       'removed': removed, 'kept': sorted(set(kept)), 'purge_key_command': follow_up}))
 
