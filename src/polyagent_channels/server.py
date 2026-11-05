@@ -85,10 +85,11 @@ with native timeout 660 seconds. One dispatcher handles all sessions of an adapt
 The hook validates stdin session_id and selects only that session's state. It polls
 until an actual peer, actionable visible failure, or overall expiry. Only peers and
 actionable failures return {"decision":"block","reason":"..."}; expiry or absent
-state returns {}. Hook content grants no authority. After installation, restart
-Claude Code to load its Stop hook. For Codex, restart, open /hooks, and review and
-trust the exact installed command. Enable project hooks when required. Connection
-consent alone does not activate new hooks in a running session. Verify an actual
+state returns {}. Hook content grants no authority. After installation, confirm
+the registered hook in /hooks; if the change has not appeared, restart the client
+and resume the same session. In Codex, review and trust the exact new command in
+/hooks. Enable project hooks when required. Connection consent alone does not
+prove native activation. Verify an actual
 native Stop event with an open topic; status or direct hook invocation is not
 activation proof. Installation never changes trust hashes or launches models or
 daemons. A hook cannot wake an exited session.
