@@ -3,6 +3,7 @@ import io
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import httpx
 import pytest
@@ -191,28 +192,36 @@ def test_wait_failures_exit_once_through_redacted_boundary(invoke, transport, ca
             len(requests)) == (1, '', True, False, 1 if stage == 'identity' else 2)
 
 
-def test_open_is_exclusive_and_records_only_logical_exchange(invoke, peer_service, tmp_path, capsys):
+def test_open_is_exclusive_and_records_only_logical_exchange(invoke, peer_service, monkeypatch, tmp_path, capsys):
     peer_service(None)
     started = time.time()
+    monkeypatch.setattr(exchange.time, 'time', lambda: started)
     first_status = invoke('open', *TARGET, '--cursor', '4-0')
     first = json.loads(capsys.readouterr().out)
     path = tmp_path / '.channels/first-agent/exchange.json'
     original = path.read_bytes()
+    monkeypatch.setattr(exchange.time, 'time', lambda: first['deadline'] - 0.001)
     second_status = invoke('open', *TARGET, '--cursor', '9-0')
     second = capsys.readouterr()
     state = json.loads(original)
     assert (first_status, second_status, path.read_bytes() == original, set(state),
-            state['cursor'], state['errors'], started + 599 <= state['deadline'] <= time.time() + 601,
+            state['cursor'], state['errors'], state['deadline'],
             first['type'], 'FileExistsError' in second.err, 'synthetic' in original.decode()) == (
         0, 1, True, {'agent_id', 'channel', 'conversation_id', 'cursor', 'deadline', 'errors'},
-        '4-0', 0, True, 'open', True, False)
+        '4-0', 0, started + 600, 'open', True, False)
 
 
-def test_concurrent_open_has_one_owner_and_complete_json(tmp_path):
+@pytest.mark.parametrize('expired', [False, True])
+def test_concurrent_open_has_one_owner_and_complete_json(tmp_path, expired):
     state = exchange.new_state(IDENTITIES['Bearer synthetic-first-credential'],
                                {'channel': 'general', 'conversation_id': 'work', 'cursor': '0-0'}, 60)
+    if expired:
+        exchange.open_exchange(tmp_path, 'synthetic-first-credential',
+                               {**state, 'cursor': '9-0', 'deadline': time.time() - 1})
+    ready = Barrier(2)
 
     def open_once(_):
+        ready.wait(timeout=5)
         try:
             exchange.open_exchange(tmp_path, 'synthetic-first-credential', state)
         except FileExistsError:
@@ -223,6 +232,81 @@ def test_concurrent_open_has_one_owner_and_complete_json(tmp_path):
         outcomes = sorted(executor.map(open_once, range(2)))
     assert (outcomes, json.loads((tmp_path / 'first-agent/exchange.json').read_text())) == (
         ['conflict', 'opened'], state)
+
+
+@pytest.mark.parametrize('marker_owner', [None, 'second'])
+def test_open_preserves_expired_state_without_matching_owner(
+        invoke, peer_service, monkeypatch, tmp_path, capsys, marker_owner):
+    peer_service(None)
+    invoke('open', *TARGET)
+    opened = json.loads(capsys.readouterr().out)
+    monkeypatch.setattr(exchange.time, 'time', lambda: opened['deadline'])
+    path = tmp_path / '.channels/first-agent/exchange.json'
+    marker = path.parent / exchange.owner_marker('synthetic-first-credential')
+    marker.unlink()
+    if marker_owner is not None:
+        foreign_marker = path.parent / exchange.owner_marker('synthetic-' + marker_owner + '-credential')
+        foreign_marker.touch()
+    original = path.read_bytes()
+    entries = sorted(item.name for item in path.parent.iterdir())
+    status = invoke('open', *TARGET)
+    output = capsys.readouterr()
+    assert (status, output.out, 'ExchangeMismatch' in output.err, path.read_bytes(),
+            sorted(item.name for item in path.parent.iterdir())) == (1, '', True, original, entries)
+
+
+@pytest.mark.parametrize('field,value,error', [
+    (None, None, 'JSONDecodeError'),
+    ('agent_id', 'second-agent', 'ExchangeMismatch'),
+    ('cursor', 'invalid', 'ValueError'),
+    ('deadline', float('nan'), 'ValueError'),
+    ('unexpected', True, 'ValueError'),
+])
+def test_open_preserves_corrupt_expired_state(
+        invoke, peer_service, monkeypatch, tmp_path, capsys, field, value, error):
+    peer_service(None)
+    invoke('open', *TARGET)
+    opened = json.loads(capsys.readouterr().out)
+    monkeypatch.setattr(exchange.time, 'time', lambda: opened['deadline'])
+    path = tmp_path / '.channels/first-agent/exchange.json'
+    state = json.loads(path.read_text())
+    contents = '{'
+    if field is not None:
+        state[field] = value
+        contents = json.dumps(state)
+    path.write_text(contents)
+    status = invoke('open', *TARGET)
+    output = capsys.readouterr()
+    assert (status, output.out, error in output.err, path.read_text()) == (1, '', True, contents)
+
+
+@pytest.mark.parametrize('location,dangling', [
+    ('state', False), ('state', True), ('marker', False), ('marker', True), ('directory', False),
+])
+def test_open_preserves_symlinked_expired_state(
+        invoke, peer_service, monkeypatch, tmp_path, capsys, location, dangling):
+    peer_service(None)
+    invoke('open', *TARGET)
+    opened = json.loads(capsys.readouterr().out)
+    monkeypatch.setattr(exchange.time, 'time', lambda: opened['deadline'])
+    path = tmp_path / '.channels/first-agent/exchange.json'
+    original = path.read_bytes()
+    marker = path.parent / exchange.owner_marker('synthetic-first-credential')
+    source = {'state': path, 'marker': marker, 'directory': path.parent}[location]
+    protected = tmp_path / 'protected'
+    source.rename(protected)
+    source.symlink_to(protected, target_is_directory=location == 'directory')
+    if dangling:
+        protected.unlink()
+    status = invoke('open', *TARGET)
+    output = capsys.readouterr()
+    remaining = None
+    if path.exists():
+        remaining = path.read_bytes()
+    if location == 'state' and dangling:
+        original = None
+    assert (status, output.out, 'ValueError' in output.err, source.is_symlink(),
+            protected.exists(), remaining) == (1, '', True, True, not dangling, original)
 
 
 def test_close_requires_matching_owner_and_target(invoke, peer_service, tmp_path, capsys):
@@ -321,8 +405,9 @@ def test_hook_wait_is_bounded_by_exchange_deadline(invoke, peer_service, tmp_pat
     assert (status, output.out, output.err, time.monotonic() - started < 1, state['errors']) == (0, '{}\n', '', True, 0)
 
 
-@pytest.mark.parametrize('end', ['expired', 'closed'])
-def test_hook_after_exchange_end_allows_without_network(invoke, peer_service, monkeypatch, capsys, end):
+@pytest.mark.parametrize('end', ['expired', 'boundary', 'closed'])
+def test_hook_after_exchange_end_allows_without_network_and_open_uses_new_target(
+        invoke, peer_service, monkeypatch, tmp_path, capsys, end):
     requests = peer_service(None)
     invoke('open', *TARGET)
     opened = json.loads(capsys.readouterr().out)
@@ -331,10 +416,22 @@ def test_hook_after_exchange_end_allows_without_network(invoke, peer_service, mo
         capsys.readouterr()
     if end == 'expired':
         monkeypatch.setattr(exchange.time, 'time', lambda: opened['deadline'] + 1)
+    if end == 'boundary':
+        monkeypatch.setattr(exchange.time, 'time', lambda: opened['deadline'])
     count = len(requests)
     status = invoke('hook')
     output = capsys.readouterr()
-    assert (status, output.out, output.err, len(requests)) == (0, '{}\n', '', count)
+    hook_requests = len(requests) - count
+    now = time.time()
+    monkeypatch.setattr(exchange.time, 'time', lambda: now)
+    reopened = invoke('open', 'other', '--conversation-id', 'next', '--cursor', '100-0', '--timeout', '60')
+    new_output = capsys.readouterr()
+    state = json.loads((tmp_path / '.channels/first-agent/exchange.json').read_text())
+    expected = {'agent_id': 'first-agent', 'channel': 'other', 'conversation_id': 'next',
+                'cursor': '100-0', 'deadline': now + 60, 'errors': 0}
+    assert (status, output.out, output.err, hook_requests, reopened, new_output.err, json.loads(new_output.out or 'null'),
+            state, len(requests)) == (
+        0, '{}\n', '', 0, 0, '', {'type': 'open', **expected}, expected, count + 1)
 
 
 @pytest.mark.parametrize('stage', ['identity', 'messages', 'input'])
@@ -414,24 +511,33 @@ def test_hook_identity_mismatch_never_reads_peer_messages(invoke, transport, tmp
         ['/agents/me', '/agents/me'], 'block', 1, '0-0')
 
 
-@pytest.mark.parametrize('reopen', [False, True])
+@pytest.mark.parametrize('end', ['closed', 'reopened', 'expired'])
+@pytest.mark.parametrize('result', ['message', 'error'])
 def test_late_hook_result_cannot_recreate_closed_or_overwrite_new_exchange(
-        invoke, peer_service, tmp_path, capsys, reopen):
+        invoke, peer_service, monkeypatch, tmp_path, capsys, end, result):
     directory = tmp_path / '.channels'
     identity = IDENTITIES['Bearer synthetic-first-credential']
     target = {'channel': 'general', 'conversation_id': 'work', 'cursor': '100-0'}
+    replacement = None
 
-    async def close_while_waiting(request):
-        exchange.close_exchange(directory, 'synthetic-first-credential', identity, target)
-        if reopen:
-            exchange.open_exchange(directory, 'synthetic-first-credential', exchange.new_state(identity, target, 600))
+    async def end_while_waiting(request):
+        nonlocal replacement
+        if end != 'expired':
+            exchange.close_exchange(directory, 'synthetic-first-credential', identity, target)
+        if end == 'expired':
+            monkeypatch.setattr(exchange.time, 'time', lambda: opened['deadline'])
+        if end != 'closed':
+            replacement = exchange.new_state(identity, target, 600)
+            exchange.open_exchange(directory, 'synthetic-first-credential', replacement)
+        if result == 'error':
+            raise httpx.ReadTimeout('synthetic-private-configuration', request=request)
         return httpx.Response(200, json={'messages': [message('9-0')], 'cursor': '10-0'})
 
-    peer_service(close_while_waiting)
+    peer_service(end_while_waiting)
     invoke('open', *TARGET)
-    capsys.readouterr()
+    opened = json.loads(capsys.readouterr().out)
     status = invoke('hook')
     output = capsys.readouterr()
     path = directory / 'first-agent/exchange.json'
-    cursor = json.loads(path.read_text())['cursor'] if path.exists() else None
-    assert (status, output.out, output.err, cursor) == (0, '{}\n', '', '100-0' if reopen else None)
+    state = json.loads(path.read_text()) if path.exists() else None
+    assert (status, output.out, output.err, state) == (0, '{}\n', '', replacement)

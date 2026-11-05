@@ -146,8 +146,11 @@ use different registered credentials for independent clients. State contains onl
 agent_id, channel, conversation_id, cursor, deadline and errors; an empty local
 ownership marker uses a one-way credential fingerprint. No URL, credential value
 or credential/config path is stored. Updates are atomic. Default open lifetime
-is 600 seconds; --timeout must be positive. Expiration does not delete the record;
-close it before opening another exchange. close rejects an owner/target mismatch.
+is 600 seconds; --timeout must be positive. Expiration leaves the record, but the
+same authenticated owner can open again when deadline <= now. open atomically
+replaces valid, owned state using the requested channel, conversation and cursor.
+Live, unowned, corrupt or symlinked state fails visibly. close rejects an
+owner/target mismatch.
 
 Each hook waits at most 30 seconds, including identity/network time, bounded by
 the overall exchange deadline. The registration's 60-second callback timeout

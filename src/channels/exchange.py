@@ -188,11 +188,15 @@ def open_exchange(directory, credential, state):
     if path.parent.is_symlink():
         raise ValueError('Exchange directory must not be a symlink')
     with locked_state(path):
-        if path.exists() or path.is_symlink():
-            raise FileExistsError('An exchange is already open for this logical client')
         marker = path.parent / owner_marker(credential)
         if marker.is_symlink():
             raise ValueError('Exchange owner marker must not be a symlink')
+        if path.exists() or path.is_symlink():
+            existing = read_state(path)
+            if not marker.is_file():
+                raise ExchangeMismatch()
+            if existing['deadline'] > time.time():
+                raise FileExistsError('An exchange is already open for this logical client')
         marker.touch(mode=0o600, exist_ok=True)
         write_state(path, state)
 
