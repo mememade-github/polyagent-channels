@@ -1,4 +1,4 @@
-"""Read-only plan and explicit local installation; no credential acquisition."""
+"""Read-only plan, shared-key client installation and conservative uninstall."""
 import argparse
 from contextlib import contextmanager, ExitStack
 import fcntl
@@ -8,9 +8,13 @@ import os
 import shlex
 import sys
 import tempfile
+import hashlib
+import re
+import zipfile
+import time
 from pathlib import Path
 
-from channels.client_config import ConfigError, DEFAULT_ROOT, profile_paths, read_config, service_url
+from channels.client_config import ConfigError, DEFAULT_ROOT, read_config, service_url
 
 
 class SetupError(ValueError):
@@ -78,12 +82,15 @@ def managed_binding(command):
         expected = wrapper_content(Path(execution[1]), root)
         if executable != root / 'bin/channels' or content != expected:
             raise ValueError()
-        if len(words) != 4 or words[1] != '--profile' or words[3] != 'hook':
+        if len(words) != 4 or words[1] not in ('--profile', '--client') or words[3] != 'hook':
             raise ValueError()
-        profile_paths(root / 'config.json', words[2])
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', words[2]):
+            raise ValueError()
+        if words[1] == '--client' and words[2] not in ('claude', 'codex'):
+            raise ValueError()
     except (IndexError, UnicodeError, ValueError):
         raise SetupError('Ambiguous managed hook; inspect indicated Stop position') from None
-    return (str(root), words[2])
+    return (str(root), words[1], words[2])
 
 
 def managed_wrapper_root(wrapper):
@@ -91,11 +98,11 @@ def managed_wrapper_root(wrapper):
     return binding[0] if binding else None
 
 
-def hook_document(path, command, replace=False):
+def hook_document(path, command, replace=False, remove=False):
     data = json.loads(path.read_text()) if path.exists() else {}
     stops = data.setdefault('hooks', {}).setdefault('Stop', [])
     selected = shlex.split(command)
-    binding = (str(Path(selected[0]).parent.parent), selected[2])
+    binding = (str(Path(selected[0]).parent.parent), '--client', selected[2])
     retained = []
     previous = []
     for entry_index, entry in enumerate(stops):
@@ -104,16 +111,23 @@ def hook_document(path, command, replace=False):
             try:
                 owned = managed_binding(hook.get('command', ''))
             except ValueError:
-                raise SetupError(f'Ambiguous receiver at Stop[{entry_index}].hooks[{hook_index}]; inspect/remove it manually before install') from None
-            if owned is None:
+                raise SetupError(f'Ambiguous receiver at Stop[{entry_index}].hooks[{hook_index}]; inspect manually') from None
+            exact = hook.get('type') == 'command' and hook.get('command') == command
+            if remove:
+                if exact and owned == binding:
+                    continue
                 hooks.append(hook)
                 continue
-            previous.append({'root': owned[0], 'profile': owned[1]})
-            if owned != binding and not replace:
-                raise SetupError(f'Native scope conflict at Stop[{entry_index}].hooks[{hook_index}]; use plan --replace to review a managed rebind')
+            if owned is None or (owned[1] == '--client' and owned[2] != selected[2]):
+                hooks.append(hook)
+                continue
+            if owned != binding and not (replace and owned[1] == '--profile'):
+                raise SetupError('Native scope conflict; --replace only replaces verified legacy callbacks')
+            previous.append(list(owned))
         if hooks or not entry.get('hooks'):
             retained.append({**entry, 'hooks': hooks})
-    retained.append({'hooks': [{'type': 'command', 'command': command, 'timeout': 60}]})
+    if not remove:
+        retained.append({'hooks': [{'type': 'command', 'command': command, 'timeout': 660}]})
     data['hooks']['Stop'] = retained
     return (json.dumps(data, indent=2) + '\n').encode(), previous
 
@@ -133,16 +147,40 @@ def installation_lock(path):
         os.close(descriptor)
 
 
+@contextmanager
+def lifecycle_lock(root, exclusive=False):
+    """Keep one inode shared by CLI users and exclusive installation changes."""
+    path = canonical_path(root / '.lifecycle.lock')
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        details = os.fstat(descriptor)
+        if not stat.S_ISREG(details.st_mode) or details.st_size or details.st_nlink != 1:
+            raise SetupError('Invalid lifecycle lock destination')
+        operation = fcntl.LOCK_SH
+        if exclusive:
+            operation = fcntl.LOCK_EX | fcntl.LOCK_NB
+        try:
+            fcntl.flock(descriptor, operation)
+        except BlockingIOError:
+            raise SetupError('Installation in use; stop CLI operations and hooks before changing installation') from None
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('plan', 'install'))
-    parser.add_argument('--url', required=True)
-    parser.add_argument('--profile', required=True)
+    parser.add_argument('action', choices=('plan', 'install', 'uninstall'))
+    parser.add_argument('--url')
     parser.add_argument('--target', type=Path, default=DEFAULT_ROOT)
-    parser.add_argument('--client', choices=('claude', 'codex', 'nohook'), required=True)
+    parser.add_argument('--client', choices=('claude', 'codex'))
     parser.add_argument('--project', type=Path, default=Path.cwd())
-    parser.add_argument('--replace', action='store_true', help='Explicitly rebind confirmed managed Stop receivers')
+    parser.add_argument('--key-file', type=Path)
+    parser.add_argument('--purge-key', action='store_true')
+    parser.add_argument('--replace', action='store_true')
     options = parser.parse_args(arguments)
+    if options.action != 'uninstall' and (not options.url or not options.client):
+        parser.error('plan/install require --url and --client')
     try:
         execute(options)
     except ConfigError as error:
@@ -152,75 +190,283 @@ def main(arguments=None):
         print('channel setup failed: ' + str(error), file=sys.stderr)
         return 1
     except Exception as error:
-        print('channel setup failed: ' + type(error).__name__ + ' (check URL, paths and existing settings)', file=sys.stderr)
+        print('channel setup failed: ' + type(error).__name__ + ' (check paths and settings)', file=sys.stderr)
         return 1
     return 0
 
 
-def native_hook(options):
-    if options.client == 'nohook':
-        return None
-    relative = '.claude/settings.local.json' if options.client == 'claude' else '.codex/hooks.json'
-    return canonical_path(canonical_path(options.project) / relative)
+def native_hook(project, client):
+    relative = '.claude/settings.local.json' if client == 'claude' else '.codex/hooks.json'
+    return canonical_path(project / relative)
 
 
 def execute(options):
     root = canonical_path(options.target)
-    hook = native_hook(options)
+    project = canonical_path(options.project)
+    clients = [options.client] if options.client else ['claude', 'codex']
+    hooks = [native_hook(project, client) for client in clients]
     if options.action == 'plan':
-        return prepare(options)
+        return install(options, root, project)
     locks = {root / '.install.lock'}
-    if hook:
-        locks.add(hook.with_name(hook.name + '.channels.lock'))
-    # Every installer uses the same total ordering, including across shared roots.
+    locks.update(hook.with_name(hook.name + '.channels.lock') for hook in hooks)
     with ExitStack() as stack:
         for lock in sorted(locks):
             stack.enter_context(installation_lock(lock))
-        prepare(options)
+        stack.enter_context(lifecycle_lock(root, exclusive=True))
+        if options.action == 'uninstall':
+            return uninstall(options, root, project, clients)
+        install(options, root, project)
 
 
-def prepare(options):
-    root = canonical_path(options.target)
-    config = root / 'config.json'
+def manifest_data(root):
+    path = canonical_path(root / 'install-manifest.json')
+    if not path.exists():
+        return {'version': 1, 'files': {}, 'hooks': []}
+    data = json.loads(path.read_text())
+    if data.get('version') != 1 or not isinstance(data.get('files'), dict) or not isinstance(data.get('hooks'), list):
+        raise SetupError('Invalid ownership manifest; preserving installation')
+    return data
+
+
+def digest(content):
+    return hashlib.sha256(content).hexdigest()
+
+
+def archive_owned(path):
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return archive.read('POLYAGENT-HARNESS') == b'1\n'
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return False
+
+
+def protected_key(path):
+    path = canonical_path(path)
+    details = path.stat()
+    if not stat.S_ISREG(details.st_mode) or details.st_mode & 0o077 or path.parent.stat().st_mode & 0o077:
+        raise SetupError('Key file and parent must be private (0600/0700)')
+    content = path.read_bytes()
+    if not content.strip():
+        raise SetupError('Key file is empty')
+    return content
+
+
+def install(options, root, project):
+    config = canonical_path(root / 'config.json')
+    wrapper = canonical_path(root / 'bin/channels')
+    archive = canonical_path(root / 'harness.pyz')
+    key = canonical_path(root / '.env/channel.key')
     url = service_url(options.url)
-    credential, state = profile_paths(config, options.profile)
-    wrapper = root / 'bin/channels'
-    archive = root / 'harness.pyz'
-    interpreter = Path(os.path.abspath(sys.executable))
-    command = shlex.join([str(wrapper), '--profile', options.profile, 'hook'])
-    hook = native_hook(options)
-    for destination in (config, wrapper, archive, credential, state):
-        canonical_path(destination)
     if config.exists() and read_config(config) != url:
-        raise SetupError('Shared URL change requires ordinary manual configuration')
-    hook_bytes, previous = hook_document(hook, command, options.replace) if hook else (None, [])
-    wrapper_bytes = wrapper_content(interpreter, root)
-    if wrapper.exists() and wrapper.read_bytes() != wrapper_bytes and managed_wrapper_root(wrapper) is None:
-        raise FileExistsError('Unrelated wrapper')
+        raise SetupError('Shared URL change requires manual configuration')
+    command = shlex.join([str(wrapper), '--client', options.client, 'hook'])
+    hook = native_hook(project, options.client)
+    hook_bytes, previous = hook_document(hook, command, options.replace)
+    content = wrapper_content(Path(os.path.abspath(sys.executable)), root)
+    if wrapper.exists() and wrapper.read_bytes() != content and managed_wrapper_root(wrapper) is None:
+        raise SetupError('Unrelated wrapper; preserving it')
     source = canonical_path(sys.argv[0])
-    if options.action == 'install' and (source.suffix != '.pyz' or not source.is_file()):
-        raise SetupError('Install requires the downloaded zipapp')
-    if archive.exists() and archive != source:
-        import zipfile
-        with zipfile.ZipFile(archive) as existing:
-            if existing.read('POLYAGENT-HARNESS') != b'1\n':
-                raise FileExistsError('Unrelated archive')
-    print(json.dumps({'action': options.action, 'profile': options.profile, 'url': url,
-                      'interpreter': str(interpreter), 'archive': str(archive), 'wrapper': str(wrapper), 'config': str(config),
-                      'credential': str(credential), 'state': str(state), 'hook': str(hook) if hook else None,
-                      'previous_bindings': previous, 'new_binding': {'root': str(root), 'profile': options.profile},
-                      'actions': ['copy archive', 'write URL-only config and absolute wrapper', 'merge selected Stop hook'],
-                      'connection': 'Only the chosen service; plan/install make no network requests',
-                      'credential_setup': 'Operator must provision this protected file or use register with an administrator key; no credentials copied',
-                      'native_activation': 'Review native /hooks trust and enable project hooks where required; registration does not prove activation'}))
+    if archive.exists() and not archive_owned(archive):
+        raise SetupError('Unrelated archive; preserving it')
+    manifest = manifest_data(root)
+    key_bytes = protected_key(options.key_file) if options.key_file else None
+    if key.exists() and key_bytes is not None and protected_key(key).strip() != key_bytes.strip():
+        raise SetupError('Existing shared key differs; preserving it')
+    print(json.dumps({'action': options.action, 'root': str(root), 'hook': str(hook),
+                      'command': command, 'previous_bindings': previous,
+                      'key': str(key), 'native_activation': 'Review and trust the exact new native hook; trust is user-controlled'}))
     if options.action == 'plan':
         return
-    for directory in (root, wrapper.parent, credential.parent, state):
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    credential.parent.chmod(0o700)
-    atomic_write(archive, source.read_bytes())
-    atomic_write(config, (json.dumps({'url': url}) + '\n').encode())
-    atomic_write(wrapper, wrapper_bytes, 0o700)
-    if hook:
-        hook.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(hook, hook_bytes)
+    if source.suffix != '.pyz' or not archive_owned(source):
+        raise SetupError('Install requires the downloaded zipapp')
+    files = {'harness.pyz': source.read_bytes(), 'config.json': (json.dumps({'url': url}) + '\n').encode(),
+             'bin/channels': content}
+    for directory in (root, wrapper.parent, key.parent):
+        canonical_path(directory).mkdir(parents=True, exist_ok=True, mode=0o700)
+    key.parent.chmod(0o700)
+    if key_bytes is not None and not key.exists():
+        atomic_write(key, key_bytes)
+    for name, body in files.items():
+        atomic_write(root / name, body, 0o700 if name == 'bin/channels' else 0o600)
+        manifest['files'][name] = digest(body)
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(hook, hook_bytes)
+    record = {'project': str(project), 'client': options.client, 'path': str(hook), 'command': command}
+    manifest['hooks'] = [item for item in manifest['hooks'] if (item['project'], item['client']) != (str(project), options.client)] + [record]
+    atomic_write(root / 'install-manifest.json', (json.dumps(manifest, indent=2) + '\n').encode())
+
+
+def uninstall(options, root, project, clients):
+    manifest = manifest_data(root)
+    kept = []
+    removed = []
+    legacy = not (root / 'install-manifest.json').exists()
+    remaining = [item for item in manifest['hooks']
+                 if (item['project'], item['client']) not in {(str(project), client) for client in clients}]
+    if options.purge_key and remaining:
+        raise SetupError('Cannot purge shared key: another registered project or adapter still depends on this root')
+    refuse_live_exchanges(root)
+    refuse_busy_session_locks(root)
+    callbacks_removed = []
+    for client in clients:
+        hook = native_hook(project, client)
+        command = shlex.join([str(root / 'bin/channels'), '--client', client, 'hook'])
+        if hook.exists():
+            body, _ = hook_document(hook, command, remove=True)
+            if legacy and archive_owned(root / 'harness.pyz'):
+                document = json.loads(body)
+                for entry in document['hooks']['Stop']:
+                    entry['hooks'] = [item for item in entry['hooks'] if not legacy_callback(item, root)]
+                body = (json.dumps(document, indent=2) + '\n').encode()
+            before = json.loads(hook.read_text())
+            after = json.loads(body)
+            old_commands = [item.get('command') for entry in before.get('hooks', {}).get('Stop', []) for item in entry.get('hooks', [])]
+            new_commands = [item.get('command') for entry in after['hooks']['Stop'] for item in entry.get('hooks', [])]
+            callbacks_removed.extend({'path': str(hook), 'command': command} for command in old_commands if command not in new_commands)
+            if old_commands != new_commands:
+                atomic_write(hook, body)
+        manifest['hooks'] = [item for item in manifest['hooks'] if (item['project'], item['client']) != (str(project), client)]
+    if manifest['hooks']:
+        atomic_write(root / 'install-manifest.json', (json.dumps(manifest, indent=2) + '\n').encode())
+        kept.append(str(root))
+    elif legacy:
+        kept.append(str(root) + ' (legacy ownership across projects unknown; shared files preserved)')
+    else:
+        for name, expected in manifest['files'].items():
+            if name not in ('harness.pyz', 'config.json', 'bin/channels'):
+                raise SetupError('Unknown manifest file; preserving it')
+            path = canonical_path(root / name)
+            if path.exists() and digest(path.read_bytes()) == expected:
+                path.unlink()
+                removed.append(str(path))
+        remove_generated_state(root, removed)
+        (root / 'install-manifest.json').unlink(missing_ok=True)
+    key = canonical_path(root / '.env/channel.key')
+    if options.purge_key and key.exists():
+        key.unlink()
+        removed.append(str(key))
+    kept.extend(str(path) for path in root.iterdir())
+    # Report credential locations without traversing unknown directories (including manual venvs).
+    for directory in (root / ".env", root / "credentials"):
+        if directory.is_dir() and not directory.is_symlink():
+            kept.extend(str(path) for path in directory.iterdir())
+    if key.exists():
+        kept.append(str(key))
+    follow_up = None
+    if key.exists():
+        follow_up = shlex.join(['python3', str(Path(sys.argv[0]).absolute()), 'uninstall',
+                               '--target', str(root), '--project', str(project), '--purge-key'])
+    print(json.dumps({'action': 'uninstall', 'callbacks_removed': callbacks_removed,
+                      'removed': removed, 'kept': sorted(set(kept)), 'purge_key_command': follow_up}))
+
+
+def legacy_callback(hook, root):
+    binding = managed_binding(hook.get('command', ''))
+    return hook.get('type') == 'command' and binding is not None and binding[:2] == (str(root), '--profile')
+
+
+def session_directories(root):
+    directory = root / 'state'
+    if directory.is_symlink() or not directory.is_dir():
+        return []
+    return [session for session in directory.iterdir()
+            if not session.is_symlink() and session.is_dir() and re.fullmatch(r'[a-f0-9]{64}', session.name)]
+
+
+def generated_topic_paths(session):
+    return [session / 'exchange.json', *sorted(session.glob('topic-*.json'))]
+
+
+def refuse_busy_session_locks(root):
+    for session in session_directories(root):
+        for lock in [session / 'exchange.lock', *session.glob('topic-*.lock')]:
+            if lock.is_symlink() or not lock.is_file():
+                continue
+            descriptor = os.open(lock, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise SetupError('Session lock in use; stop hooks before uninstall') from None
+            finally:
+                os.close(descriptor)
+
+
+def refuse_live_exchanges(root):
+    from channels.exchange import read_state
+
+    for session in session_directories(root):
+        for path in generated_topic_paths(session):
+            try:
+                state = read_state(path)
+            except (OSError, ValueError, TypeError, KeyError):
+                continue
+            if state['deadline'] > time.time() or state['pending'] is not None:
+                raise SetupError('Live exchange or pending work present; ack and close exchanges and stop active hooks before uninstall')
+
+
+def valid_diagnostic(path):
+    from channels.exchange import validate_session_id
+
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        data = json.loads(path.read_text())
+        if set(data) != {'timestamp', 'state', 'session_id', 'callback_id'}:
+            return False
+        session_id = validate_session_id(data['session_id'])
+        if data['callback_id'] is not None:
+            validate_session_id(data['callback_id'])
+        return (digest(session_id.encode('ascii')) == path.parent.name
+                and type(data['timestamp']) in (int, float)
+                and data['state'] in ('absent', 'expired', 'wait', 'peer', 'error', 'config_error'))
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def remove_generated_state(root, removed):
+    for session in session_directories(root):
+        safe = True
+        for state in generated_topic_paths(session):
+            safe = remove_generated_topic(state, removed) and safe
+        diagnostic = session / 'last-hook.json'
+        if safe and valid_diagnostic(diagnostic):
+            diagnostic.unlink()
+            removed.append(str(diagnostic))
+        if not any(session.iterdir()):
+            session.rmdir()
+
+
+def remove_generated_topic(state, removed):
+    from channels.exchange import read_state
+
+    session = state.parent
+    try:
+        record = read_state(state)
+    except (OSError, ValueError, TypeError, KeyError):
+        record = None
+    # Unknown or live state also protects the session's diagnostics.
+    if state.is_symlink() or (state.exists() and (record is None or (record['deadline'] > time.time() or record['pending'] is not None))):
+        return False
+    lock = state.with_suffix('.lock')
+    descriptor = None
+    try:
+        if lock.exists() or lock.is_symlink():
+            if lock.is_symlink():
+                return False
+            descriptor = os.open(lock, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+            details = os.fstat(descriptor)
+            if not stat.S_ISREG(details.st_mode) or details.st_size or details.st_nlink != 1:
+                return False
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+        if record is not None and read_state(state) == record:
+            state.unlink()
+            removed.append(str(state))
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+    return True

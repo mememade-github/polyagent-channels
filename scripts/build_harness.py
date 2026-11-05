@@ -9,7 +9,7 @@ PACKAGES = ('httpx', 'httpcore', 'h11', 'certifi', 'idna', 'anyio', 'typing-exte
             'websockets', 'async-timeout', 'exceptiongroup')
 SOURCES = ('__init__.py', 'cli.py', 'exchange.py', 'client_config.py', 'setup.py')
 ENTRY = '''import sys
-if sys.argv[1:2] and sys.argv[1] in ('plan', 'install'):
+if sys.argv[1:2] and sys.argv[1] in ('plan', 'install', 'uninstall'):
     from channels.setup import main
     sys.exit(main())
 from channels.cli import main

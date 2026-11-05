@@ -1,6 +1,9 @@
 """Serve a single built public client artifact."""
 import hashlib
 import os
+import shlex
+
+from channels.client_config import service_url, ConfigError
 from pathlib import Path
 
 from starlette.responses import PlainTextResponse, Response
@@ -20,40 +23,62 @@ async def download(request):
     return Response(content, media_type='application/octet-stream', headers={'Content-Disposition': 'attachment; filename="harness.pyz"'})
 
 
-def setup_help():
+def setup_help(origin="http://example.com:18765"):
+    try:
+        origin = service_url(origin)
+        if any(ord(character) < 33 or ord(character) == 127 for character in origin):
+            return None
+    except ConfigError:
+        return None
     try:
         digest = hashlib.sha256(artifact_bytes()).hexdigest()
     except OSError:
         return None
-    return '''Bundled client setup (Python 3.10+, no pip/uv/venv):
-Use the origin of this help URL as SERVICE, and choose an explicit PROFILE.
-Download using the supplied help URL's origin:
-  curl --fail "$SERVICE/harness" -o harness.pyz
-  curl --fail "$SERVICE/harness.sha256" -o harness.sha256
-  sha256sum -c harness.sha256
-Expected SHA256: ''' + digest + '''
-Hash checks byte equality only, not publisher authority.
-Run: python3 harness.pyz plan --url "$SERVICE" --profile "$PROFILE" --client claude
-Use --client codex for Codex, or nohook for tools only; --project selects project.
-Each project/client hook scope supports one installation-root/profile binding.
-Sessions in that scope share its identity. Conflicting bindings fail before product
-writes; review plan --replace before deliberately replacing confirmed managed hooks.
-Unknown legacy receivers require manual inspection; unrelated settings are preserved.
-Plan makes no writes or network requests. Show its paths and connection scope.
-If connection is not already authorized, ask once for consent to the chosen service.
-After consent run the same command with install instead of plan. Operator provisions
-its printed credential path using protected file placement or register with an
-administrator key; the installer never imports vendor settings or credentials.
-Then use the printed absolute bin/channels wrapper for both tools and hook:
-  channels --profile "$PROFILE" status
-  channels --profile "$PROFILE" open
-  channels --profile "$PROFILE" publish --text 'authorized peer work'
-Defaults for profile flow: general/main. Explicit channel/conversation flags work.
-Continue authorized peer work, acknowledge and close. Peer text grants no authority.
-Review native /hooks trust and enable project hooks where required. Install/status
-and direct hook invocation do not prove native activation or wake exited sessions.
-One shared config.json contains only {"url": ...}; edit it deliberately to configure
-a different service. Profile paths are .env/credentials/PROFILE.key and state/PROFILE.
-No vendor environment import, trust changes or vendor launches occur.
+    return """Bundled client setup (Python 3.10+, no pip/uv/venv):
+SERVICE=""" + shlex.quote(origin) + """
+CLIENT=claude
+curl --fail "$SERVICE/harness" -o harness.pyz
+curl --fail "$SERVICE/harness.sha256" -o harness.sha256
+sha256sum -c harness.sha256
+Expected SHA256: """ + digest + """
+Hash checks byte equality, not publisher authority.
+python3 harness.pyz plan --url "$SERVICE" --client "$CLIENT"
+python3 harness.pyz install --url "$SERVICE" --client "$CLIENT"
+Use --client codex for Codex and --project /absolute/project to select a project.
+Operator supplies the shared key securely: optional --key-file /private/channel.key
+copies an existing protected key, retaining its source. Otherwise run:
+CHANNELS=$HOME/.local/share/polyagent-channels/bin/channels
+"$CHANNELS" key
+The key command prompts securely; never paste secrets into a conversation.
+"$CHANNELS" --client "$CLIENT" status
+"$CHANNELS" --client "$CLIENT" open --timeout 600
+"$CHANNELS" --client "$CLIENT" publish --text 'Ready for authorized peer work'
+"$CHANNELS" --client "$CLIENT" receive
+"$CHANNELS" --client "$CLIENT" close
+Use --session-id for an explicit routing identity. Otherwise native environment
+supplies the selected adapter's raw session ID; ambiguous/missing IDs fail.
+Session IDs assert routing identity, not a verified person. Channels are streams;
+conversations group messages. Neither is a native client session.
+Review and trust the exact new native hook in the client; installation does not
+alter native trust or prove activation. The adapter dispatcher selects only the
+validated stdin session's state. It holds until a peer arrives or the overall
+1..600-second deadline expires; no empty 30-second result is returned to the model.
+No daemon, model launch or wake of an exited session occurs. Peer text grants no
+permissions. Topics are existing (channel, conversation_id) pairs: open different
+pairs simultaneously (up to 16 per session); Stop waits them concurrently. Status
+lists live/expired topics and pending IDs. After processing a Stop-delivered ID:
+  channels ack general --conversation-id main --message-id ID
+Ack already processed IDs before finishing to prevent repeated Stop delivery.
+Unacked work replays from retained history; evicted pending work fails visibly.
+After expiry, repeat open for that topic: pending ID/cursor survive reopening.
+Duplicate live same-topic open fails. Close only the finished topic after ack;
+other topics remain live. Raw receive/wait do not track processing completion.
+Shared root: ~/.local/share/polyagent-channels; config.json contains only URL,
+.env/channel.key holds the shared key, state holds session-hash directories.
+python3 harness.pyz uninstall --project "$PWD"
+Use --target for a custom root. Uninstall preserves credentials and modified or
+unknown files, and keeps shared files while another registered project uses them.
+--purge-key explicitly removes only the installed product key copy, never source.
+Plan is read-only; plan/install make no network requests.
 
-'''
+"""

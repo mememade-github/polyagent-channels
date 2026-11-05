@@ -1,7 +1,6 @@
-"""URL-only shared configuration and explicit conventional profile paths."""
+"""URL-only shared configuration and conventional shared-key paths."""
 import json
 import os
-import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -32,10 +31,6 @@ class ConfigURLError(ConfigError):
     code = 'config_url_invalid'
 
 
-class ConfigProfileError(ConfigError):
-    code = 'config_profile_invalid'
-
-
 def service_url(value):
     try:
         parsed = urlsplit(value)
@@ -45,13 +40,6 @@ def service_url(value):
     except (ValueError, TypeError):
         raise ConfigURLError() from None
     return value.rstrip('/')
-
-
-def profile_paths(config, profile):
-    if not isinstance(profile, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', profile):
-        raise ConfigProfileError()
-    root = Path(os.path.abspath(Path(config).expanduser())).parent
-    return root / '.env/credentials' / (profile + '.key'), root / 'state' / profile
 
 
 def read_config(path):
@@ -73,18 +61,13 @@ def read_config(path):
 
 
 def apply_config(options, arguments):
-    if options.config is None and options.profile is None:
-        return
-    if options.profile is None:
-        raise ConfigProfileError()
-    options.config = os.path.abspath(Path(options.config or DEFAULT_ROOT / 'config.json').expanduser())
-    credential, state = profile_paths(options.config, options.profile)
-    url = read_config(options.config)
-    # Explicit flags retain precedence; vendor environment never selects profile paths.
-    for flag, field, value in (('--url', 'url', url), ('--credential-file', 'credential_file', str(credential)), ('--state-dir', 'state_dir', str(state))):
-        if not any(item == flag or item.startswith(flag + '=') for item in arguments):
-            setattr(options, field, value)
-    if hasattr(options, 'channel') and options.channel is None:
-        options.channel = 'general'
-    if hasattr(options, 'conversation_id') and options.conversation_id is None:
-        options.conversation_id = 'main'
+    root = Path(options.config).expanduser().absolute().parent if options.config else DEFAULT_ROOT
+    if options.config:
+        url = read_config(options.config)
+        if not any(item == '--url' or item.startswith('--url=') for item in arguments):
+            options.url = url
+    options.url = service_url(options.url)
+    if options.key_file is None:
+        options.key_file = str(root / '.env/channel.key')
+    if options.state_dir is None:
+        options.state_dir = str(root / 'state')
