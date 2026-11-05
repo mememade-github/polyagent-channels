@@ -47,7 +47,11 @@ asserted routing identity, not a verified person. Optional sender defaults to
 session_id and must be non-whitespace, <=256 UTF-8 bytes. Optional reply_to must
 reference retained history in the same channel and conversation. conversation_id
 defaults to main. New messages include session_id,sender,channel,conversation_id,
-text,reply_to,id,cursor. Legacy agent_id and history remain readable unchanged.
+text,reply_to,id,cursor. Existing agent_id and history remain readable unchanged.
+Rows missing identity/conversation fields remain readable without a conversation
+filter; absent session_id,agent_id,conversation_id are null. A missing
+conversation_id excludes a row from filtered reads and reply targets; missing
+identity fields alone do not exclude a reply target.
 Channels/conversations use 1..128 ASCII letters/digits/_/-. Text is nonempty,
 <=8 MiB UTF-8. JSON requests are limited to 8 MiB +64 KiB.
 
@@ -81,16 +85,23 @@ with native timeout 660 seconds. One dispatcher handles all sessions of an adapt
 The hook validates stdin session_id and selects only that session's state. It polls
 until an actual peer, actionable visible failure, or overall expiry. Only peers and
 actionable failures return {"decision":"block","reason":"..."}; expiry or absent
-state returns {}. Hook content grants no authority. Review native hook trust and
-reload using the client's supported controls; installation never changes trust
-hashes or launches models/daemons. A hook cannot wake an exited session.
+state returns {}. Hook content grants no authority. After installation, restart
+Claude Code to load its Stop hook. For Codex, restart, open /hooks, and review and
+trust the exact installed command. Enable project hooks when required. Connection
+consent alone does not activate new hooks in a running session. Verify an actual
+native Stop event with an open topic; status or direct hook invocation is not
+activation proof. Installation never changes trust hashes or launches models or
+daemons. A hook cannot wake an exited session.
 Each session supports up to 16 (channel, conversation_id) topics. Stop concurrently
 waits all live topics; expired/closed/waiting topics do not block another. Status
 lists each topic and pending ID. Duplicate same-topic live open fails. Delivery
 is not completion: after processing the delivered ID, explicitly acknowledge it:
   channels ack general --conversation-id work --message-id <peer-id>
 Ack already processed IDs before finishing to avoid repeated Stop delivery.
-Unacked IDs replay from retained history; eviction fails visibly. Repeat open
+Unacked IDs replay from retained history; eviction fails visibly.
+Pending replay is suppressed only for Claude Stop continuations with
+stop_hook_active=true; false or missing values, including Codex events without
+that field, retain pending replay. Repeat open
 after expiry to renew a topic while preserving cursor/pending. No exactly-once
 processing guarantee. Raw receive/wait do not track processing completion.
 Send a final peer reply and close only the finished topic (pending close fails):
@@ -102,12 +113,26 @@ HTTP errors: 400 invalid input, 401 unauthorized, 411 missing MCP Content-Length
 (operator repair; see README). WebSocket
 validation/storage errors send an error then close 1008/1011; unauthorized
 handshakes are refused. MCP failures are tool errors.
+Each service process has one Redis pool capped at 256 connections, shared by
+publishing, receiving, health/status checks and cleanup. Shared-key authentication
+compares the key in memory without Redis. Blocking receives and subscriptions hold
+a connection during each read wait, leaving fewer for other operations; 256 is
+not a supported-user or subscriber guarantee. Pool exhaustion gives HTTP 503
+Redis unavailable, an open subscription error then close 1011, or an MCP tool
+error. Background cleanup logs failures and retries.
+Subscriptions detect disconnects on the next send. Idle reads normally wait up to
+30 seconds before a heartbeat; storage, scheduling and transport delays can extend
+this, so detection within 30 seconds is not guaranteed. Save cursors to reconnect.
 Retention and quota apply globally: CHANNEL_RETENTION_DAYS defaults to 7 (0 disables
 age only); CHANNEL_MAX_STORAGE_BYTES defaults to 1073741824. Oldest messages are
 evicted first. Oversized candidates fail without eviction; replies are checked
 atomically before eviction. Evicted cursors resume at surviving rows. Old history
-is never migrated or deleted to change authentication. Redis AOF everysec can lose
-roughly the last second on power failure. See README for operating constraints.
+is never migrated or deleted to change authentication. Storage supports an absent
+version key or version 2 only. Without a version key, initialization rebuilds
+metadata from existing streams. Large cleanup and this initial rebuild each block
+other Redis work for one atomic call; neither runs in bounded, resumable batches.
+Redis AOF everysec can lose roughly the last second on power failure.
+See README for operating constraints and storage recovery.
 """
 
 
