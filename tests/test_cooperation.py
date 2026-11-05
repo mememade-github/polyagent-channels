@@ -319,3 +319,39 @@ def test_stop_stdin_routes_two_same_vendor_sessions_with_two_topics(tmp_path, mo
     assert ('second topic result' in decision['reason'] and 'second' in decision['reason']
             and sum(topic['pending'] is not None for topic in selected) == 1
             and all(topic['pending'] is None for topic in other))
+
+
+def test_native_stop_continuation_skips_pending_but_delivers_other_topic(tmp_path, monkeypatch, capsys):
+    directory = tmp_path / 'state'
+    for name in ('deferred', 'other'):
+        exchange.open_exchange(directory, 'native-a', exchange.new_state(
+            'native-a', {**TARGET, 'conversation_id': name}, 600))
+    phase = ['initial']
+    reads = []
+    async def handler(request):
+        topic = request.url.params['conversation_id']
+        reads.append((phase[0], topic))
+        if phase[0] == 'initial' and topic == 'other':
+            await asyncio.Event().wait()
+        return httpx.Response(200, json={'messages': [
+            {'id': '7-0', 'session_id': 'native-b', 'text': topic + ' work'}], 'cursor': '7-0'})
+    monkeypatch.setattr(cli, 'read_secret', lambda path: 'synthetic-key')
+    monkeypatch.setattr(cli, 'exchange_client', lambda options, secret: httpx.AsyncClient(
+        base_url='http://synthetic/', transport=httpx.MockTransport(handler)))
+    options = cli.command_parser().parse_args(['--state-dir', str(directory), 'hook'])
+    def stop(active):
+        monkeypatch.setattr('sys.stdin', io.StringIO(json.dumps({
+            'session_id': 'native-a', 'hook_event_name': 'Stop', 'stop_hook_active': active})))
+        cli.run_hook(options)
+        return json.loads(capsys.readouterr().out)
+    initial = stop(False)
+    phase[0] = 'continuation'
+    other = stop(True)
+    repeats = [stop(True) for ignored in range(3)]
+    pending = [exchange.read_state(path) for path in exchange.list_states(directory, 'native-a')]
+    phase[0] = 'resume'
+    resumed = stop(False)
+    assert ('deferred work' in initial['reason'] and 'other work' in other['reason']
+            and repeats == [{}, {}, {}] and ('continuation', 'deferred') not in reads
+            and all(topic['pending'] == '7-0' and topic['cursor'] == '0-0' for topic in pending)
+            and resumed['decision'] == 'block' and 'work' in resumed['reason'])

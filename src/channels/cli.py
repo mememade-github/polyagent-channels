@@ -244,7 +244,16 @@ def run_hook(options):
             print('{}')
             return
         paths = exchange.list_states(options.state_dir, options.session_id)
-        live = [path for path in paths if exchange.read_state(path)['deadline'] > time.time()]
+        live = []
+        for path in paths:
+            state = exchange.read_state(path)
+            if state['deadline'] <= time.time():
+                continue
+            # Native Claude marks Stop-hook continuations; pending is still work,
+            # but replay belongs to the next initial Stop, not this continuation.
+            if event.get('stop_hook_active') is True and state['pending'] is not None:
+                continue
+            live.append(path)
         diagnostic = 'expired' if paths else 'absent'
         if live:
             key = read_secret(options.key_file)
