@@ -244,7 +244,7 @@ def test_python310_bundle_installed_wrapper_and_uninstall(artifact, tmp_path):
 
 def test_closed_diagnostic_cleanup_and_concise_kept_output(artifact, tmp_path):
     from polyagent_channels import exchange
-    from polyagent_channels.cli import record_hook
+    from polyagent_channels.cli import record_hook, connection_probe
     from argparse import Namespace
 
     installed = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
@@ -253,7 +253,8 @@ def test_closed_diagnostic_cleanup_and_concise_kept_output(artifact, tmp_path):
     state = exchange.new_state(session_id, {'channel': 'general', 'conversation_id': 'main', 'cursor': '0-0'}, 60)
     exchange.open_exchange(root / 'state', session_id, state)
     exchange.close_exchange(root / 'state', session_id, state)
-    record_hook(Namespace(session_id=session_id, state_dir=root / 'state'), 'peer', 'callback-1')
+    record_hook(Namespace(session_id=session_id, state_dir=root / 'state'), 'callback_observed', 'callback-1')
+    connection_probe(Namespace(session_id=session_id, state_dir=root / 'state'))
     directory = exchange.session_directory(root / 'state', session_id)
     inode = (directory / 'exchange.lock').stat().st_ino
     manual = root / 'manual-venv/lib'
@@ -265,9 +266,10 @@ def test_closed_diagnostic_cleanup_and_concise_kept_output(artifact, tmp_path):
     result = invoke(artifact, 'uninstall', '--target', root, '--project', tmp_path, cwd=tmp_path)
     output = json.loads(result.stdout)
     assert (installed.returncode, result.returncode, (directory / 'last-hook.json').exists(),
+            (directory / 'connection-probe.json').exists(),
             (directory / 'exchange.lock').stat().st_ino, (root / 'harness.pyz').exists(),
             len(output['kept']) < 10, str(key) in output['kept'], '--purge-key' in output['purge_key_command'],
-            len(output['callbacks_removed']), 'synthetic-protected-key' in result.stdout) == (0, 0, False, inode, False, True, True, True, 1, False)
+            len(output['callbacks_removed']), 'synthetic-protected-key' in result.stdout) == (0, 0, False, False, inode, False, True, True, True, 1, False)
 
 
 def test_purge_shared_key_refused_before_callback_changes(artifact, tmp_path):
@@ -325,7 +327,7 @@ def test_busy_closed_session_lock_refuses_uninstall(artifact, tmp_path):
                 (root / 'harness.pyz').exists()) == (1, inode, True)
 
 
-def test_active_installed_hook_reuses_installation_and_refuses_changes(artifact, tmp_path):
+def test_active_installed_cli_reuses_installation_and_refuses_changes(artifact, tmp_path):
     import fcntl
     import time
 
@@ -343,8 +345,14 @@ def test_active_installed_hook_reuses_installation_and_refuses_changes(artifact,
     state.write_text('session state must remain untouched')
     preserved = {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
                  for path in [hook, *root.rglob('*')] if path.is_file()}
-    process = subprocess.Popen([sys.executable, str(root / 'harness.pyz'), '--config',
-                                str(root / 'config.json'), 'hook'], stdin=subprocess.PIPE,
+    # Hold the real installed lifecycle lock without relying on malformed hook input.
+    active_cli = ('import sys\nfrom pathlib import Path\n'
+                  'sys.path.insert(0, sys.argv[1])\n'
+                  'from polyagent_channels.setup import lifecycle_lock\n'
+                  'with lifecycle_lock(Path(sys.argv[2])):\n'
+                  '    sys.stdin.readline()\n'
+                  'print("{}")\n')
+    process = subprocess.Popen([sys.executable, '-c', active_cli, str(root / 'harness.pyz'), str(root)], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         with (root / '.lifecycle.lock').open('r') as lock:
@@ -356,7 +364,7 @@ def test_active_installed_hook_reuses_installation_and_refuses_changes(artifact,
                 except BlockingIOError:
                     break
                 if time.monotonic() >= deadline:
-                    pytest.fail('Hook did not acquire lifecycle lock')
+                    pytest.fail('Installed CLI did not acquire lifecycle lock')
                 time.sleep(.01)
         reused = invoke(artifact, 'install', *arguments, cwd=tmp_path)
         assert reused.returncode == 0 and json.loads(reused.stdout)['status'] == 'already_installed'
@@ -380,7 +388,7 @@ def test_active_installed_hook_reuses_installation_and_refuses_changes(artifact,
             assert (result.returncode, hook.read_bytes(), 'Installation in use' in result.stderr) == (1, before, True)
         assert {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
                 for path in preserved} == preserved
-        output, errors = process.communicate('{"session_id":"synthetic-hook"}', timeout=5)
+        output, errors = process.communicate('release\n', timeout=5)
         assert (process.returncode, json.loads(output), errors) == (0, {}, '')
     finally:
         if process.poll() is None:

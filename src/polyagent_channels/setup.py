@@ -423,7 +423,7 @@ def generated_topic_paths(session):
 
 def refuse_busy_session_locks(root):
     for session in session_directories(root):
-        for lock in [session / 'exchange.lock', *session.glob('topic-*.lock')]:
+        for lock in [session / 'exchange.lock', session / 'connection-probe.lock', *session.glob('topic-*.lock')]:
             if lock.is_symlink() or not lock.is_file():
                 continue
             descriptor = os.open(lock, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -463,7 +463,7 @@ def valid_diagnostic(path):
             validate_session_id(data['callback_id'])
         return (digest(session_id.encode('ascii')) == path.parent.name
                 and type(data['timestamp']) in (int, float)
-                and data['state'] in ('absent', 'expired', 'wait', 'peer', 'error', 'config_error'))
+                and data['state'] in ('absent', 'expired', 'wait', 'waiting', 'callback_observed', 'peer', 'error', 'config_error'))
     except (OSError, ValueError, TypeError, KeyError):
         return False
 
@@ -477,8 +477,25 @@ def remove_generated_state(root, removed):
         if safe and valid_diagnostic(diagnostic):
             diagnostic.unlink()
             removed.append(str(diagnostic))
+        probe = session / 'connection-probe.json'
+        if safe and valid_connection_probe(probe):
+            probe.unlink()
+            removed.append(str(probe))
         if not any(session.iterdir()):
             session.rmdir()
+
+
+def valid_connection_probe(path):
+    from polyagent_channels.exchange import validate_session_id
+
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        data = json.loads(path.read_text())
+        return (set(data) == {'session_id'}
+                and digest(validate_session_id(data['session_id']).encode('ascii')) == path.parent.name)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
 
 
 def remove_generated_topic(state, removed):

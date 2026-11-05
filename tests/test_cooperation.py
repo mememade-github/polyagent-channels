@@ -142,6 +142,10 @@ def test_native_adapters_exchange_through_http_contract(tmp_path, monkeypatch, c
         routes.append((request.method, request.url.path))
         if request.url.path == '/status':
             return httpx.Response(200, json={'status': 'ready'})
+        if request.url.path == '/sessions':
+            return httpx.Response(200, json={'session': json.loads(request.content)})
+        if request.url.path.endswith('/cursor'):
+            return httpx.Response(200, json={'cursor': str(len(rows)) + '-0', 'time_ms': 1000})
         if request.method == 'POST':
             row = {**json.loads(request.content), 'id': str(len(rows) + 1) + '-0'}
             rows.append(row)
@@ -204,6 +208,22 @@ def test_hook_cycles_save_cursor_without_empty_model_polls(tmp_path, monkeypatch
     monkeypatch.setattr(exchange, 'wait_for_peer', wait)
     result = asyncio.run(exchange.hook_decision(None, path))
     assert result['decision'] == 'block' and calls == [('0-0', 30), ('7-0', 30)]
+
+
+def test_hook_heartbeats_before_each_bounded_wait(tmp_path, monkeypatch):
+    exchange.open_exchange(tmp_path, 'native-a', state())
+    path = exchange.owned_state(tmp_path, 'native-a')
+    calls = []
+    async def heartbeat():
+        calls.append('heartbeat')
+    async def wait(client, target, timeout):
+        calls.append(('wait', target['cursor'], timeout))
+        if target['cursor'] == '0-0':
+            return {'type': 'timeout', 'cursor': '7-0'}
+        return {'id': '8-0', 'session_id': 'native-b', 'text': 'peer'}
+    monkeypatch.setattr(exchange, 'wait_for_peer', wait)
+    delivered = asyncio.run(exchange.hook_decision(None, path, heartbeat=heartbeat))
+    assert delivered['decision'] == 'block' and calls == ['heartbeat', ('wait', '0-0', 30), 'heartbeat', ('wait', '7-0', 30)]
 
 
 def test_hook_close_during_poll_cancels_without_error(tmp_path, monkeypatch):
@@ -303,6 +323,8 @@ def test_stop_stdin_routes_two_same_vendor_sessions_with_two_topics(tmp_path, mo
     key.write_text('synthetic-key')
     key.chmod(0o600)
     async def handler(request):
+        if request.url.path == '/sessions':
+            return httpx.Response(200, json={'session': json.loads(request.content)})
         if request.url.params['conversation_id'] == 'first':
             await asyncio.Event().wait()
         return httpx.Response(200, json={'messages': [
@@ -329,6 +351,8 @@ def test_native_stop_continuation_skips_pending_but_delivers_other_topic(tmp_pat
     phase = ['initial']
     reads = []
     async def handler(request):
+        if request.url.path == '/sessions':
+            return httpx.Response(200, json={'session': json.loads(request.content)})
         topic = request.url.params['conversation_id']
         reads.append((phase[0], topic))
         if phase[0] == 'initial' and topic == 'other':

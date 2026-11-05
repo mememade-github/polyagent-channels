@@ -38,7 +38,7 @@ class CredentialAuth:
     async def __call__(self, scope, receive, send):
         if scope['type'] not in ('http', 'websocket'):
             return await self.application(scope, receive, send)
-        if scope['type'] == 'http' and scope['path'] in ('/help', '/health', '/harness', '/harness.sha256'):
+        if scope['type'] == 'http' and scope['path'] in ('/help', '/help/reference', '/health', '/harness', '/harness.sha256'):
             return await self.application(scope, receive, send)
         body_status = self.mcp_body_status(scope)
         if body_status:

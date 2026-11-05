@@ -1,14 +1,17 @@
 import asyncio
 import io
 import json
+import time
 import threading
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from polyagent_channels import cli
+from polyagent_channels import cli, exchange
 from polyagent_channels.client_config import apply_config
 
 
@@ -50,6 +53,41 @@ def test_explicit_neutral_override(monkeypatch):
 def test_required_session_is_actionable():
     with pytest.raises(ValueError, match='session_missing'):
         cli.select_session(options('publish', '--text', 'hi'))
+
+
+def test_manual_hook_tty_input_fails_immediately(monkeypatch):
+    stream = io.StringIO()
+    monkeypatch.setattr(stream, 'isatty', lambda: True)
+    monkeypatch.setattr('sys.stdin', stream)
+    with pytest.raises(cli.HookInputRequired, match='native hook event JSON required; do not invoke manually'):
+        cli.read_hook_input()
+
+
+@pytest.mark.parametrize('payload,exit_code', [('', 1), ('{"session_id":', 1), ('{"session_id":"native-stdin"}', 0)])
+def test_hook_pipe_input_is_bounded_and_complete_event_needs_no_eof(tmp_path, payload, exit_code):
+    process = subprocess.Popen([sys.executable, '-m', 'polyagent_channels.cli', '--state-dir', str(tmp_path / 'state'), 'hook'],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        if payload:
+            process.stdin.write(payload)
+            process.stdin.flush()
+        # Keep the writing pipe open, as an accidental direct tool invocation does.
+        process.wait(timeout=3)
+        output, errors = process.communicate(timeout=1)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.communicate(timeout=2)
+    assert process.returncode == exit_code and json.loads(output) == {}
+    assert ('native hook event JSON required; do not invoke manually' in errors) if exit_code else errors == ''
+
+
+@pytest.mark.parametrize('missing_config', [False, True])
+def test_empty_hook_input_returns_failure_even_when_config_is_missing(tmp_path, missing_config):
+    arguments = ['--config', str(tmp_path / 'missing.json')] if missing_config else []
+    result = subprocess.run([sys.executable, '-m', 'polyagent_channels.cli', '--state-dir', str(tmp_path / 'state'),
+                             *arguments, 'hook'], input='', capture_output=True, text=True, timeout=3)
+    assert result.returncode == 1 and 'native hook event JSON required; do not invoke manually' in result.stderr
 
 
 def test_publish_attaches_session_and_default_sender(monkeypatch):
@@ -96,6 +134,35 @@ def test_key_source_permissions(tmp_path):
     source.chmod(0o644)
     with pytest.raises(ValueError, match='key_permissions'):
         cli.read_secret(source)
+
+
+def test_concurrent_identical_key_writers_never_observe_an_empty_key(tmp_path, monkeypatch):
+    destination = tmp_path / '.env/channel.key'
+    selected = options('--key-file', str(destination), 'key')
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'synthetic-concurrent-key')
+    opened, release = threading.Event(), threading.Event()
+    original = cli.os.fdopen
+    failures = []
+    def pause_first_writer(*args, **kwargs):
+        if threading.current_thread().name == 'key-writer':
+            opened.set()
+            assert release.wait(5)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(cli.os, 'fdopen', pause_first_writer)
+    def write_first():
+        try:
+            cli.save_key(selected, report=False)
+        except Exception as error:
+            failures.append(type(error).__name__)
+    worker = threading.Thread(target=write_first, name='key-writer')
+    worker.start()
+    try:
+        assert opened.wait(5)
+        cli.save_key(selected, report=False)
+    finally:
+        release.set()
+        worker.join(5)
+    assert not failures and not worker.is_alive() and cli.read_secret(destination) == 'synthetic-concurrent-key'
 
 
 def test_status_without_session_probes_status_only(monkeypatch, capsys):
@@ -222,31 +289,148 @@ def test_status_session_is_optional_even_when_native_environments_ambiguous(monk
     assert cli.select_session(options('status'), required=False) is None
 
 
-def test_concurrent_identical_key_writers_never_observe_an_empty_key(tmp_path, monkeypatch):
-    destination = tmp_path / '.env/channel.key'
-    selected = options('--key-file', str(destination), 'key')
-    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'synthetic-concurrent-key')
-    opened, release = threading.Event(), threading.Event()
-    original = cli.os.fdopen
-    failures = []
-    def pause_first_writer(*args, **kwargs):
-        if threading.current_thread().name == 'key-writer':
-            opened.set()
-            assert release.wait(5)
-        return original(*args, **kwargs)
-    monkeypatch.setattr(cli.os, 'fdopen', pause_first_writer)
-    def write_first():
-        try:
-            cli.save_key(selected, report=False)
-        except Exception as error:
-            failures.append(type(error).__name__)
-    worker = threading.Thread(target=write_first, name='key-writer')
-    worker.start()
-    try:
-        assert opened.wait(5)
-        cli.save_key(selected, report=False)
-    finally:
-        release.set()
-        worker.join(5)
-    assert not failures and not worker.is_alive() and cli.read_secret(destination) == 'synthetic-concurrent-key'
+@pytest.fixture
+def connection_client(tmp_path, monkeypatch, capsys):
+    secret_dir = tmp_path / '.env'
+    secret_dir.mkdir(mode=0o700)
+    key = secret_dir / 'channel.key'
+    key.write_text('synthetic-connection-key')
+    key.chmod(0o600)
+    config = tmp_path / 'config.json'
+    config.write_text('{"url":"http://synthetic-service"}')
+    requests = []
+    messages = [{'id': '1-0', 'session_id': 'old-peer', 'conversation_id': 'main', 'text': 'old work'}]
+    presence = []
+    on_snapshot = []
+    def handler(request):
+        requests.append(request)
+        assert request.headers['Authorization'] == 'Bearer synthetic-connection-key'
+        if request.url.path == '/sessions':
+            if request.method == 'POST':
+                presence.append(json.loads(request.content))
+            return httpx.Response(200, json={'sessions': presence})
+        if request.url.path == '/status':
+            return httpx.Response(200, json={'status': 'ready'})
+        if request.url.path.endswith('/cursor'):
+            cursor = messages[-1]['id'] if messages else '0-0'
+            for action in on_snapshot:
+                action()
+            return httpx.Response(200, json={'cursor': cursor, 'time_ms': 1000})
+        if request.method == 'POST':
+            topic = exchange.owned_state(tmp_path / 'state', 'native-self', {'channel': 'general', 'conversation_id': 'main'})
+            assert topic is not None, 'Reception must be open before a peer can reply to this publish'
+            row = {**json.loads(request.content), 'id': str(len(messages) + 1) + '-0'}
+            messages.append(row)
+            return httpx.Response(200, json=row)
+        cursor = request.url.params['cursor']
+        conversation = request.url.params.get('conversation_id')
+        result = [row for row in messages if int(row['id'].split('-')[0]) > int(cursor.split('-')[0])
+                  and (conversation is None or row['conversation_id'] == conversation)]
+        return httpx.Response(200, json={'messages': result, 'cursor': messages[-1]['id'] if messages else cursor})
+    original_sync, original_async = httpx.Client, httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(cli.httpx, 'Client', lambda **settings: original_sync(transport=transport, **settings))
+    monkeypatch.setattr(cli.httpx, 'AsyncClient', lambda **settings: original_async(transport=transport, **settings))
+    def invoke(*arguments, stdin=None):
+        selected = options('--config', str(config), '--client', 'codex', '--session-id', 'native-self', *arguments)
+        if stdin is not None:
+            monkeypatch.setattr('sys.stdin', io.StringIO(json.dumps(stdin)))
+        cli.run(selected)
+        return json.loads(capsys.readouterr().out)
+    return SimpleNamespace(invoke=invoke, requests=requests, messages=messages, presence=presence,
+                           directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot)
 
+
+def test_connect_reuses_key_preserves_pending_and_is_idempotent(connection_client, monkeypatch):
+    session = connection_client
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: pytest.fail('an existing protected key must be reused'))
+    first = session.invoke('connect', '--name', 'reviewer')
+    path = exchange.owned_state(session.directory, 'native-self')
+    original = exchange.read_state(path)
+    exchange.write_state(path, {**original, 'pending': '2-0', 'deadline': time.time() - 1})
+    second = session.invoke('connect')
+    assert (first['reception'] == 'hook_unobserved' and second['topic']['cursor'] == '1-0'
+            and second['topic']['pending'] == '2-0'
+            and sum(request.url.path.endswith('/cursor') for request in session.requests) == 1
+            and session.presence[0]['name'] == 'reviewer' and 'name' not in session.presence[1])
+
+
+def test_connect_missing_key_prompts_once_without_printing_it(connection_client, monkeypatch):
+    session = connection_client
+    session.key.unlink()
+    prompts = []
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: prompts.append(prompt) or 'synthetic-connection-key')
+    result = session.invoke('connect')
+    assert len(prompts) == 1 and 'synthetic-connection-key' not in json.dumps(result)
+
+
+def test_publish_opens_reception_before_sending_and_keeps_pre_reply_cursor(connection_client):
+    session = connection_client
+    session.on_snapshot.append(lambda: session.messages.append({
+        'id': '2-0', 'session_id': 'current-peer', 'conversation_id': 'main', 'text': 'racing peer message'}))
+    published = session.invoke('publish', '--text', 'current task')
+    session.messages.append({'id': '4-0', 'session_id': 'current-peer', 'conversation_id': 'main', 'text': 'current reply'})
+    received = session.invoke('receive', '--timeout', '0')
+    paths = [request.url.path for request in session.requests]
+    assert (published['reception'] == 'hook_unobserved' and published['next_action']
+            and paths.index('/channels/general/cursor') < paths.index('/channels/general/messages')
+            and [row['text'] for row in received['messages']] == ['racing peer message', 'current task', 'current reply']
+            and exchange.read_state(exchange.owned_state(session.directory, 'native-self'))['cursor'] == '1-0')
+
+
+def test_receive_defaults_to_current_main_and_history_discovery_is_explicit(connection_client):
+    session = connection_client
+    current = session.invoke('receive', '--timeout', '0')
+    session.messages.append({'id': '2-0', 'session_id': 'other-peer', 'conversation_id': 'other', 'text': 'unrelated task'})
+    main = session.invoke('receive', '--cursor', '0-0', '--timeout', '0')
+    all_topics = session.invoke('receive', '--all-conversations', '--cursor', '0-0', '--timeout', '0')
+    assert (current['messages'] == [] and current['ack_required'] is False
+            and 'only IDs previously delivered by Stop' in current['next_action']
+            and [row['text'] for row in main['messages']] == ['old work']
+            and len(all_topics['messages']) == 2)
+
+
+def test_open_defaults_fresh_and_reopen_preserves_pending_while_history_is_explicit(connection_client):
+    session = connection_client
+    opened = session.invoke('open', '--timeout', '60')
+    path = exchange.owned_state(session.directory, 'native-self')
+    saved = {**exchange.read_state(path), 'deadline': time.time() - 1, 'pending': '2-0'}
+    exchange.write_state(path, saved)
+    resumed = session.invoke('open')
+    historical = session.invoke('open', '--conversation-id', 'historical', '--cursor', '0-0')
+    assert (opened['cursor'] == '1-0' and resumed['cursor'] == '1-0' and resumed['pending'] == '2-0'
+            and historical['cursor'] == '0-0'
+            and sum(request.url.path.endswith('/cursor') for request in session.requests) == 1)
+
+
+@pytest.mark.parametrize('callback_state', ['waiting', 'callback_observed', 'peer', 'expired'])
+def test_stale_callback_is_distinct_from_current_reception(connection_client, callback_state):
+    session = connection_client
+    session.invoke('connect')
+    path = exchange.session_directory(session.directory, 'native-self') / 'last-hook.json'
+    path.write_text(json.dumps({'timestamp': time.time() - 120, 'state': callback_state,
+                               'session_id': 'native-self', 'callback_id': 'old'}))
+    result = session.invoke('connect')
+    assert result['reception'] == 'callback_stale' and result['callback_age_seconds'] >= 120 and 'stale' in result['next_action']
+
+
+def test_connect_callback_probe_is_once_and_does_not_consume_peer_work(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'new peer work'})
+    observed = session.invoke('hook', stdin={'session_id': 'native-self', 'hook_event_id': 'probe:1'})
+    before_delivery = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    delivered = session.invoke('hook', stdin={'session_id': 'native-self', 'hook_event_id': 'delivery:1'})
+    assert ('Connection callback observed' in observed['reason'] and before_delivery['pending'] is None
+            and 'new peer work' in delivered['reason']
+            and exchange.read_state(exchange.owned_state(session.directory, 'native-self'))['pending'] == '2-0'
+            and any(row['state'] == 'waiting' and row['ttl_seconds'] == 90 for row in session.presence))
+
+
+def test_peers_lists_service_announcements_and_close_retires_last_topic(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    peers = session.invoke('peers')
+    session.invoke('close')
+    assert (peers['sessions'][0]['client'] == 'codex' and session.requests[-1].url.path == '/sessions'
+            and session.presence[-1]['state'] == 'closed' and session.presence[-1]['ttl_seconds'] == 1)

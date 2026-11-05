@@ -4,7 +4,9 @@ import getpass
 import asyncio
 import contextlib
 import json
+import math
 import os
+import select
 import sys
 import tempfile
 import time
@@ -16,6 +18,38 @@ from websockets.asyncio.client import connect
 
 from polyagent_channels import exchange
 from polyagent_channels.client_config import ConfigError, apply_config
+
+
+class HookInputRequired(ValueError):
+    """The callback was invoked without a complete native hook event."""
+
+
+def read_hook_input():
+    failure = 'native hook event JSON required; do not invoke manually'
+    if sys.stdin.isatty():
+        raise HookInputRequired(failure)
+    try:
+        descriptor = sys.stdin.fileno()
+    except (AttributeError, OSError, ValueError):
+        try:
+            return json.load(sys.stdin)
+        except (ValueError, TypeError):
+            raise HookInputRequired(failure) from None
+    deadline = time.monotonic() + 1
+    content = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([descriptor], [], [], remaining)[0]:
+            raise HookInputRequired(failure)
+        chunk = os.read(descriptor, 65536)
+        if not chunk:
+            raise HookInputRequired(failure)
+        content.extend(chunk)
+        try:
+            return json.loads(content)
+        except (ValueError, UnicodeError):
+            # A pipe may split a valid event across reads; the overall deadline remains bounded.
+            continue
 
 
 def command_parser():
@@ -30,6 +64,12 @@ def command_parser():
     key = commands.add_parser('key', help='Save the shared key from a protected file or hidden prompt')
     key.add_argument('--source-file')
     key.add_argument('--replace-key', action='store_true')
+    connection = commands.add_parser('connect', help='Connect this session and open automatic reception for a topic')
+    connection.add_argument('channel', nargs='?', default='general')
+    connection.add_argument('--conversation-id', default='main')
+    connection.add_argument('--name', help='Display name; asserted by this session, not verified identity')
+    connection.add_argument('--timeout', type=exchange.positive_seconds, default=exchange.EXCHANGE_TIMEOUT)
+    commands.add_parser('peers', help='List unexpired session announcements; these do not prove a peer is online')
     publisher = commands.add_parser('publish', help='Publish text, --file PATH or --file - for stdin')
     publisher.add_argument('channel', nargs='?', default='general')
     publisher.add_argument('--conversation-id', default='main')
@@ -41,8 +81,11 @@ def command_parser():
     for name in ('receive', 'listen'):
         reader = commands.add_parser(name, help='Read after cursor' if name == 'receive' else 'Active WebSocket notifications')
         reader.add_argument('channel', nargs='?', default='general')
-        reader.add_argument('--conversation-id', help='Omit to read all conversations')
-        reader.add_argument('--cursor', default='0-0')
+        reader.add_argument('--conversation-id', default='main' if name == 'receive' else None)
+        reader.add_argument('--all-conversations', action='store_const', const=None, dest='conversation_id',
+                            help='Explicitly discover messages across conversations')
+        reader.add_argument('--cursor', default=None if name == 'receive' else '0-0',
+                            help='Explicit history cursor; 0-0 opts into all retained history')
         reader.add_argument('--timeout', type=int, default=30, help='seconds; listen 0 means unlimited')
     commands.add_parser('status', help='Probe shared-key access and this session callback status')
     add_exchange_commands(commands)
@@ -60,7 +103,8 @@ def add_exchange_commands(commands):
         command.add_argument('channel', nargs='?', default='general')
         command.add_argument('--conversation-id', default='main')
         if name not in ('close', 'ack'):
-            command.add_argument('--cursor', default='0-0')
+            command.add_argument('--cursor', default=None if name == 'open' else '0-0',
+                                 help='Open defaults to the fresh or saved cursor; 0-0 explicitly reads retained history')
         if name == 'ack':
             command.add_argument('--message-id', required=True)
         if name == 'wait':
@@ -161,6 +205,18 @@ def save_key(options, report=True):
         print(json.dumps({'status': status, 'key_path': str(path)}))
 
 
+def connection_key(options):
+    try:
+        return read_secret(options.key_file)
+    except ValueError as error:
+        if not str(error).startswith('key_missing:'):
+            raise
+    options.source_file = None
+    options.replace_key = False
+    save_key(options, report=False)
+    return read_secret(options.key_file)
+
+
 def select_session(options, required=True):
     if options.session_id is not None:
         return exchange.validate_session_id(options.session_id)
@@ -182,7 +238,7 @@ def exchange_target(options):
     target = {'channel': options.channel, 'conversation_id': options.conversation_id}
     exchange.validate_identifier(target['channel'])
     exchange.validate_identifier(target['conversation_id'])
-    if options.command not in ('close', 'ack'):
+    if options.command not in ('close', 'ack') and options.cursor is not None:
         exchange.validate_cursor(options.cursor)
         target['cursor'] = options.cursor
     return target
@@ -191,6 +247,108 @@ def exchange_target(options):
 def exchange_client(options, key):
     return httpx.AsyncClient(base_url=options.url.rstrip('/') + '/', timeout=70,
                              headers={'Authorization': 'Bearer ' + key})
+
+
+def presence_payload(options, state='connected', ttl_seconds=600):
+    adapter = options.client
+    if adapter is None:
+        selected = [client for client, name in (('claude', 'CLAUDE_CODE_SESSION_ID'), ('codex', 'CODEX_THREAD_ID'))
+                    if os.environ.get(name) == options.session_id]
+        adapter = selected[0] if len(selected) == 1 else 'cli'
+    payload = {'session_id': options.session_id, 'client': adapter, 'state': state, 'ttl_seconds': ttl_seconds}
+    if getattr(options, 'name', None) is not None:
+        payload['name'] = options.name
+    return payload
+
+
+def announce_presence(options, key, state='connected', ttl_seconds=600):
+    with httpx.Client(timeout=10) as client:
+        response = client.post(options.url.rstrip('/') + '/sessions',
+                               headers={'Authorization': 'Bearer ' + key}, json=presence_payload(options, state, ttl_seconds))
+        response.raise_for_status()
+
+
+def ensure_topic(options, key):
+    target = {'channel': options.channel, 'conversation_id': options.conversation_id or 'main'}
+    for value in target.values():
+        exchange.validate_identifier(value)
+    path = exchange.owned_state(options.state_dir, options.session_id, target)
+    previous = exchange.read_state(path) if path else None
+    if previous and previous['deadline'] > time.time() and options.command != 'connect':
+        return previous
+    cursor = previous['cursor'] if previous else None
+    if cursor is None:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(options.url.rstrip('/') + '/channels/' + options.channel + '/cursor',
+                                  headers={'Authorization': 'Bearer ' + key})
+            response.raise_for_status()
+            cursor = response.json()['cursor']
+        exchange.validate_cursor(cursor)
+    timeout = options.timeout if options.command == 'connect' else exchange.EXCHANGE_TIMEOUT
+    state = exchange.new_state(options.session_id, {**target, 'cursor': cursor}, timeout)
+    return exchange.open_exchange(options.state_dir, options.session_id, state, reuse=True)
+
+
+def reception_status(options):
+    result = {'reception': 'not_open', 'next_action': 'Run connect for the topic before waiting for peer replies.',
+              'native_activation': 'Local callback diagnostics do not verify native hook trust or activation.'}
+    if not options.session_id:
+        result['next_action'] = 'Select --client in its native session, or provide --session-id.'
+        return result
+    topics = [exchange.read_state(path) for path in exchange.list_states(options.state_dir, options.session_id)]
+    target_channel = getattr(options, 'channel', None)
+    if target_channel is not None:
+        target_conversation = getattr(options, 'conversation_id', None) or 'main'
+        topics = [topic for topic in topics if topic['channel'] == target_channel and topic['conversation_id'] == target_conversation]
+    if not topics:
+        return result
+    if not any(topic['deadline'] > time.time() for topic in topics):
+        result.update(reception='expired', next_action='Run connect for the same topic to resume its saved cursor and pending work.')
+        return result
+    diagnostic = exchange.session_directory(options.state_dir, options.session_id) / 'last-hook.json'
+    callback = None
+    if diagnostic.exists() and not diagnostic.is_symlink():
+        candidate = json.loads(diagnostic.read_text())
+        if candidate.get('session_id') == options.session_id:
+            callback = candidate
+    if callback:
+        timestamp = callback.get('timestamp')
+        age = time.time() - timestamp if type(timestamp) in (int, float) and math.isfinite(timestamp) else None
+        result['callback_age_seconds'] = round(age, 3) if age is not None else None
+        if age is None or not 0 <= age <= 90:
+            result.update(reception='callback_stale', next_action='The last callback observation is stale or has an invalid timestamp. '
+                          'Review the Channels command in /hooks, enable project hooks if required, then yield to an actual native Stop event. '
+                          'A past callback does not establish current reception or native trust.')
+            return result
+    if callback and callback.get('state') == 'waiting':
+        result.update(reception='waiting', next_action='The callback reports waiting for peer data; process Stop-delivered content, reply, then ack its ID.')
+        return result
+    if callback and callback.get('state') in ('callback_observed', 'peer', 'expired'):
+        result.update(reception='callback_observed', next_action='A local callback was observed; native trust is not verified. '
+                      'Process any Stop-delivered peer content, reply and ack its ID, then yield to Stop while this topic remains open.')
+        return result
+    result.update(reception='hook_unobserved', next_action='Review the exact Channels Stop command in /hooks and enable project hooks if required. '
+                  'If it is not loaded, restart and resume this same session. Finish local work, then yield to an actual native Stop event; '
+                  'installation and a direct hook invocation do not prove activation.')
+    return result
+
+
+def connection_probe(options, consume=False):
+    directory = exchange.session_directory(options.state_dir, options.session_id)
+    if directory.is_symlink() or Path(options.state_dir).is_symlink():
+        raise ValueError('session_state_invalid')
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / 'connection-probe.json'
+    with exchange.locked_state(path):
+        if not consume:
+            exchange.write_state(path, {'session_id': options.session_id})
+            return
+        if not path.exists():
+            return False
+        if path.is_symlink() or json.loads(path.read_text()) != {'session_id': options.session_id}:
+            raise ValueError('session_probe_invalid')
+        path.unlink()
+        return True
 
 
 async def run_exchange(options, key):
@@ -202,6 +360,15 @@ async def run_exchange(options, key):
             return 2 if result.get('type') == 'timeout' else 0
         response = await client.get('status')
         response.raise_for_status()
+        if options.command == 'open' and 'cursor' not in target:
+            previous = exchange.owned_state(options.state_dir, options.session_id, target)
+            if previous is not None:
+                target['cursor'] = exchange.read_state(previous)['cursor']
+            if previous is None:
+                response = await client.get('channels/' + options.channel + '/cursor')
+                response.raise_for_status()
+                target['cursor'] = response.json()['cursor']
+            exchange.validate_cursor(target['cursor'])
     if options.command == 'open':
         state = exchange.new_state(options.session_id, target, options.timeout)
         state = exchange.open_exchange(options.state_dir, options.session_id, state)
@@ -212,6 +379,9 @@ async def run_exchange(options, key):
         print(json.dumps({'type': 'acknowledged', **target, 'message_id': options.message_id}))
         return 0
     exchange.close_exchange(options.state_dir, options.session_id, target)
+    live = any(exchange.read_state(path)['deadline'] > time.time()
+               for path in exchange.list_states(options.state_dir, options.session_id))
+    announce_presence(options, key, 'connected' if live else 'closed', 90 if live else 1)
     print(json.dumps({'type': 'closed', **target}))
     return 0
 
@@ -236,7 +406,7 @@ def run_hook(options):
     path = None
     state = None
     try:
-        event = json.load(sys.stdin)
+        event = read_hook_input()
         if not isinstance(event, dict):
             raise ValueError('hook_input_invalid')
         options.session_id = exchange.validate_session_id(event.get('session_id'))
@@ -263,13 +433,32 @@ def run_hook(options):
         diagnostic = 'expired' if paths else 'absent'
         if live:
             key = read_secret(options.key_file)
+            record_hook(options, 'callback_observed', callback_id)
+            if connection_probe(options, consume=True):
+                announce_presence(options, key)
+                print(json.dumps({'decision': 'block', 'reason': 'Connection callback observed for this session. '
+                                  'Continue the already authorized task, or finish local work and yield to Stop to wait for peer messages. '
+                                  'This diagnostic does not verify native hook trust; do not invoke the hook manually to claim activation.'}))
+                return
             async def wait():
                 async with exchange_client(options, key) as client:
-                    return await exchange.hook_topics(client, live, options.timeout)
+                    async def heartbeat():
+                        response = await client.post('sessions', json=presence_payload(options, 'waiting', 90))
+                        response.raise_for_status()
+                        record_hook(options, 'waiting', callback_id)
+                    try:
+                        return await exchange.hook_topics(client, live, options.timeout, heartbeat)
+                    finally:
+                        response = await client.post('sessions', json=presence_payload(options))
+                        response.raise_for_status()
             decision = asyncio.run(wait())
             diagnostic = 'peer' if 'Untrusted peer JSON' in decision.get('reason', '') else 'expired'
             if any(path.exists() and exchange.read_state(path)['errors'] for path in live):
                 diagnostic = 'error'
+    except HookInputRequired as error:
+        print('channel hook failed: ' + str(error), file=sys.stderr)
+        print('{}')
+        return 1
     except Exception:
         diagnostic = 'error'
         print('channel hook failed: check key, session input, state and service', file=sys.stderr)
@@ -288,10 +477,14 @@ def run_hook_config_error(options, code):
     options.state_dir = options.state_dir or str(root / 'state')
     options.session_id = None
     try:
-        event = json.load(sys.stdin)
+        event = read_hook_input()
         options.session_id = exchange.validate_session_id(event.get('session_id'))
         if Path(options.config).is_file():
             record_hook(options, 'config_error')
+    except HookInputRequired as error:
+        print('channel hook failed: ' + str(error), file=sys.stderr)
+        print('{}')
+        return 1
     except Exception:
         pass
     print('{}')
@@ -308,6 +501,7 @@ def client_status(options, key):
     if options.session_id is None and options.client is None and all(os.environ.get(name) for name in ('CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID')):
         session_status = 'session_ambiguous'
     result = {'status': 'ready', 'session_id': options.session_id,
+              'service': 'ready',
               'session': session_status,
               'key_path': options.key_file, 'exchange': 'absent', 'last_callback': None}
     if options.session_id:
@@ -326,7 +520,7 @@ def client_status(options, key):
             data = json.loads(diagnostic.read_text())
             if set(data) == {'timestamp', 'state', 'session_id', 'callback_id'} and data['session_id'] == options.session_id:
                 result['last_callback'] = data
-    print(json.dumps(result))
+    print(json.dumps({**result, **reception_status(options)}))
 
 
 def run(options):
@@ -334,14 +528,33 @@ def run(options):
         save_key(options)
         return
     if options.command == 'hook':
-        run_hook(options)
+        return run_hook(options)
+    options.session_id = select_session(options, required=options.command in ('connect', 'publish', 'open', 'close', 'wait', 'ack')
+                                        or (options.command == 'receive' and options.cursor is None))
+    key = connection_key(options) if options.command == 'connect' else read_secret(options.key_file)
+    if options.command == 'connect':
+        announce_presence(options, key)
+        state = ensure_topic(options, key)
+        connection_probe(options)
+        print(json.dumps({'type': 'connected', 'session_id': options.session_id, 'topic': state,
+                          **reception_status(options)}))
         return
-    options.session_id = select_session(options, required=options.command in ('publish', 'open', 'close', 'wait', 'ack'))
-    key = read_secret(options.key_file)
+    if options.command == 'peers':
+        with httpx.Client(timeout=10) as client:
+            response = client.get(options.url.rstrip('/') + '/sessions', headers={'Authorization': 'Bearer ' + key})
+            response.raise_for_status()
+        print(json.dumps(response.json(), ensure_ascii=False))
+        return
+    if options.session_id:
+        announce_presence(options, key)
     if options.command == 'status':
         return client_status(options, key)
     if options.command in ('wait', 'open', 'close', 'ack'):
         return asyncio.run(run_exchange(options, key))
+    if options.command == 'publish' or (options.command == 'receive' and options.cursor is None):
+        state = ensure_topic(options, key)
+        if options.command == 'receive':
+            options.cursor = state['cursor']
     headers = {'Authorization': 'Bearer ' + key}
     channel_url = options.url.rstrip('/') + '/channels/' + options.channel
     if options.command == 'listen':
@@ -350,7 +563,12 @@ def run(options):
     response = request_messages(options, channel_url, headers)
     if response.is_error:
         raise ValueError('unauthorized401' if response.status_code == 401 else f'HTTP {response.status_code}')
-    print(json.dumps(response.json(), ensure_ascii=False))
+    result = {**response.json(), **reception_status(options)}
+    if options.command == 'receive':
+        result.update(delivery='history_read', ack_required=False)
+        result['next_action'] = ('This receive call creates no pending delivery; ack only IDs previously delivered by Stop. '
+                                 + result['next_action'])
+    print(json.dumps(result, ensure_ascii=False))
 
 
 def main():
@@ -371,7 +589,9 @@ def main():
             except ConfigError as error:
                 if options.command != 'hook':
                     raise
-                run_hook_config_error(options, error.code)
+                status = run_hook_config_error(options, error.code)
+                if status:
+                    sys.exit(status)
                 return
             status = run(options)
             if status:

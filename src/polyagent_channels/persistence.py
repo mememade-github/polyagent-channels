@@ -112,6 +112,71 @@ def validate_conversation(conversation_id):
     channel_key(conversation_id)
 
 
+async def server_time_ms():
+    seconds, microseconds = await redis.time()
+    return seconds * 1000 + microseconds // 1000
+
+
+async def channel_cursor(channel: str) -> dict:
+    """Observe the current stream end without changing retained messages."""
+    rows = await redis.xrevrange(channel_key(channel), count=1)
+    return {'cursor': rows[0][0] if rows else '0-0', 'time_ms': await server_time_ms()}
+
+
+async def lease_session(session_id: str, state: str, ttl_seconds: int,
+                        client: str | None = None, name: str | None = None) -> dict:
+    """Record a bounded, asserted observation, not model liveness or verified identity."""
+    validate_session_id(session_id)
+    if not isinstance(state, str) or state not in {'connected', 'waiting', 'active', 'closed'}:
+        raise ValueError('state must be connected, waiting, active or closed')
+    if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 600:
+        raise ValueError('ttl_seconds must be an integer in 1..600')
+    for field, value, limit in (('client', client, 64), ('name', name, 256)):
+        if value is not None and (not isinstance(value, str) or not value.strip()
+                                  or len(value.encode('utf-8')) > limit):
+            raise ValueError(f'{field} must be nonempty and <={limit} UTF-8 bytes')
+    record = {'session_id': session_id, 'state': state, 'ttl_seconds': ttl_seconds}
+    if client is not None:
+        record['client'] = client
+    if name is not None:
+        record['name'] = name
+    key = 'channels:session:' + session_id
+    async with redis.pipeline(transaction=True) as transaction:
+        transaction.hset(key, mapping=record)
+        transaction.expire(key, ttl_seconds)
+        transaction.hgetall(key)
+        transaction.pttl(key)
+        transaction.time()
+        results = await transaction.execute()
+    return session_record(*results[-3:])
+
+
+def session_record(fields, remaining_ms, now):
+    seconds, microseconds = now
+    expires_at_ms = seconds * 1000 + microseconds // 1000 + remaining_ms
+    ttl_seconds = int(fields['ttl_seconds'])
+    return {**fields, 'client': fields.get('client'), 'name': fields.get('name'),
+            'ttl_seconds': ttl_seconds, 'last_seen_ms': expires_at_ms - ttl_seconds * 1000,
+            'expires_at_ms': expires_at_ms}
+
+
+async def list_sessions() -> dict:
+    """List unexpired lease observations; absent sessions may simply be disconnected."""
+    records = {}
+    async for key in redis.scan_iter(match='channels:session:*', count=100):
+        async with redis.pipeline(transaction=True) as transaction:
+            transaction.hgetall(key)
+            transaction.pttl(key)
+            transaction.time()
+            value, remaining_ms, now = await transaction.execute()
+        if value and remaining_ms > 0:
+            record = session_record(value, remaining_ms, now)
+            records[record['session_id']] = record
+    now = await server_time_ms()
+    return {'sessions': [records[key] for key in sorted(records)
+                         if records[key]['expires_at_ms'] > now and records[key]['state'] != 'closed']}
+
+
 async def publish(channel: str, text: str, session_id: str, reply_to: str | None = None,
                   conversation_id: str = 'main', sender: str | None = None) -> dict:
     """Publish with an asserted routing session, not a verified person identity."""

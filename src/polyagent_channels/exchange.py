@@ -227,7 +227,7 @@ def write_state(path, state):
         Path(temporary).unlink(missing_ok=True)
 
 
-def open_exchange(directory, session_id, state):
+def open_exchange(directory, session_id, state, reuse=False):
     validate_state(state)
     if state['session_id'] != session_id:
         raise ExchangeMismatch()
@@ -244,9 +244,10 @@ def open_exchange(directory, session_id, state):
         with (contextlib.nullcontext() if path.name == 'exchange.json' else locked_state(path)):
             if path.exists() or path.is_symlink():
                 existing = read_state(path)
-                if existing['deadline'] > time.time():
+                if existing['deadline'] > time.time() and not reuse:
                     raise ExchangeAlreadyOpen('session_topic_already_live')
-                state = {**state, 'cursor': existing['cursor'], 'pending': existing['pending']}
+                state = {**state, 'cursor': existing['cursor'], 'pending': existing['pending'],
+                         'deadline': max(state['deadline'], existing['deadline'])}
             write_state(path, state)
     return state
 
@@ -272,7 +273,7 @@ def update_state(path, original, updated):
     return True
 
 
-async def hook_decision(client, path, timeout=HOOK_TIMEOUT):
+async def hook_decision(client, path, timeout=HOOK_TIMEOUT, heartbeat=None):
     try:
         state = read_state(path)
     except FileNotFoundError:
@@ -290,6 +291,8 @@ async def hook_decision(client, path, timeout=HOOK_TIMEOUT):
         if duration <= 0:
             return {}
         try:
+            if heartbeat is not None:
+                await heartbeat()
             result = await pending_message(client, state) if state['pending'] else await wait_for_peer(client, state, duration)
         except PendingMessageEvicted:
             return {'decision': 'block', 'reason': 'Pending message ' + state['pending']
@@ -348,8 +351,8 @@ async def pending_message(client, state):
         cursor = page['cursor']
 
 
-async def hook_topics(client, paths, timeout):
-    tasks = {asyncio.create_task(hook_decision(client, path, timeout)) for path in paths}
+async def hook_topics(client, paths, timeout, heartbeat=None):
+    tasks = {asyncio.create_task(hook_decision(client, path, timeout, heartbeat)) for path in paths}
     all_tasks = set(tasks)
     try:
         while tasks:
