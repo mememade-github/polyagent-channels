@@ -2,7 +2,7 @@ import stat
 
 import pytest
 
-from channels.auth import load_key
+from polyagent_channels.auth import load_key
 
 
 def test_first_start_creates_private_key(monkeypatch, tmp_path):
@@ -35,7 +35,7 @@ def test_protected_transports_reject_missing_wrong_or_duplicate_bearer(scope_typ
     import asyncio
     from unittest.mock import AsyncMock
 
-    from channels.auth import CredentialAuth
+    from polyagent_channels.auth import CredentialAuth
 
     application, send = AsyncMock(), AsyncMock()
     scope = {'type': scope_type, 'method': 'GET', 'path': '/status',
@@ -47,7 +47,7 @@ def test_protected_transports_reject_missing_wrong_or_duplicate_bearer(scope_typ
 def test_shared_key_rotation_invalidates_previous_key(server_module):
     from starlette.testclient import TestClient
 
-    from channels.auth import CredentialAuth
+    from polyagent_channels.auth import CredentialAuth
 
     with TestClient(CredentialAuth(server_module.inner, 'replacement', server_module.MAX_BODY)) as client:
         previous = client.get('/status', headers={'Authorization': 'Bearer synthetic-admin-key'})

@@ -14,8 +14,8 @@ from urllib.parse import urlencode
 import httpx
 from websockets.asyncio.client import connect
 
-from channels import exchange
-from channels.client_config import ConfigError, apply_config
+from polyagent_channels import exchange
+from polyagent_channels.client_config import ConfigError, apply_config
 
 
 def command_parser():
@@ -277,7 +277,7 @@ def run_hook(options):
 
 
 def run_hook_config_error(options, code):
-    from channels.client_config import DEFAULT_ROOT
+    from polyagent_channels.client_config import DEFAULT_ROOT
     root = Path(options.config).expanduser().absolute().parent if options.config else DEFAULT_ROOT
     options.state_dir = options.state_dir or str(root / 'state')
     options.session_id = None
@@ -350,8 +350,8 @@ def run(options):
 def main():
     options = command_parser().parse_args()
     try:
-        from channels.setup import lifecycle_lock
-        from channels.client_config import DEFAULT_ROOT
+        from polyagent_channels.setup import lifecycle_lock
+        from polyagent_channels.client_config import DEFAULT_ROOT
         root = DEFAULT_ROOT
         if options.state_dir:
             root = Path(options.state_dir).expanduser().absolute().parent

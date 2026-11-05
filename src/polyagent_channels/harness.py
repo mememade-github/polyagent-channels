@@ -3,7 +3,7 @@ import hashlib
 import os
 import shlex
 
-from channels.client_config import service_url, ConfigError
+from polyagent_channels.client_config import service_url, ConfigError
 from pathlib import Path
 
 from starlette.responses import PlainTextResponse, Response

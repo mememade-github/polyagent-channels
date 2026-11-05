@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from redis.exceptions import RedisError
 
-from channels.persistence import (
+from polyagent_channels.persistence import (
     MAX_TEXT,
     channel_key,
     publish,
@@ -74,7 +74,7 @@ def test_storage_failure_is_not_hidden(storage):
 
 @pytest.mark.parametrize('value,expected', [(None, 7), ('0', 0), ('14', 14)])
 def test_retention_setting(monkeypatch, value, expected):
-    from channels.persistence import retention_days
+    from polyagent_channels.persistence import retention_days
 
     monkeypatch.delenv('CHANNEL_RETENTION_DAYS', raising=False)
     if value is not None:
@@ -84,7 +84,7 @@ def test_retention_setting(monkeypatch, value, expected):
 
 @pytest.mark.parametrize('value', ['-1', '1.5', '', 'forever'])
 def test_invalid_retention_is_visible(monkeypatch, value):
-    from channels.persistence import retention_days
+    from polyagent_channels.persistence import retention_days
 
     monkeypatch.setenv('CHANNEL_RETENTION_DAYS', value)
     with pytest.raises(ValueError, match='CHANNEL_RETENTION_DAYS'):
@@ -93,7 +93,7 @@ def test_invalid_retention_is_visible(monkeypatch, value):
 
 @pytest.fixture
 def retention(storage, monkeypatch):
-    from channels import persistence
+    from polyagent_channels import persistence
 
     monkeypatch.setattr(persistence, 'RETENTION_DAYS', 1)
     monkeypatch.setattr(persistence.time, 'time', lambda: 172800)
@@ -113,7 +113,7 @@ def test_retention_filters_expired_rows_and_keeps_conversation_cursor(retention)
 
 
 def test_rows_expiring_during_long_poll_are_excluded(retention, monkeypatch):
-    from channels import persistence
+    from polyagent_channels import persistence
 
     monkeypatch.setattr(persistence.time, 'time', lambda: next(times))
     times = iter([172800, 172801])
@@ -154,7 +154,7 @@ def test_trim_failure_is_visible_to_reader(retention):
 def test_idle_sweep_retries_visibly_and_cancels(retention, monkeypatch, caplog, outage):
     from unittest.mock import AsyncMock
 
-    from channels import persistence
+    from polyagent_channels import persistence
 
     if outage:
         retention.eval.side_effect = RedisError('private data must not be logged')
@@ -174,7 +174,7 @@ def test_idle_sweep_retries_visibly_and_cancels(retention, monkeypatch, caplog, 
 
 @pytest.mark.parametrize('value,expected', [(None, 1073741824), ('1', 1), ('2048', 2048)])
 def test_storage_budget_setting(monkeypatch, value, expected):
-    from channels.persistence import max_storage_bytes
+    from polyagent_channels.persistence import max_storage_bytes
 
     monkeypatch.delenv('CHANNEL_MAX_STORAGE_BYTES', raising=False)
     if value is not None:
@@ -184,7 +184,7 @@ def test_storage_budget_setting(monkeypatch, value, expected):
 
 @pytest.mark.parametrize('value', ['', '0', '-1', '1.5', ' 10', '1e9', '9007199254740992'])
 def test_invalid_storage_budget_is_visible(monkeypatch, value):
-    from channels.persistence import max_storage_bytes
+    from polyagent_channels.persistence import max_storage_bytes
 
     monkeypatch.setenv('CHANNEL_MAX_STORAGE_BYTES', value)
     with pytest.raises(ValueError, match='CHANNEL_MAX_STORAGE_BYTES'):

@@ -145,7 +145,7 @@ def test_concurrent_same_dispatcher(artifact, tmp_path):
 
 
 def test_legacy_replace_and_conservative_uninstall(artifact, tmp_path):
-    from channels.setup import wrapper_content
+    from polyagent_channels.setup import wrapper_content
     root = tmp_path / 'root'
     wrapper = root / 'bin/channels'
     wrapper.parent.mkdir(parents=True)
@@ -173,7 +173,7 @@ def test_bundle_is_client_only(artifact):
 
 
 def test_uninstall_only_valid_generated_session_state(artifact, tmp_path):
-    from channels import exchange
+    from polyagent_channels import exchange
     result = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
     root = tmp_path / 'root'
     state = exchange.new_state('synthetic-session',
@@ -243,8 +243,8 @@ def test_python310_bundle_installed_wrapper_and_uninstall(artifact, tmp_path):
 
 
 def test_closed_diagnostic_cleanup_and_concise_kept_output(artifact, tmp_path):
-    from channels import exchange
-    from channels.cli import record_hook
+    from polyagent_channels import exchange
+    from polyagent_channels.cli import record_hook
     from argparse import Namespace
 
     installed = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
@@ -283,7 +283,7 @@ def test_purge_shared_key_refused_before_callback_changes(artifact, tmp_path):
 
 
 def test_live_exchange_refuses_uninstall_before_mutation(artifact, tmp_path):
-    from channels import exchange
+    from polyagent_channels import exchange
     invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
     root = tmp_path / 'root'
     state = exchange.new_state('live-synthetic', {'channel': 'general', 'conversation_id': 'main', 'cursor': '0-0'}, 60)
@@ -295,8 +295,8 @@ def test_live_exchange_refuses_uninstall_before_mutation(artifact, tmp_path):
 
 
 def test_help_uses_request_origin_and_quotes_host_data(monkeypatch):
-    from channels import harness
-    from channels.server import help_page
+    from polyagent_channels import harness
+    from polyagent_channels.server import help_page
     from starlette.requests import Request
     import asyncio
 
@@ -312,7 +312,7 @@ def test_help_uses_request_origin_and_quotes_host_data(monkeypatch):
 
 def test_busy_closed_session_lock_refuses_uninstall(artifact, tmp_path):
     import fcntl
-    from channels import exchange
+    from polyagent_channels import exchange
     invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
     root = tmp_path / 'root'
     directory = exchange.session_directory(root / 'state', 'closed-busy')
@@ -361,7 +361,7 @@ def test_active_installed_hook_refused_even_without_state(artifact, tmp_path):
 
 
 def test_shared_lifecycle_users_and_removed_config(artifact, tmp_path):
-    from channels.setup import lifecycle_lock
+    from polyagent_channels.setup import lifecycle_lock
 
     assert invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
@@ -385,7 +385,7 @@ def test_shared_lifecycle_users_and_removed_config(artifact, tmp_path):
 
 
 def test_expired_pending_topic_refuses_uninstall_and_preserves_unknown(artifact, tmp_path):
-    from channels import exchange
+    from polyagent_channels import exchange
     invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
     root = tmp_path / 'root'
     topic = exchange.new_state('pending-synthetic',

@@ -14,7 +14,7 @@ import zipfile
 import time
 from pathlib import Path
 
-from channels.client_config import ConfigError, DEFAULT_ROOT, read_config, service_url
+from polyagent_channels.client_config import ConfigError, DEFAULT_ROOT, read_config, service_url
 
 
 class SetupError(ValueError):
@@ -396,7 +396,7 @@ def refuse_busy_session_locks(root):
 
 
 def refuse_live_exchanges(root):
-    from channels.exchange import read_state
+    from polyagent_channels.exchange import read_state
 
     for session in session_directories(root):
         for path in generated_topic_paths(session):
@@ -409,7 +409,7 @@ def refuse_live_exchanges(root):
 
 
 def valid_diagnostic(path):
-    from channels.exchange import validate_session_id
+    from polyagent_channels.exchange import validate_session_id
 
     if path.is_symlink() or not path.is_file():
         return False
@@ -441,7 +441,7 @@ def remove_generated_state(root, removed):
 
 
 def remove_generated_topic(state, removed):
-    from channels.exchange import read_state
+    from polyagent_channels.exchange import read_state
 
     session = state.parent
     try:

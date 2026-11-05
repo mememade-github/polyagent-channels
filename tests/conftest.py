@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 from starlette.testclient import TestClient
 
-from channels import persistence
-from channels.auth import CredentialAuth
+from polyagent_channels import persistence
+from polyagent_channels.auth import CredentialAuth
 @pytest.fixture
 def storage(monkeypatch):
     # Existing transport fixtures use synthetic stream IDs, without wall-clock expiration.
@@ -24,7 +24,7 @@ def server_module(monkeypatch, tmp_path, storage):
     artifact.write_bytes(b'synthetic-built-artifact')
     monkeypatch.setenv('CHANNEL_HARNESS_FILE', str(artifact))
     monkeypatch.setenv('CHANNEL_KEY_FILE', str(tmp_path / '.env/channel.key'))
-    server = importlib.reload(importlib.import_module('channels.server'))
+    server = importlib.reload(importlib.import_module('polyagent_channels.server'))
     monkeypatch.setattr(server, 'redis', storage)
     return server
 

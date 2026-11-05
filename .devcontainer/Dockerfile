@@ -220,4 +220,4 @@ RUN /home/vscode/channels-venv/bin/python scripts/build_harness.py /opt/polyagen
 ENV PATH=/home/vscode/channels-venv/bin:$PATH \
     CHANNEL_KEY_FILE=/workspaces/.env/channel.key
 WORKDIR /workspaces
-CMD ["python", "-m", "uvicorn", "channels.server:app", "--host", "0.0.0.0", "--port", "8080", "--ws-max-size", "16777216", "--no-access-log"]
+CMD ["python", "-m", "uvicorn", "polyagent_channels.server:app", "--host", "0.0.0.0", "--port", "8080", "--ws-max-size", "16777216", "--no-access-log"]

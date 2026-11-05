@@ -12,7 +12,7 @@ from redis.exceptions import ResponseError
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from channels import persistence
+from polyagent_channels import persistence
 
 SCRIPT_SHA = '9ef97e59b4ab6032b1fed8e588c77b6b348c5311'
 KEY_TYPE_ERROR = f'user_script:13: Unexpected storage key type script: {SCRIPT_SHA}, on @user_script:13.'
@@ -99,7 +99,7 @@ def request_messages(client, headers, method):
 def test_http_reports_and_logs_canonical_storage_state(client, headers, storage, caplog, method, message, expected):
     storage.eval.side_effect = ResponseError(message)
     response = request_messages(client, headers, method)
-    server_logs = [record.getMessage() for record in caplog.records if record.name == 'channels.server']
+    server_logs = [record.getMessage() for record in caplog.records if record.name == 'polyagent_channels.server']
     assert (response.status_code, response.json()) == (503, {'error': expected})
     assert any(expected in line for line in server_logs) and not contains_raw_text(caplog.text)
 

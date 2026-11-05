@@ -10,9 +10,9 @@ PACKAGES = ('httpx', 'httpcore', 'h11', 'certifi', 'idna', 'anyio', 'typing-exte
 SOURCES = ('__init__.py', 'cli.py', 'exchange.py', 'client_config.py', 'setup.py')
 ENTRY = '''import sys
 if sys.argv[1:2] and sys.argv[1] in ('plan', 'install', 'uninstall'):
-    from channels.setup import main
+    from polyagent_channels.setup import main
     sys.exit(main())
-from channels.cli import main
+from polyagent_channels.cli import main
 main()
 '''
 
@@ -24,7 +24,7 @@ def build(output, root):
         archive.writestr('POLYAGENT-HARNESS', '1\n')
         archive.write(root / 'LICENSE', 'LICENSE')
         for name in SOURCES:
-            archive.write(root / 'src/channels' / name, 'channels/' + name)
+            archive.write(root / 'src/polyagent_channels' / name, 'polyagent_channels/' + name)
         for name in PACKAGES:
             distribution = metadata.distribution(name)
             if distribution.version != pins[name]:

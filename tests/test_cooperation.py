@@ -8,8 +8,8 @@ from threading import Barrier
 import httpx
 import pytest
 
-from channels import cli, exchange
-from channels.client_config import apply_config
+from polyagent_channels import cli, exchange
+from polyagent_channels.client_config import apply_config
 
 
 TARGET = {'channel': 'general', 'conversation_id': 'work', 'cursor': '0-0'}

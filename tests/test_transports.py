@@ -6,7 +6,7 @@ import pytest
 from redis.exceptions import RedisError
 from starlette.websockets import WebSocketDisconnect
 
-from channels.auth import CredentialAuth
+from polyagent_channels.auth import CredentialAuth
 
 
 @pytest.mark.parametrize('authorization', [None, 'Bearer wrong'])

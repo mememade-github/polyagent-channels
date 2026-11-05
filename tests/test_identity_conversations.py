@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from channels import persistence
+from polyagent_channels import persistence
 
 
 @pytest.mark.parametrize('session_id', ['', 'has/slash', 'has space', '한글', 'x' * 257, None, 123])

@@ -11,7 +11,7 @@ import pytest
 from redis import Redis
 from redis.exceptions import ResponseError
 
-from channels import persistence
+from polyagent_channels import persistence
 
 
 @pytest.fixture
@@ -125,7 +125,7 @@ def test_separate_process_publishers_share_atomic_budget(database):
 import os, sys
 from redis import Redis
 from redis.exceptions import ResponseError
-from channels.persistence import LIFECYCLE, STORAGE_KEYS
+from polyagent_channels.persistence import LIFECYCLE, STORAGE_KEYS
 r = Redis.from_url(os.environ['REDIS_TEST_URL'], decode_responses=True)
 for i in range(30):
     assert r.eval(LIFECYCLE, len(STORAGE_KEYS), *STORAGE_KEYS, 'append', sys.argv[1], '0', '100', '', 'main', 'text', 'x' * 16)[0] == 'ok'

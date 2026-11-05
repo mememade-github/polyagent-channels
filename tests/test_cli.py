@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from channels import cli
-from channels.client_config import apply_config
+from polyagent_channels import cli
+from polyagent_channels.client_config import apply_config
 
 
 def options(*arguments):

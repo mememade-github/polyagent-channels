@@ -13,7 +13,7 @@ requires-python = ">=3.12"
 dynamic = ["dependencies"]
 
 [project.scripts]
-channels = "channels.cli:main"
+channels = "polyagent_channels.cli:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
@@ -26,7 +26,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["channels"]
+source = ["polyagent_channels"]
 
 [tool.setuptools.package-data]
-channels = ["*.lua"]
+polyagent_channels = ["*.lua"]

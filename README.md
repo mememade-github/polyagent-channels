@@ -182,7 +182,7 @@ Use Python 3.12+ and an isolated virtual environment from the repository root:
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e . -r requirements-dev.txt
-.venv/bin/python -m pytest --cov=channels --cov-branch --cov-report=term-missing
+.venv/bin/python -m pytest --cov=polyagent_channels --cov-branch --cov-report=term-missing
 ```
 
 The default suite uses mocked Redis and synthetic data; real-storage tests skip without `REDIS_TEST_URL`. Coverage reports executed lines and branches without an arbitrary threshold. For storage regression tests, start a separate Redis instance and supply a fresh, dedicated, nonzero database, never the operator database:

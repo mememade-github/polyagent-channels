@@ -13,9 +13,9 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.websockets import WebSocketDisconnect
 
-from channels.harness import download, setup_help
-from channels.auth import ERRORS, CredentialAuth, load_key
-from channels.persistence import (
+from polyagent_channels.harness import download, setup_help
+from polyagent_channels.auth import ERRORS, CredentialAuth, load_key
+from polyagent_channels.persistence import (
     MAX_TEXT,
     StorageStateError,
     lifecycle,

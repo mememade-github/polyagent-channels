@@ -6,7 +6,7 @@ import re
 import time
 from importlib.resources import files
 
-from channels.identity import validate_sender, validate_session_id
+from polyagent_channels.identity import validate_sender, validate_session_id
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ResponseError
@@ -27,7 +27,7 @@ def max_storage_bytes():
 
 
 MAX_STORAGE_BYTES = max_storage_bytes()
-LIFECYCLE = files('channels').joinpath('lifecycle.lua').read_text(encoding='utf-8')
+LIFECYCLE = files('polyagent_channels').joinpath('lifecycle.lua').read_text(encoding='utf-8')
 STORAGE_KEYS = ('channels:heads', 'channels:bytes', 'channels:version', 'channels:clock')
 RETENTION_DAYS = retention_days()
 RETENTION_SWEEP_SECONDS = 60
