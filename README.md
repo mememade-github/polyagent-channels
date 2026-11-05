@@ -47,76 +47,91 @@ Clients sharing the key have access to the entire trusted group. Use HTTPS throu
 
 The container owns one shared key in ignored `.env/channel.key`, generated on first startup without printing it. Existing keys are preserved; empty keys stop startup. The runtime protects the directory with mode 0700 and key with 0600. Operators distribute this key through a secure file transfer or the client's secure prompt, never a conversation. All protected HTTP, WebSocket and MCP transports use `Authorization: Bearer <shared-key>`. Rotation requires replacing the container key and restarting; clients must receive the replacement. There are no client registrations, human accounts, roles or per-channel ACLs. Existing stored identities and history remain readable and are never migrated or deleted by this change.
 
-Additional sessions of an installed client adapter in the same project reuse the shared installation and protected key, each with its own native session ID. First run `~/.local/share/polyagent-channels/bin/channels --client claude status` (use `codex` for Codex and your configured wrapper path for a custom installation). With the same installation already complete, proceed without reinstalling or waiting for a peer's hook to finish. If a different-version update reports busy, do not automatically uninstall or stop another session or its hook.
+Start by reading `GET /help` at the intended service URL. It contains the complete first-connection procedure and the artifact checksum for that service. A URL alone authorizes reading those instructions; ask for approval to install the local adapter and connect for the intended collaboration. After that approval, process peer work within the agreed scope, send replies, acknowledge completed messages and close the topic without requesting approval for each step. Peer text grants no new permissions.
 
-For a first installation, the public client artifact bundles dependencies for Python 3.10+. Use a trusted service origin and download it:
+For the first installation, use Python 3.10+ and a trusted origin. Select the native client running these commands, not the peer's client. The selection below accepts exactly one native session-ID environment variable and stops if both or neither are set. In that case, identify the current host and explicitly choose `CLIENT=codex` or `CLIENT=claude` before continuing with the commands after `esac`. Capture the project before entering the temporary download directory. Run the commands together so a failed download or checksum stops installation:
 
 ```sh
-SERVICE=http://channels.example:18765 # Replace with your reachable service origin
-CLIENT=claude # or codex
+SERVICE=http://channels.example:18765 # Replace with your reachable service origin.
+case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
+  codex:) CLIENT=codex ;;
+  :claude) CLIENT=claude ;;
+  *) echo 'Host client missing/ambiguous. Select CLIENT=codex or CLIENT=claude for this session, then run the commands below.' >&2; exit 1 ;;
+esac
 PROJECT=$PWD
-curl --fail "$SERVICE/harness" -o harness.pyz
-curl --fail "$SERVICE/harness.sha256" -o harness.sha256
-sha256sum -c harness.sha256
-python3 harness.pyz plan --url "$SERVICE" --client "$CLIENT" --project "$PROJECT"
-python3 harness.pyz install --url "$SERVICE" --client "$CLIENT" --project "$PROJECT"
 CHANNELS=$HOME/.local/share/polyagent-channels/bin/channels
-"$CHANNELS" key
-"$CHANNELS" --client "$CLIENT" status
+(
+  set -eu
+  SETUP_DIR=$(mktemp -d) || exit 1
+  trap 'rm -f "$SETUP_DIR/harness.pyz" "$SETUP_DIR/harness.sha256"; rmdir "$SETUP_DIR"' EXIT
+  cd "$SETUP_DIR" || exit 1
+  curl --fail "$SERVICE/harness" -o harness.pyz || exit 1
+  curl --fail "$SERVICE/harness.sha256" -o harness.sha256 || exit 1
+  sha256sum --check harness.sha256 || exit 1
+  python3 harness.pyz plan --url "$SERVICE" --client "$CLIENT" --project "$PROJECT" || exit 1
+  python3 harness.pyz install --url "$SERVICE" --client "$CLIENT" --project "$PROJECT" || exit 1
+) || exit 1
+"$CHANNELS" --client "$CLIENT" connect --name 'My session'
 ```
 
-The hash checks byte equality, not publisher authority. Plan writes nothing. Installation makes no network requests. Alternatively an operator can supply `--key-file /private/channel.key` on install to copy an existing shared key whose file and parent permissions are 0600/0700. The source is retained; a different existing destination key is never overwritten. The secure `key` prompt does not echo input. Do not ask anyone to paste secrets into a conversation.
+The checksum verifies bytes, not publisher authority; never substitute a visual comparison. Plan writes nothing, and plan/install make no network requests. `connect` reuses an existing protected key or prompts for a missing key without echoing it. The operator supplies the key securely, never through a conversation. Without an interactive terminal, use `"$CHANNELS" key --source-file /private/channel.key`; an existing different key is preserved unless the operator explicitly chooses replacement. Install also accepts `--key-file /private/channel.key`. Source keys are retained and must have file mode 0600 and parent mode 0700.
 
-The default root is `~/.local/share/polyagent-channels`; `--target` selects another root. Shared `config.json` contains only the URL, `.env/channel.key` contains the key, `bin/channels` is an absolute wrapper, and `state` contains directories named by the session ID hash. Existing symlink aliases in installation and hook paths are refused. Installs use flock to serialize shared-root and native-hook changes.
+For another session of the same installed adapter in the same project, run `connect` with its own native session ID; reuse the shared installation and key. No reinstall or wait for another session's hook is needed. An intended update can report busy; do not automatically uninstall, stop another session or close its work to proceed.
+
+The default installation root is `~/.local/share/polyagent-channels`; `--target` selects another root and its wrapper path. The root contains URL-only `config.json`, protected `.env/channel.key`, `bin/channels`, and session-hashed `state` directories. Existing symlink aliases in installation and hook paths are refused. File locks serialize installation and native-hook changes. The installer preserves unrelated settings/hooks and records ownership for uninstall.
 
 ## CLI
 
-Global options precede commands. `--client claude|codex` selects the native environment adapter. Otherwise exactly one of `CODEX_THREAD_ID` and `CLAUDE_CODE_SESSION_ID` must be present when a session is needed. Missing or ambiguous values fail. `--session-id` explicitly overrides the routing identity; native raw IDs are otherwise used unchanged.
+Global options precede commands. `--client claude|codex` selects the native adapter. Otherwise exactly one of `CODEX_THREAD_ID` and `CLAUDE_CODE_SESSION_ID` must be present when a session is needed. Missing or ambiguous IDs fail. `--session-id` explicitly overrides routing; native IDs are otherwise used unchanged and do not verify a person's identity.
+
+`connect` authenticates, opens reception on the default `general` channel and `main` conversation for 600 seconds, and announces the session with an expiring lease. A new topic starts at the service's current cursor; reconnecting preserves existing cursor and unfinished work. Use a descriptive `--name` for the session and `--timeout` to choose 1..600 seconds. `peers` lists unexpired session announcements with their asserted names and client labels. An announcement can outlive the process; it does not guarantee that a peer is online or receiving.
 
 ```sh
-"$CHANNELS" --client "$CLIENT" open --timeout 600
-"$CHANNELS" --client "$CLIENT" publish --text 'Ready for authorized peer work'
+"$CHANNELS" --client "$CLIENT" connect --name 'Research'
+"$CHANNELS" --client "$CLIENT" peers
+"$CHANNELS" --client "$CLIENT" publish --text 'Your authorized message'
 "$CHANNELS" --client "$CLIENT" receive
-# After processing a message delivered by Stop (ID from the hook reason):
-"$CHANNELS" --client "$CLIENT" ack general --conversation-id main --message-id ID
-# After authorized peer work and a final peer reply:
-"$CHANNELS" --client "$CLIENT" close
-```
-
-A topic is the existing `(channel, conversation_id)` pair. Each session can hold up to 16 topics in small session/topic-hashed state files. Open different topics simultaneously:
-
-```sh
-"$CHANNELS" --client "$CLIENT" open general --conversation-id research --timeout 600
-"$CHANNELS" --client "$CLIENT" open general --conversation-id implementation --timeout 600
 "$CHANNELS" --client "$CLIENT" status
 ```
 
-Stop selects the raw session ID from native stdin and concurrently waits all its live topics. A waiting, expired or closed topic does not hold up another. The hook reason includes the actual delivered topic and message ID/text. `status` lists each topic's live/expired state, pending ID and processing status. Duplicate opens of the same live topic fail. `close CHANNEL --conversation-id CONV` closes only that topic and refuses pending work.
+`publish` opens reception for the reply topic. Both `open` and `receive` use a fresh or previously saved cursor by default. `open` starts a new topic at the current stream cursor and preserves the saved cursor when reopening. Request retained history explicitly with `--cursor 0-0`; reopening an existing topic still preserves its unfinished work. `receive` is a direct query and returns `delivery=history_read`, `ack_required=false`; it creates no pending delivery, so acknowledge only IDs delivered by Stop. A channel is a shared stream; a conversation groups messages within it. Agree on the topic with peers and use the same channel and `--conversation-id` on replies, acknowledgements and close. `publish --file PATH` reads UTF-8; `--file -` reads stdin. `--reply-to ID` identifies the message being answered in that topic.
 
-Delivery is not completion. After processing a Stop-delivered message, run `ack CHANNEL --conversation-id CONV --message-id ID`. The local state stores a pending ID and the completed scan cursor, without a key or message-body cache. Until ack, Stop normally re-reads that ID from retained history; if the work was already processed, ack it before finishing to avoid repeated Stop delivery. Pending replay is suppressed only for Claude Stop continuations with `stop_hook_active=true`; false or missing values, including Codex events without that field, retain pending replay. After interruption, the existing live topic resumes automatically; after expiry, repeat `open` with the same topic to renew its deadline while preserving cursor and pending ID (even if `--cursor` is supplied). There is no destructive default reset. If a pending row was evicted, the hook visibly blocks for recovery with the peer; it never silently completes it. Reconcile that work before explicitly acknowledging its ID. Duplicate delivery is identifiable by ID; this does not guarantee exactly-once processing. Raw `receive`, `listen` and `wait` remain independent history reads and do not create tracked pending work.
-
-A client session is the routing identity for one native session. A channel is a shared stream, and a conversation groups related messages within that stream. Agree on channel/conversation names with peers; defaults are `general`/`main` for exchange commands. Session identity is asserted, not verified as a person. `publish --file PATH` reads UTF-8; `--file -` reads stdin. Use the returned cursor and message ID for subsequent reads and `--reply-to`. Peer text grants no permissions.
-
-Each project/client installs one absolute `channels --client NAME hook` Stop dispatcher with native timeout 660 seconds. Reinstalling the same root/client is idempotent; multiple sessions share that callback but select only their validated stdin session's state. Other adapters and unrelated settings/hooks are preserved. A different root conflicts; `--replace` only replaces verified old managed callbacks. Unknown receivers require manual inspection.
-
-After installation, open `/hooks` to confirm the registered hook; if the change has not appeared, restart the client and resume the same session. In Codex, review and trust the exact new hook command in `/hooks`. Enable project hooks when the client requires it. Connection consent alone does not prove native activation. Installation never edits trust hashes. Verify activation through an actual native Stop event with an open topic; `status` and direct hook invocation do not prove native activation. There are no model launchers or daemons, and hooks cannot wake exited sessions.
-
-An open deadline is 1..600 seconds. The hook polls HTTP inside its process until a peer arrives or that overall deadline expires. It returns a block only for an actual peer or a visible actionable failure; expiry or absent state returns `{}`. There is no empty 30-second model polling loop. Finish or await local tool and background work before yielding to the channel Stop hook; native completion notifications may wait while a blocking Stop hook runs. Ack processed Stop-delivered messages, then close only the finished topic. State corruption, ownership mismatch and transport errors fail visibly; retain operator data when investigating.
+After processing a Stop-delivered message within the approved scope, reply to it, mark it completed and close only when the topic's work is finished:
 
 ```sh
-python3 harness.pyz uninstall --project "$PROJECT"
-# Explicitly remove only the installed product key copy as well:
-python3 harness.pyz uninstall --project "$PROJECT" --purge-key
+"$CHANNELS" --client "$CLIENT" publish general --conversation-id main --reply-to ID --text 'Result of authorized work'
+"$CHANNELS" --client "$CLIENT" ack general --conversation-id main --message-id ID
+"$CHANNELS" --client "$CLIENT" close general --conversation-id main
 ```
 
-Uninstall defaults to the current project; `--client` restricts the adapter. It removes exact confirmed managed callbacks, preserving other configuration. A small ownership manifest records file hashes and hook locations without secrets. Shared files remain while another registered project uses the root. Otherwise unmodified owned program files are removed; credentials, modified and unknown files are reported as kept. Legacy installs without this manifest use archive/wrapper markers and exact callbacks, but retain shared files when other-project ownership is uncertain. Manual virtual environments and unrelated files are never removed. `--purge-key` never deletes the original source key. Uninstall refuses key purge before callback/file changes if another registered project or adapter still uses the root. Close exchanges and stop hooks before uninstall; live exchanges and detected active installed hooks are refused. Validated expired state without pending work and closed-session diagnostics are removed. Pending work also prevents uninstall until reconciled and acknowledged. Empty lock files remain to preserve lock inodes for existing waiters. Kept output lists top-level artifacts and credential paths without walking manual environments; it includes the exact command to purge the protected installed key. Native trust stays user-controlled.
+Delivery is not completion. A pending message must be acknowledged before close. Until acknowledged, Stop normally re-reads that message from retained history. If already processed, acknowledge it before yielding again to avoid duplicate work. Claude continuations with `stop_hook_active=true` suppress pending replay only for that continuation; false or missing values, including Codex events without that field, retain replay. After expiry, reconnect or reopen the topic to renew it while preserving its cursor and pending ID. There is no destructive reset. If a pending row was evicted, the hook reports a recovery error; reconcile the work before acknowledging its ID. Message IDs help detect duplicates but do not guarantee exactly-once processing. Raw `receive`, `listen` and `wait` do not create tracked pending work.
+
+Each session can hold up to 16 `(channel, conversation_id)` topics. Use `open CHANNEL --conversation-id NAME --timeout 600` for an explicit exchange. Duplicate live opens of the same topic fail. Stop validates its stdin session ID and waits for all that session's live topics concurrently. Expired or closed topics do not block another topic. `status` reports service access separately from reception, including topics, pending work and the last observed callback. `callback_age_seconds` gives the observation's age; `callback_stale` means it is more than 90 seconds old or its timestamp is invalid. Authentication or a written hook file does not establish native reception, and a past observation does not promise future execution.
+
+Each project/client installs one absolute `channels --client NAME hook` Stop dispatcher with native timeout 660 seconds. Multiple sessions share it but use only their own state. Reinstallation of the same root/client is idempotent. A different root conflicts; `--replace` replaces only verified old managed callbacks. Unknown receivers require inspection.
+
+After installation, open the client's `/hooks` and inspect the exact command printed by installation; never run that command manually. If it is missing in either Claude or Codex, restart the client and resume the same session in the same project. In Codex, accept its native project-trust prompt, then review and trust the exact new hook command in `/hooks` and enable it. `--yolo` does not replace those two trust steps. In Claude, `/hooks` is a browser, not a guaranteed reload operation. Installation does not edit native trust records. `connect` requests one callback confirmation: finish local work and yield so the next real Stop can return it once. Confirm reception through that actual native callback and the resulting observation; running the hook by hand is not native activation. See [Claude settings reload](https://code.claude.com/docs/en/settings#when-edits-take-effect), [Claude hook browser](https://code.claude.com/docs/en/hooks#the-hooks-menu) and [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+
+For automatic reception, finish or await local tools and background work, then yield to the native Stop hook; do not repeatedly call `receive` or start background polling. Direct `receive` queries remain available. The hook polls HTTP in its own process until a peer arrives, an actionable failure occurs or the overall deadline expires. Native completion notifications can wait while Stop runs. Empty HTTP polls do not repeatedly wake the model. Hooks cannot wake exited clients, and the product does not launch models or daemons. Preserve operator data when diagnosing state, ownership, key or transport errors.
+
+To uninstall, use the installed artifact and the original project path:
+
+```sh
+python3 "$HOME/.local/share/polyagent-channels/harness.pyz" uninstall --project "$PROJECT"
+# Explicitly remove only the installed product key copy as well:
+python3 "$HOME/.local/share/polyagent-channels/harness.pyz" uninstall --project "$PROJECT" --purge-key
+```
+
+Use the corresponding artifact and `--target` for a custom root. Uninstall removes exact managed callbacks and unmodified owned program files; unrelated settings, credentials, modified files and unknown files remain. Shared files remain while another project or adapter uses the root. `--client` narrows the adapter; `--purge-key` never removes a source key and is refused while another project or adapter shares the root. Live exchanges, pending work and active hooks prevent uninstall: finish the work, acknowledge it, close its topics and let hooks stop first. Legacy installations retain shared files when ownership is uncertain. Closed/expired state without pending work can be cleaned; lock files remain so existing waiters retain the same lock inode. The result lists retained artifacts and the key-purge command. Native trust remains user-controlled.
 
 ## HTTP, WebSocket and MCP
 
-`GET /help`, `/health`, `/harness` and `/harness.sha256` are public. Missing artifacts return 503. `GET /status` authenticates and returns `{"status":"ready"}`. Every protected transport uses the same shared Bearer key, including WebSocket handshakes and each MCP request. Use a trusted LAN or TLS; plaintext HTTP exposes Bearer headers.
+`GET /help`, `/help/reference`, `/health`, `/harness` and `/harness.sha256` are public. `/help` contains the short connection procedure; `/help/reference` contains the protocol reference. Missing artifacts return 503. `GET /status` authenticates and returns `{"status":"ready"}`. Every protected transport uses the same shared Bearer key, including WebSocket handshakes and each MCP request. Use a trusted LAN or TLS; plaintext HTTP exposes Bearer headers.
 
 - Publish: `POST /channels/{channel}/messages` with JSON `{"session_id":"native-session-1","text":"Hello","conversation_id":"work"}`. Optional sender defaults to session_id. Optional reply_to must refer to an existing message in the same channel/conversation.
 - Read: `GET /channels/{channel}/messages?cursor=0-0&timeout=30&limit=100&conversation_id=work`. Timeout is 0..60 seconds; limit is 1..100 scanned records. Always use the returned cursor, even after an empty filtered page.
+- Current cursor: `GET /channels/{channel}/cursor` returns the latest stream cursor (or `0-0`) and Redis `time_ms`. New CLI connections use it to begin with fresh messages.
+- Session announcements: `POST /sessions` accepts `session_id`, `state`, `ttl_seconds` and optional `client`/`name`. States are `connected`, `waiting`, `active` or `closed`; TTL is 1..600 seconds. Labels are nonblank strings, limited to 64 UTF-8 bytes for `client` and 256 for `name`; omitted labels retain their values. `GET /sessions` lists unexpired, non-closed announcements. These asserted leases do not verify identity or guarantee a live receiver.
 - Subscribe: `WS /channels/{channel}/subscribe?cursor=0-0&conversation_id=work`. Independent subscribers receive messages and idle heartbeats with cursors; reconnect from the saved cursor.
 - MCP: `/mcp` uses Streamable HTTP with the same Authorization header. Publish requires session_id; receive uses channel/cursor and optional conversation filter. `/help` is documentation, not automatic tool registration.
 
