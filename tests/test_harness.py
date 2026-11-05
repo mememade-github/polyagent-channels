@@ -325,14 +325,24 @@ def test_busy_closed_session_lock_refuses_uninstall(artifact, tmp_path):
                 (root / 'harness.pyz').exists()) == (1, inode, True)
 
 
-def test_active_installed_hook_refused_even_without_state(artifact, tmp_path):
+def test_active_installed_hook_reuses_installation_and_refuses_changes(artifact, tmp_path):
     import fcntl
     import time
 
-    assert invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path).returncode == 0
+    key = tmp_path / 'private/key'
+    key.parent.mkdir(mode=0o700)
+    key.write_text('synthetic-installed-key')
+    key.chmod(0o600)
+    arguments = args(tmp_path) + ['--key-file', key]
+    assert invoke(artifact, 'install', *arguments, cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
     hook = tmp_path / '.claude/settings.local.json'
     before = hook.read_bytes()
+    state = root / 'state/retained'
+    state.parent.mkdir()
+    state.write_text('session state must remain untouched')
+    preserved = {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+                 for path in [hook, *root.rglob('*')] if path.is_file()}
     process = subprocess.Popen([sys.executable, str(root / 'harness.pyz'), '--config',
                                 str(root / 'config.json'), 'hook'], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -348,10 +358,28 @@ def test_active_installed_hook_refused_even_without_state(artifact, tmp_path):
                 if time.monotonic() >= deadline:
                     pytest.fail('Hook did not acquire lifecycle lock')
                 time.sleep(.01)
-        for action in ('install', 'uninstall'):
-            arguments = args(tmp_path) if action == 'install' else ['--target', root, '--project', tmp_path]
-            result = invoke(artifact, action, *arguments, cwd=tmp_path)
+        reused = invoke(artifact, 'install', *arguments, cwd=tmp_path)
+        assert reused.returncode == 0 and json.loads(reused.stdout)['status'] == 'already_installed'
+        assert process.poll() is None
+        assert {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+                for path in preserved} == preserved
+        other_archive = tmp_path / 'other.pyz'
+        other_archive.write_bytes(artifact.read_bytes())
+        with zipfile.ZipFile(other_archive, 'a') as archive:
+            archive.writestr('synthetic-release', 'different')
+        other_key = key.with_name('other-key')
+        other_key.write_text('synthetic-other-key')
+        other_key.chmod(0o600)
+        changes = [(other_archive, 'install', arguments),
+                   (artifact, 'install', arguments + ['--url', 'http://localhost:18766']),
+                   (artifact, 'install', arguments + ['--key-file', other_key]),
+                   (artifact, 'install', arguments + ['--project', tmp_path / 'new-project']),
+                   (artifact, 'uninstall', ['--target', root, '--project', tmp_path])]
+        for candidate, action, changed in changes:
+            result = invoke(candidate, action, *changed, cwd=tmp_path)
             assert (result.returncode, hook.read_bytes(), 'Installation in use' in result.stderr) == (1, before, True)
+        assert {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+                for path in preserved} == preserved
         output, errors = process.communicate('{"session_id":"synthetic-hook"}', timeout=5)
         assert (process.returncode, json.loads(output), errors) == (0, {}, '')
     finally:

@@ -212,6 +212,10 @@ def execute(options):
     with ExitStack() as stack:
         for lock in sorted(locks):
             stack.enter_context(installation_lock(lock))
+        if options.action == 'install' and installation_matches(options, root, project):
+            print(json.dumps({'action': 'install', 'status': 'already_installed', 'root': str(root),
+                              'hook': str(native_hook(project, options.client))}))
+            return
         stack.enter_context(lifecycle_lock(root, exclusive=True))
         if options.action == 'uninstall':
             return uninstall(options, root, project, clients)
@@ -249,6 +253,43 @@ def protected_key(path):
     if not content.strip():
         raise SetupError('Key file is empty')
     return content
+
+
+def installation_matches(options, root, project):
+    """Reuse an unchanged installation without interrupting shared CLI users."""
+    try:
+        source = canonical_path(sys.argv[0])
+        if source.suffix != '.pyz' or not archive_owned(source):
+            return False
+        wrapper = root / 'bin/channels'
+        files = {'harness.pyz': (source.read_bytes(), 0o600),
+                 'config.json': ((json.dumps({'url': service_url(options.url)}) + '\n').encode(), 0o600),
+                 'bin/channels': (wrapper_content(Path(os.path.abspath(sys.executable)), root), 0o700)}
+        for name, (body, mode) in files.items():
+            path = canonical_path(root / name)
+            if not path.is_file() or path.read_bytes() != body or stat.S_IMODE(path.stat().st_mode) != mode:
+                return False
+        hook = native_hook(project, options.client)
+        command = shlex.join([str(wrapper), '--client', options.client, 'hook'])
+        expected_hook, _ = hook_document(hook, command, options.replace)
+        if not hook.is_file() or hook.read_bytes() != expected_hook:
+            return False
+        manifest = manifest_data(root)
+        record = {'project': str(project), 'client': options.client, 'path': str(hook), 'command': command}
+        bindings = [item for item in manifest['hooks']
+                    if (item['project'], item['client']) == (str(project), options.client)]
+        if bindings != [record] or manifest['files'] != {name: digest(body) for name, (body, _) in files.items()}:
+            return False
+        key = canonical_path(root / '.env/channel.key')
+        if stat.S_IMODE(key.parent.stat().st_mode) != 0o700:
+            return False
+        if options.key_file and (not key.is_file() or protected_key(key) != protected_key(options.key_file)):
+            return False
+        if key.exists():
+            protected_key(key)
+        return True
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
 
 
 def install(options, root, project):
