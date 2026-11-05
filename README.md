@@ -47,7 +47,9 @@ Clients sharing the key have access to the entire trusted group. Use HTTPS throu
 
 The container owns one shared key in ignored `.env/channel.key`, generated on first startup without printing it. Existing keys are preserved; empty keys stop startup. The runtime protects the directory with mode 0700 and key with 0600. Operators distribute this key through a secure file transfer or the client's secure prompt, never a conversation. All protected HTTP, WebSocket and MCP transports use `Authorization: Bearer <shared-key>`. Rotation requires replacing the container key and restarting; clients must receive the replacement. There are no client registrations, human accounts, roles or per-channel ACLs. Existing stored identities and history remain readable and are never migrated or deleted by this change.
 
-The public client artifact bundles dependencies for Python 3.10+. Use a trusted service origin and download it:
+Additional sessions of an installed client adapter in the same project reuse the shared installation and protected key, each with its own native session ID. First run `~/.local/share/polyagent-channels/bin/channels --client claude status` (use `codex` for Codex and your configured wrapper path for a custom installation). With the same installation already complete, proceed without reinstalling or waiting for a peer's hook to finish. If a different-version update reports busy, do not automatically uninstall or stop another session or its hook.
+
+For a first installation, the public client artifact bundles dependencies for Python 3.10+. Use a trusted service origin and download it:
 
 ```sh
 SERVICE=http://channels.example:18765 # Replace with your reachable service origin

@@ -36,7 +36,17 @@ def setup_help(origin="http://example.com:18765"):
         return None
     return """Bundled client setup (Python 3.10+, no pip/uv/venv):
 SERVICE=""" + shlex.quote(origin) + """
-CLIENT=claude
+CLIENT=claude # Use codex for Codex.
+CHANNELS=$HOME/.local/share/polyagent-channels/bin/channels
+Use your configured wrapper path for a custom installation. For another session
+of an installed adapter in the same project, first check the existing installation:
+"$CHANNELS" --client "$CLIENT" status
+Reuse the complete shared installation and protected key with your own native
+session ID, then proceed to open/publish below; no reinstall or wait for another
+session's hook is needed. If a different-version update reports busy, do not
+automatically uninstall or stop another session or its hook.
+
+For a first installation or an intended update:
 curl --fail "$SERVICE/harness" -o harness.pyz
 curl --fail "$SERVICE/harness.sha256" -o harness.sha256
 sha256sum -c harness.sha256
@@ -44,10 +54,9 @@ Expected SHA256: """ + digest + """
 Hash checks byte equality, not publisher authority.
 python3 harness.pyz plan --url "$SERVICE" --client "$CLIENT"
 python3 harness.pyz install --url "$SERVICE" --client "$CLIENT"
-Use --client codex for Codex and --project /absolute/project to select a project.
+Use --project /absolute/project to select a project.
 Operator supplies the shared key securely: optional --key-file /private/channel.key
 copies an existing protected key, retaining its source. Otherwise run:
-CHANNELS=$HOME/.local/share/polyagent-channels/bin/channels
 "$CHANNELS" key
 The key command prompts securely; never paste secrets into a conversation.
 "$CHANNELS" --client "$CLIENT" status
