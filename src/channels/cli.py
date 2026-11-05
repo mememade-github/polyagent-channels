@@ -12,10 +12,15 @@ import httpx
 from websockets.asyncio.client import connect
 
 from channels import exchange
+from channels.client_config import ConfigError, apply_config
+from channels.setup import atomic_write
+import time
 
 
 def command_parser():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config')
+    parser.add_argument('--profile')
     parser.add_argument('--url', default=os.getenv('CHANNEL_URL', 'http://127.0.0.1:18765'))
     parser.add_argument('--key-file', default=os.getenv('CHANNEL_KEY_FILE', '.env/channel.key'), help='Protected administrator key; registration only')
     parser.add_argument('--credential-file', default=os.getenv('CHANNEL_CREDENTIAL_FILE', '.env/agent.key'))
@@ -24,7 +29,7 @@ def command_parser():
     registration = commands.add_parser('register', help='Register with administrator key; save a new private credential file')
     registration.add_argument('--name', required=True)
     publisher = commands.add_parser('publish', help='Publish text, --file PATH or --file - for stdin')
-    publisher.add_argument('channel')
+    publisher.add_argument('channel', nargs='?')
     publisher.add_argument('--conversation-id', default='main')
     source = publisher.add_mutually_exclusive_group(required=True)
     source.add_argument('--text')
@@ -32,10 +37,11 @@ def command_parser():
     publisher.add_argument('--reply-to')
     for name in ('receive', 'listen'):
         reader = commands.add_parser(name, help='Read after cursor' if name == 'receive' else 'Active WebSocket notifications')
-        reader.add_argument('channel')
+        reader.add_argument('channel', nargs='?')
         reader.add_argument('--conversation-id', help='Omit to read all conversations')
         reader.add_argument('--cursor', default='0-0')
         reader.add_argument('--timeout', type=int, default=30, help='seconds; listen 0 means unlimited')
+    commands.add_parser('status', help='Verify existing identity and local exchange/callback status')
     add_exchange_commands(commands)
     return parser
 
@@ -47,8 +53,8 @@ def add_exchange_commands(commands):
             'open': 'Open one bounded cooperation exchange for this logical client',
             'close': 'Close only the matching owned exchange',
         }[name])
-        command.add_argument('channel')
-        command.add_argument('--conversation-id', required=True)
+        command.add_argument('channel', nargs='?')
+        command.add_argument('--conversation-id')
         if name != 'close':
             command.add_argument('--cursor', default='0-0')
         if name == 'wait':
@@ -94,7 +100,7 @@ async def listen(channel_url, headers, cursor, conversation_id=None):
 async def listen_until_timeout(options, channel_url, headers):
     if options.timeout < 0:
         raise ValueError('timeout must be nonnegative')
-    with contextlib.suppress(TimeoutError):
+    with contextlib.suppress(TimeoutError, asyncio.TimeoutError):
         await asyncio.wait_for(listen(channel_url, headers, options.cursor, options.conversation_id), options.timeout or None)
 
 
@@ -171,15 +177,68 @@ async def run_owned_hook(options, credential, path):
 
 def run_hook(options):
     decision = {}
+    diagnostic = 'absent'
     try:
         if exchange.has_open_state(options.state_dir):
             credential = read_secret(options.credential_file)
             path = exchange.owned_state(options.state_dir, credential)
+            if path is None:
+                diagnostic = 'error'
             if path is not None:
+                state = exchange.read_state(path)
+                diagnostic = 'expired' if state['deadline'] <= time.time() else 'wait'
                 decision = asyncio.run(run_owned_hook(options, credential, path))
+                if 'Untrusted peer JSON' in decision.get('reason', ''):
+                    diagnostic = 'peer'
+                if not path.exists():
+                    diagnostic = 'absent'
+                elif diagnostic != 'expired' and ('failed' in decision.get('reason', '') or exchange.read_state(path)['errors']):
+                    diagnostic = 'error'
     except Exception:  # noqa: BLE001 — ownership/state failures must also stay redacted
+        diagnostic = 'error'
         print('channel hook cannot use owned state; allowing stop: ' + exchange.SAFE_DIAGNOSTIC, file=sys.stderr)
+    record_hook(options, diagnostic)
     print(json.dumps(decision, ensure_ascii=False))
+
+
+def record_hook(options, state):
+    try:
+        directory = Path(options.state_dir)
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write(directory / 'last-hook.json', json.dumps({'timestamp': time.time(), 'state': state}).encode())
+    except Exception:
+        print('channel hook diagnostic unavailable', file=sys.stderr)
+
+
+def client_status(options, credential):
+    with httpx.Client(timeout=10) as client:
+        response = client.get(options.url.rstrip('/') + '/agents/me', headers={'Authorization': 'Bearer ' + credential})
+        response.raise_for_status()
+        identity = response.json()
+    result = {'profile': options.profile, 'identity': {'agent_id': identity['agent_id'], 'sender': identity['sender']},
+              'url': options.url, 'channel': 'general', 'conversation_id': 'main',
+              'credential_path': options.credential_file, 'state_path': options.state_dir, 'exchange': 'absent', 'last_callback': None}
+    try:
+        path = exchange.owned_state(options.state_dir, credential)
+        if path:
+            state = exchange.read_state(path)
+            if state['agent_id'] != identity['agent_id']:
+                raise exchange.ExchangeMismatch()
+            result.update(channel=state['channel'], conversation_id=state['conversation_id'],
+                          exchange='expired' if state['deadline'] <= time.time() else 'live')
+        elif exchange.has_open_state(options.state_dir):
+            result['exchange'] = 'error'
+    except Exception:
+        result['exchange'] = 'error'
+    try:
+        diagnostic = json.loads((Path(options.state_dir) / 'last-hook.json').read_text())
+        if set(diagnostic) == {'timestamp', 'state'} and diagnostic['state'] in ('absent', 'expired', 'wait', 'peer', 'error', 'config_error') and type(diagnostic['timestamp']) in (int, float):
+            result['last_callback'] = diagnostic
+    except FileNotFoundError:
+        pass
+    except Exception:
+        result['last_callback'] = {'state': 'error'}
+    print(json.dumps(result))
 
 
 def run(options):
@@ -190,6 +249,8 @@ def run(options):
         run_hook(options)
         return
     credential = read_secret(options.credential_file)
+    if options.command == 'status':
+        return client_status(options, credential)
     if options.command in ('wait', 'open', 'close'):
         return asyncio.run(run_exchange(options, credential))
     headers = {'Authorization': 'Bearer ' + credential}
@@ -206,9 +267,32 @@ def run(options):
 def main():
     options = command_parser().parse_args()
     try:
+        try:
+            apply_config(options, sys.argv[1:])
+        except ConfigError as error:
+            if options.command != 'hook':
+                raise
+            # Recover only the conventional diagnostic destination, never configuration values.
+            from channels.client_config import DEFAULT_ROOT, profile_paths
+            try:
+                _, state = profile_paths(options.config or DEFAULT_ROOT / 'config.json', options.profile or '')
+                options.state_dir = str(state)
+                record_hook(options, 'config_error')
+            except Exception:
+                pass
+            print('{}')
+            print('channel hook configuration failed: ' + error.code + '; allowing stop', file=sys.stderr)
+            return
+        if hasattr(options, 'channel') and options.channel is None:
+            raise ValueError('channel is required without a profile')
+        if options.command in ('open', 'close', 'wait') and options.conversation_id is None:
+            raise ValueError('conversation is required without a profile')
         status = run(options)
         if status:
             sys.exit(status)
+    except ConfigError as error:
+        print('channel configuration failed: ' + error.code, file=sys.stderr)
+        sys.exit(1)
     except KeyboardInterrupt:
         pass
     # Outer CLI boundary deliberately omits exception text: transports can include secrets.

@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.websockets import WebSocketDisconnect
 
+from channels.harness import download, setup_help
 from channels.auth import ERRORS, CredentialAuth, load_key
 from channels.identity import authenticated_agent, register
 from channels.persistence import (
@@ -75,31 +76,9 @@ not SSE. Independent receivers get message events; reconnect with saved cursor.
 A cycle with no matches emits {"type":"heartbeat","cursor":"..."}; an idle
 receive waits up to 30 seconds. Save heartbeat cursors too.
 
-Tool-enabled agent setup, starting with only this help URL:
-You need a permitted shell, network access and the product's channels CLI on PATH
-in the agent AND hook runtime. Reading help cannot install tools or register a
-hook. An operator can preinstall the CLI. Otherwise, with permission to install,
-use Python 3.12+ from the unpacked polyagent-channels product distribution:
-  python3.12 -m venv .venv
-  .venv/bin/pip install -r requirements.lock
-  .venv/bin/pip install --no-deps .
-  . .venv/bin/activate
-  channels --help
-The operator supplies these environment variables to the runtime:
-  CHANNEL_URL: this service's base URL (use HTTPS or a trusted network).
-  CHANNEL_CREDENTIAL_FILE: your own registered individual credential file in
-    ignored .env/, directory mode 0700/file 0600. Never print or publish it.
-  CHANNEL_STATE_DIR: local state directory, default ./.channels; keep it ignored.
-    Use an absolute directory when tool and hook working directories can differ.
-  CHANNEL_NAME and CHANNEL_CONVERSATION: the agreed coordination target.
-Ask the operator for missing configuration or the product distribution. No admin
-key is needed by the running agent. Use only your own individual credential.
-Fetch these instructions through a tool whose output you can read:
-  curl --fail --silent --show-error "$CHANNEL_URL/help"
-
-Manual cooperation:
-  CURSOR=0-0
-  channels publish "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --text 'Ready for the agreed task'
+Existing source CLI installations remain supported. The manual examples below
+use their flag/environment defaults. Shared wrappers always require --profile.
+For direct manual waits:
   channels wait "$CHANNEL_NAME" --conversation-id "$CHANNEL_CONVERSATION" --cursor "$CURSOR" --timeout 30
 wait gets your identity, then long-polls the existing HTTP messages endpoint. It
 ignores your own agent_id, including messages from sessions sharing your credential.
@@ -286,7 +265,10 @@ async def lifespan(app):
 
 
 async def help_page(request):
-    return PlainTextResponse(HELP)
+    introduction = setup_help()
+    if introduction is None:
+        return PlainTextResponse('Harness artifact unavailable', status_code=503)
+    return PlainTextResponse(introduction + HELP)
 
 
 async def health(request):
@@ -367,7 +349,7 @@ async def read_registration(request):
 
 
 inner = Starlette(routes=[Route('/agents', agents, methods=['POST']), Route('/agents/me', agent_identity),
-    Route('/help', help_page), Route('/health', health),
+    Route('/harness', download), Route('/harness.sha256', download), Route('/help', help_page), Route('/health', health),
     Route('/channels/{channel}/messages', messages, methods=['GET', 'POST']),
     WebSocketRoute('/channels/{channel}/subscribe', subscribe), Mount('/', app=mcp_app)], lifespan=lifespan)
 

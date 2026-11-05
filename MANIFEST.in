@@ -6,3 +6,5 @@ recursive-include src/channels *.lua
 
 include AGENTS.md
 include .devcontainer/LICENSE .dockerignore
+
+include scripts/build_harness.py

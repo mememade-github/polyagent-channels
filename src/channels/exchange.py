@@ -11,6 +11,11 @@ import tempfile
 import time
 from pathlib import Path
 
+if sys.version_info >= (3, 11):
+    timeout_context = asyncio.timeout
+else:
+    from async_timeout import timeout as timeout_context
+
 EXCHANGE_TIMEOUT = 600
 HOOK_TIMEOUT = 30
 IDENTITY_TIMEOUT = 10
@@ -50,7 +55,7 @@ def positive_seconds(value):
 
 
 async def own_identity(client):
-    async with asyncio.timeout(IDENTITY_TIMEOUT):
+    async with timeout_context(IDENTITY_TIMEOUT):
         response = await client.get('agents/me')
         response.raise_for_status()
         identity = response.json()
@@ -63,7 +68,7 @@ async def own_identity(client):
 async def wait_for_peer(client, target, timeout=0):
     """Carry scan cursors, but return a peer row's ID so later rows stay unread."""
     cursor = target['cursor']
-    timer = asyncio.timeout(seconds(timeout) or None)
+    timer = timeout_context(seconds(timeout) or None)
     try:
         async with timer:
             identity = await own_identity(client)
@@ -77,16 +82,29 @@ async def wait_for_peer(client, target, timeout=0):
                 cursor = page['cursor']
                 # Also honor cancellation when successive pages are immediately ready.
                 await asyncio.sleep(0)
-    except TimeoutError:
-        if not timer.expired():
+    except (TimeoutError, asyncio.TimeoutError):
+        if not timer_expired(timer):
             raise
     return {'type': 'timeout', 'cursor': cursor}
 
 
+def timer_expired(timer):
+    if sys.version_info >= (3, 11):
+        return timer.expired()
+    return timer.expired
+
+
+def timer_deadline(timer):
+    if sys.version_info >= (3, 11):
+        return timer.when()
+    return timer.deadline
+
+
 def poll_seconds(timer):
-    if timer.when() is None:
+    deadline = timer_deadline(timer)
+    if deadline is None:
         return POLL_TIMEOUT
-    remaining = timer.when() - asyncio.get_running_loop().time()
+    remaining = deadline - asyncio.get_running_loop().time()
     return min(POLL_TIMEOUT, max(1, math.ceil(remaining)))
 
 
