@@ -85,10 +85,21 @@ optional name is nonblank and <=256 UTF-8 bytes. Omitted labels retain their val
 GET /sessions lists unexpired, non-closed announcements. The CLI peers command
 uses this list. Leases expire without proving whether a native client is alive.
 
+Run install for every project/client, even when a shared wrapper exists; identical
+installation is a no-op. Reuse the protected key. If a key came with the URL and
+is not saved, use key --stdin after approval, sending it through tool stdin to EOF.
+Do not request it again, echo/print it or put it in command arguments. Interactive
+operator entry uses key without --stdin. The intended product copy is its protected
+runtime key file; keep it out of repository files, service logs and channel messages.
+Vendor conversation/tool records may retain input; the product cannot remove it.
+Before connect, the operator must resume the same native session with install's
+resume_command and complete native hook inspection/trust. /hooks does not install
+new hooks; do not assume running Claude reloads them. See /help for these steps.
 CLI connect reuses a protected key or prompts securely, authenticates, opens the
 chosen topic and announces the session. Defaults are general/main and 600 seconds.
+That reception window starts after installation, resumption and trust are ready.
 A fresh topic starts at the current cursor; reconnect preserves unfinished work.
-Publish also opens reception for replies. See /help for native /hooks review.
+Publish also opens reception for replies.
 Global --client codex|claude selects the adapter; --session-id explicitly overrides
 routing. Otherwise exactly one native session-ID environment variable is required.
 
