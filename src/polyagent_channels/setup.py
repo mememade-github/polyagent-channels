@@ -16,6 +16,8 @@ from pathlib import Path
 
 from polyagent_channels.client_config import ConfigError, DEFAULT_ROOT, read_config, service_url
 
+NATIVE_HOOK_PATHS = {'claude': '.claude/settings.local.json', 'codex': '.codex/hooks.json'}
+
 
 class SetupError(ValueError):
     """A diagnostic containing only installer-authored safe text."""
@@ -196,8 +198,55 @@ def main(arguments=None):
 
 
 def native_hook(project, client):
-    relative = '.claude/settings.local.json' if client == 'claude' else '.codex/hooks.json'
-    return canonical_path(project / relative)
+    return canonical_path(project / NATIVE_HOOK_PATHS[client])
+
+
+def native_resume_command(client, project, session_id=None):
+    from polyagent_channels.exchange import validate_session_id
+    name = {'claude': 'CLAUDE_CODE_SESSION_ID', 'codex': 'CODEX_THREAD_ID'}.get(client)
+    current = os.getenv(name) if name else None
+    if not current or (session_id is not None and session_id != current):
+        return None
+    try:
+        validate_session_id(current)
+    except ValueError:
+        return None
+    arguments = [client, '--resume' if client == 'claude' else 'resume', current]
+    return shlex.join(['cd', '--', str(project)]) + ' && ' + shlex.join(arguments)
+
+
+def hook_binding_status(root, project, client):
+    """Inspect this project/client's registered Stop binding without changing it."""
+    hook = project / NATIVE_HOOK_PATHS[client]
+    command = shlex.join([str(root / 'bin/channels'), '--client', client, 'hook'])
+    record = {'project': str(project), 'client': client, 'path': str(hook), 'command': command}
+    result = {**record, 'status': 'hook_missing', 'reason': 'project_client_not_installed'}
+    try:
+        canonical_path(hook)
+        manifest = manifest_data(root)
+        bindings = [item for item in manifest['hooks']
+                    if (item['project'], item['client']) == (str(project), client)]
+        if not bindings:
+            return result
+        if bindings != [record]:
+            return {**result, 'status': 'hook_invalid', 'reason': 'manifest_binding_mismatch'}
+        if not hook.is_file():
+            return {**result, 'reason': 'hook_file_missing'}
+        document = json.loads(hook.read_text())
+        entries = document.get('hooks', {}).get('Stop', [])
+        hooks = [item for entry in entries for item in entry.get('hooks', [])]
+        matching = [item for item in hooks if item.get('command') == command]
+        if matching != [{'type': 'command', 'command': command, 'timeout': 660}]:
+            return {**result, 'status': 'hook_invalid', 'reason': 'stop_command_mismatch'}
+        if any(entry.get('matcher') for entry in entries
+               if any(item.get('command') == command for item in entry.get('hooks', []))):
+            return {**result, 'status': 'hook_invalid', 'reason': 'stop_scope_mismatch'}
+        if managed_binding(command) != (str(root), '--client', client):
+            return {**result, 'status': 'hook_invalid', 'reason': 'wrapper_mismatch'}
+        hook_document(hook, command)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {**result, 'status': 'hook_invalid', 'reason': 'binding_unreadable_or_invalid'}
+    return {**result, 'status': 'installed', 'reason': None}
 
 
 def execute(options):
@@ -214,7 +263,8 @@ def execute(options):
             stack.enter_context(installation_lock(lock))
         if options.action == 'install' and installation_matches(options, root, project):
             print(json.dumps({'action': 'install', 'status': 'already_installed', 'root': str(root),
-                              'hook': str(native_hook(project, options.client))}))
+                              'hook': str(native_hook(project, options.client)),
+                              'resume_command': native_resume_command(options.client, project)}))
             return
         stack.enter_context(lifecycle_lock(root, exclusive=True))
         if options.action == 'uninstall':
@@ -315,7 +365,8 @@ def install(options, root, project):
         raise SetupError('Existing shared key differs; preserving it')
     print(json.dumps({'action': options.action, 'root': str(root), 'hook': str(hook),
                       'command': command, 'previous_bindings': previous,
-                      'key': str(key), 'native_activation': 'Review and trust the exact new native hook; trust is user-controlled'}))
+                      'key': str(key), 'resume_command': native_resume_command(options.client, project),
+                      'native_activation': 'Review and trust the exact new native hook; trust is user-controlled'}))
     if options.action == 'plan':
         return
     if source.suffix != '.pyz' or not archive_owned(source):

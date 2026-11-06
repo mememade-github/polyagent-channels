@@ -12,6 +12,8 @@ import zipfile
 
 import pytest
 
+from polyagent_channels.setup import hook_binding_status
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -99,6 +101,38 @@ def test_multiple_projects_and_adapters(artifact, tmp_path):
     assert (first.returncode, (root / 'bin/channels').exists(), len(commands(projects[1] / '.codex/hooks.json'))) == (0, True, 1)
     second = invoke(artifact, 'uninstall', '--target', root, '--project', projects[1], cwd=tmp_path)
     assert (second.returncode, (root / 'bin/channels').exists()) == (0, False)
+
+
+def test_shared_wrapper_does_not_imply_another_project_or_client_is_installed(artifact, tmp_path):
+    root = tmp_path / 'root'
+    claude = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
+    assert claude.returncode == 0, claude.stderr
+    key = root / '.env/channel.key'
+    key.write_text('synthetic-retained-key')
+    key.chmod(0o600)
+    before = key.read_bytes(), (tmp_path / '.claude/settings.local.json').read_bytes()
+    missing_client = hook_binding_status(root, tmp_path, 'codex')
+    missing_project = hook_binding_status(root, tmp_path / 'another-project', 'claude')
+    codex = invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+    assert (missing_client['status'] == missing_project['status'] == 'hook_missing'
+            and codex.returncode == 0
+            and hook_binding_status(root, tmp_path, 'claude')['status'] == 'installed'
+            and hook_binding_status(root, tmp_path, 'codex')['status'] == 'installed'
+            and (key.read_bytes(), (tmp_path / '.claude/settings.local.json').read_bytes()) == before)
+
+
+@pytest.mark.parametrize('client', ['claude', 'codex'])
+def test_install_and_reinstall_emit_current_native_resume_command(artifact, tmp_path, monkeypatch, client):
+    project = tmp_path / "project 'quoted' $(false)"
+    monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'native-claude')
+    monkeypatch.setenv('CODEX_THREAD_ID', 'native-codex')
+    first = invoke(artifact, 'install', *args(tmp_path, client, project), cwd=tmp_path)
+    second = invoke(artifact, 'install', *args(tmp_path, client, project), cwd=tmp_path)
+    assert first.returncode == second.returncode == 0, first.stderr + second.stderr
+    for output in (first.stdout, second.stdout):
+        directory, command = json.loads(output)['resume_command'].split(' && ')
+        assert (shlex.split(directory) == ['cd', '--', str(project)]
+                and shlex.split(command) == [client, '--resume' if client == 'claude' else 'resume', 'native-' + client])
 
 
 @pytest.mark.parametrize('candidate', ['channels hook', '/missing/bin/channels hook', 'env /missing/bin/channels hook'])

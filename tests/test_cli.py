@@ -1,17 +1,19 @@
 import asyncio
 import io
 import json
+import shlex
 import time
 import threading
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from polyagent_channels import cli, exchange
+from polyagent_channels import cli, exchange, setup
 from polyagent_channels.client_config import apply_config
 
 
@@ -155,7 +157,6 @@ def test_key_stdin_saves_reuses_and_preserves_conflicting_key_without_output(tmp
             and original not in output and different not in output)
 
 
-
 @pytest.mark.parametrize('content', ['', 'synthetic first\nsynthetic second'])
 def test_key_stdin_rejects_empty_or_multiple_values_without_output(tmp_path, content):
     destination = tmp_path / '.env/channel.key'
@@ -166,12 +167,10 @@ def test_key_stdin_rejects_empty_or_multiple_values_without_output(tmp_path, con
             and 'synthetic' not in result.stdout + result.stderr)
 
 
-
 def test_key_stdin_and_source_file_are_mutually_exclusive(capsys):
     with pytest.raises(SystemExit) as error:
         options('key', '--stdin', '--source-file', '/synthetic/private.key')
     assert error.value.code == 2 and 'not allowed with argument' in capsys.readouterr().err
-
 
 
 def test_concurrent_identical_key_writers_never_observe_an_empty_key(tmp_path, monkeypatch):
@@ -329,6 +328,7 @@ def test_status_session_is_optional_even_when_native_environments_ambiguous(monk
 
 @pytest.fixture
 def connection_client(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
     secret_dir = tmp_path / '.env'
     secret_dir.mkdir(mode=0o700)
     key = secret_dir / 'channel.key'
@@ -336,6 +336,17 @@ def connection_client(tmp_path, monkeypatch, capsys):
     key.chmod(0o600)
     config = tmp_path / 'config.json'
     config.write_text('{"url":"http://synthetic-service"}')
+    wrapper = tmp_path / 'bin/channels'
+    wrapper.parent.mkdir()
+    wrapper.write_bytes(setup.wrapper_content(Path(sys.executable), tmp_path))
+    (tmp_path / 'harness.pyz').write_bytes(b'synthetic-artifact')
+    hook = setup.native_hook(tmp_path, 'codex')
+    hook.parent.mkdir()
+    command = shlex.join([str(wrapper), '--client', 'codex', 'hook'])
+    hook.write_bytes(setup.hook_document(hook, command)[0])
+    manifest = {'version': 1, 'files': {}, 'hooks': [
+        {'project': str(tmp_path), 'client': 'codex', 'path': str(hook), 'command': command}]}
+    (tmp_path / 'install-manifest.json').write_text(json.dumps(manifest))
     requests = []
     messages = [{'id': '1-0', 'session_id': 'old-peer', 'conversation_id': 'main', 'text': 'old work'}]
     presence = []
@@ -376,7 +387,94 @@ def connection_client(tmp_path, monkeypatch, capsys):
         cli.run(selected)
         return json.loads(capsys.readouterr().out)
     return SimpleNamespace(invoke=invoke, requests=requests, messages=messages, presence=presence,
-                           directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot)
+                           directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot, hook=hook, root=tmp_path)
+
+
+@pytest.mark.parametrize('missing', ['client', 'project', 'hook_file'])
+def test_missing_binding_does_not_claim_native_approval_is_the_next_step(connection_client, missing):
+    session = connection_client
+    session.invoke('connect')
+    diagnostic = exchange.session_directory(session.directory, 'native-self') / 'last-hook.json'
+    diagnostic.write_text(json.dumps({'timestamp': time.time(), 'state': 'waiting',
+                                      'session_id': 'native-self', 'callback_id': 'old-binding'}))
+    manifest_path = session.root / 'install-manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    if missing == 'client':
+        manifest['hooks'][0]['client'] = 'claude'
+    if missing == 'project':
+        manifest['hooks'][0]['project'] = str(session.root / 'another-project')
+    if missing == 'hook_file':
+        session.hook.unlink()
+    manifest_path.write_text(json.dumps(manifest))
+    before = manifest_path.read_bytes()
+    result = session.invoke('connect')
+    status = session.invoke('status')
+    assert (result['reception'] == status['reception'] == 'hook_missing'
+            and 'explicit installer' in result['next_action']
+            and '/hooks' not in result['next_action']
+            and manifest_path.read_bytes() == before)
+
+
+@pytest.mark.parametrize('damage', ['command', 'timeout', 'json', 'manifest', 'matcher', 'wrapper'])
+def test_invalid_binding_is_distinct_from_an_unobserved_callback(connection_client, damage):
+    session = connection_client
+    document = json.loads(session.hook.read_text())
+    if damage == 'command':
+        document['hooks']['Stop'][0]['hooks'][0]['command'] = 'unrelated-command'
+    if damage == 'timeout':
+        document['hooks']['Stop'][0]['hooks'][0]['timeout'] = 1
+    if damage == 'matcher':
+        document['hooks']['Stop'][0]['matcher'] = 'restricted'
+    session.hook.write_text(json.dumps(document) if damage != 'json' else '{')
+    if damage == 'manifest':
+        (session.root / 'install-manifest.json').write_text('{')
+    if damage == 'wrapper':
+        (session.root / 'bin/channels').write_text('#!/bin/sh\nexit 0\n')
+    before = session.hook.read_bytes()
+    result = session.invoke('status')
+    assert (result['reception'] == 'hook_invalid' and 'Inspect the reported hook file' in result['next_action']
+            and session.hook.read_bytes() == before)
+
+
+def test_binding_inspection_accepts_unrelated_hooks_and_settings(connection_client):
+    session = connection_client
+    document = json.loads(session.hook.read_text())
+    document['custom-setting'] = True
+    document['hooks']['Stop'].append({'hooks': [{'type': 'command', 'command': 'other-hook'}]})
+    session.hook.write_text(json.dumps(document))
+    before = session.hook.read_bytes()
+    result = session.invoke('connect')
+    assert (result['reception'] == 'hook_unobserved' and result['hook_binding']['status'] == 'installed'
+            and session.hook.read_bytes() == before)
+
+
+def test_missing_installer_points_to_download_instead_of_a_nonexistent_command(connection_client):
+    session = connection_client
+    (session.root / 'harness.pyz').unlink()
+    session.hook.unlink()
+    result = session.invoke('status')
+    assert (result['reception'] == 'hook_missing' and result['install_command'] is None
+            and 'http://synthetic-service/help' in result['next_action'])
+
+
+@pytest.mark.parametrize('client', ['claude', 'codex'])
+def test_resume_uses_current_native_session_and_shell_safe_working_directory(connection_client, monkeypatch, client):
+    session = connection_client
+    current = session.root / "working dir 'quoted' $(false)"
+    current.mkdir()
+    monkeypatch.chdir(current)
+    monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'native-self' if client == 'claude' else 'other-session')
+    monkeypatch.setenv('CODEX_THREAD_ID', 'native-self' if client == 'codex' else 'other-session')
+    selected = options('--config', str(session.root / 'config.json'), '--client', client,
+                       '--project', str(session.root), 'status')
+    selected.session_id = cli.select_session(selected)
+    result = cli.reception_status(selected)
+    directory, command = result['resume_command'].split(' && ')
+    assert (shlex.split(directory) == ['cd', '--', str(current)]
+            and shlex.split(command) == [client, '--resume' if client == 'claude' else 'resume', 'native-self']
+            and result['hook_binding']['project'] == str(session.root))
+    selected.session_id = 'explicit-other-session'
+    assert cli.reception_status(selected)['resume_command'] is None
 
 
 def test_connect_reuses_key_preserves_pending_and_is_idempotent(connection_client, monkeypatch):

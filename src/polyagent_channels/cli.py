@@ -7,6 +7,7 @@ import json
 import math
 import os
 import select
+import shlex
 import sys
 import tempfile
 import time
@@ -57,6 +58,7 @@ def command_parser():
     parser.add_argument('--config')
     parser.add_argument('--client', choices=('claude', 'codex'))
     parser.add_argument('--session-id')
+    parser.add_argument('--project', type=Path, default=Path.cwd(), help='Project whose native hook binding is inspected; default current directory')
     parser.add_argument('--url', default=os.getenv('CHANNEL_URL', 'http://127.0.0.1:18765'))
     parser.add_argument('--key-file', default=os.getenv('CHANNEL_KEY_FILE'))
     parser.add_argument('--state-dir', default=os.getenv('CHANNEL_STATE_DIR'))
@@ -182,7 +184,6 @@ def key_input(options):
     return getpass.getpass('Shared channel key: ').strip()
 
 
-
 def save_key(options, report=True):
     secret = key_input(options)
     if not secret or any(character.isspace() for character in secret):
@@ -260,12 +261,17 @@ def exchange_client(options, key):
                              headers={'Authorization': 'Bearer ' + key})
 
 
-def presence_payload(options, state='connected', ttl_seconds=600):
+def selected_adapter(options):
     adapter = options.client
     if adapter is None:
         selected = [client for client, name in (('claude', 'CLAUDE_CODE_SESSION_ID'), ('codex', 'CODEX_THREAD_ID'))
                     if os.environ.get(name) == options.session_id]
         adapter = selected[0] if len(selected) == 1 else 'cli'
+    return adapter
+
+
+def presence_payload(options, state='connected', ttl_seconds=600):
+    adapter = selected_adapter(options)
     payload = {'session_id': options.session_id, 'client': adapter, 'state': state, 'ttl_seconds': ttl_seconds}
     if getattr(options, 'name', None) is not None:
         payload['name'] = options.name
@@ -300,9 +306,41 @@ def ensure_topic(options, key):
     return exchange.open_exchange(options.state_dir, options.session_id, state, reuse=True)
 
 
+def binding_diagnostics(options):
+    from polyagent_channels.client_config import DEFAULT_ROOT
+    from polyagent_channels.setup import canonical_path, hook_binding_status, native_resume_command
+    adapter = selected_adapter(options)
+    if adapter == 'cli':
+        return {}
+    root = canonical_path(Path(options.config).parent) if options.config else canonical_path(DEFAULT_ROOT)
+    project = canonical_path(options.project)
+    binding = hook_binding_status(root, project, adapter)
+    install = shlex.join(['python3', str(root / 'harness.pyz'), 'install', '--target', str(root),
+                          '--url', options.url, '--client', adapter, '--project', str(project)])
+    return {'hook_binding': binding, 'install_command': install if (root / 'harness.pyz').is_file() else None,
+            'resume_command': native_resume_command(adapter, Path.cwd(), options.session_id)}
+
+
 def reception_status(options):
     result = {'reception': 'not_open', 'next_action': 'Run connect for the topic before waiting for peer replies.',
-              'native_activation': 'Local callback diagnostics do not verify native hook trust or activation.'}
+              'native_activation': 'Local callback diagnostics do not verify native hook trust or activation.',
+              **binding_diagnostics(options)}
+    binding = result.get('hook_binding')
+    if binding and binding['status'] != 'installed':
+        result['reception'] = binding['status']
+        prefix = 'This project/client has no installed Stop binding. '
+        if binding['status'] == 'hook_invalid':
+            prefix = 'This project/client Stop binding differs from its installation record or cannot be read. Inspect the reported hook file. '
+        installation = 'Download the installer following ' + options.url + '/help for this project/client. '
+        if result['install_command']:
+            installation = 'Run the explicit installer: ' + result['install_command'] + '. '
+        result['next_action'] = prefix + installation + 'Reuse the existing protected key. '
+        result['next_action'] += 'Then restart/resume this session, review the native hook, and run connect after activation.'
+        if result['resume_command']:
+            result['next_action'] += ' Resume command: ' + result['resume_command']
+        else:
+            result['next_action'] += ' Obtain the current session ID from its native client before restarting; do not guess or resume another session.'
+        return result
     if not options.session_id:
         result['next_action'] = 'Select --client in its native session, or provide --session-id.'
         return result
@@ -341,6 +379,8 @@ def reception_status(options):
     result.update(reception='hook_unobserved', next_action='Review the exact Channels Stop command in /hooks and enable project hooks if required. '
                   'If it is not loaded, restart and resume this same session. Finish local work, then yield to an actual native Stop event; '
                   'installation and a direct hook invocation do not prove activation.')
+    if result.get('resume_command'):
+        result['next_action'] += ' Resume command: ' + result['resume_command']
     return result
 
 
