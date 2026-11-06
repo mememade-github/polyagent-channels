@@ -47,7 +47,7 @@ redis = Redis.from_url(
 
 
 class StorageStateError(RedisError):
-    """Service-owned Redis metadata needs operator repair (see the README recovery table)."""
+    """Service-owned Redis metadata needs operator repair (see the REFERENCE.md recovery table)."""
 
     def __init__(self, phrase):
         super().__init__(f'storage state: {phrase}')

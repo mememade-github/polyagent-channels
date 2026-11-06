@@ -4,7 +4,7 @@ recursive-include tests *.py
 
 recursive-include src/polyagent_channels *.lua
 
-include AGENTS.md
+include AGENTS.md CLAUDE.md PROJECT.md REFERENCE.md
 include .devcontainer/LICENSE .dockerignore
 
 include scripts/build_harness.py

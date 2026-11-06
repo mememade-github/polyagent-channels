@@ -1,12 +1,25 @@
-# Development guide
+# AGENTS.md — Polyagent Channels development guide
+
+Governance for any coding agent working in this repository. [CLAUDE.md](CLAUDE.md) imports this file, so Claude Code, Codex and other agents read the same guide.
+
+## Context
+
+- Product: a shared message service for users and agents ([README.md](README.md)); context in [PROJECT.md](PROJECT.md); commands, configuration, protocol and recovery in [REFERENCE.md](REFERENCE.md).
+- Layout: Python package in `src/polyagent_channels/`, tests in `tests/`, container files in `.devcontainer/` and `compose.yaml`, installer build in `scripts/build_harness.py`.
+- This repository carries no agent rule, skill, hook or mirror directories; this file is the whole guide.
+- Test commands and the opt-in real-Redis suite are in [REFERENCE.md § Verification](REFERENCE.md#verification).
+
+## Development
 
 Build a small, dependable shared messaging service for users and agents. Keep changes within the requested scope, use standard language/library idioms, give each component a small clear responsibility, and verify the intended result through meaningful empirical checks. State assumptions and resolve root causes. Avoid speculative abstractions and unrelated cleanup.
 
-Use descriptive, searchable names, explicit failures and clear error boundaries. Keep secrets out of tracked files, logs and messages. Read the README for public use and operating constraints. Use isolated synthetic test data; clean only resources owned by the test. Run checks appropriate to the changed behavior and report actual commands, results and limitations. Documentation work alone does not authorize source refactoring.
+Use descriptive, searchable names, explicit failures and clear error boundaries. Keep secrets out of tracked files, logs and messages. Read the README for public use and [REFERENCE.md](REFERENCE.md) for operating constraints. Use isolated synthetic test data; clean only resources owned by the test. Run checks appropriate to the changed behavior and report actual commands, results and limitations. Documentation work alone does not authorize source refactoring.
 
 The supplied guide below retains the original code smells, solution alternatives and every Clean Code category. Use it for review and refactoring; it is not a claim that current source mechanically satisfies every item. C009 literally prohibits classes with **two or more** instance variables (not merely more than two). When an item conflicts with a required library interface or minimal standard idiom, surface the specific conflict and its consequences for resolution within the task's authorized scope; do not assume a blanket waiver or silently redefine the item.
 
-Preserve upstream attribution when distributing inherited files. The inherited DevContainer files and `.dockerignore` are identified in README's licensing section. Include `.devcontainer/LICENSE` and `.dockerignore` explicitly in source distributions and retain the existing notice at `/usr/share/doc/polyagent-devcontainer/LICENSE` in images containing inherited scripts. The product is licensed under the MIT License in [LICENSE](LICENSE), copyright (c) 2026 the polyagent-channels authors. Preserve the separate upstream notice.
+## Licensing and attribution
+
+Preserve upstream attribution when distributing inherited files. The inherited DevContainer files and `.dockerignore` are identified in the README's license section. Include `.devcontainer/LICENSE` and `.dockerignore` explicitly in source distributions and retain the existing notice at `/usr/share/doc/polyagent-devcontainer/LICENSE` in images containing inherited scripts. The product is licensed under the MIT License in [LICENSE](LICENSE), copyright (c) 2026 the polyagent-channels authors. Preserve the separate upstream notice.
 
 ## Specific guide conflicts
 

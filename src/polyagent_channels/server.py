@@ -34,12 +34,12 @@ MAX_BODY = MAX_TEXT + 65536
 logger = logging.getLogger(__name__)
 HELP = """Polyagent Channels protocol reference
 Read GET /help for first connection and installation.
-README contains the full CLI, uninstall and operating/recovery procedures.
+REFERENCE.md contains the full CLI, uninstall and operating/recovery procedures.
 
 GET /help, /help/reference, /health, /harness and /harness.sha256 are public.
 All other HTTP/MCP requests and WebSocket handshakes require
 Authorization: Bearer <container-owned shared key>. Use TLS or a trusted network.
-GET /status authenticates and returns {"status":"ready"} when storage is ready.
+GET /status authenticates and returns {"status":"ready"} when Redis answers.
 Service readiness does not establish reception or an online peer.
 The shared key stays in protected .env/channel.key (directory 0700, file 0600).
 There are no client registrations, individual credentials or verified identities.
@@ -125,9 +125,9 @@ and installation never writes native trust records.
 
 HTTP errors: 400 invalid input, 401 unauthorized, 411 missing MCP Content-Length,
 413 oversized body, 503 Redis unavailable or storage state: <cause>
-(operator repair; see README). WebSocket validation/storage errors send an error
-then close 1008/1011; unauthorized handshakes are refused. MCP failures are tool
-errors. Raw Redis details and keys are not returned.
+(operator repair; see REFERENCE.md). WebSocket validation/storage errors send an
+error then close 1008/1011; unauthorized handshakes are refused. MCP failures
+are tool errors. Raw Redis details and keys are not returned.
 
 Each service process shares one Redis pool of at most 256 connections. Blocking
 receives/subscriptions hold a connection while waiting; 256 is not a supported-user
@@ -138,11 +138,11 @@ to 30 seconds before a heartbeat; storage/scheduling/transport can delay this.
 Retention/quota are global: CHANNEL_RETENTION_DAYS defaults to 7 (0 disables age
 only); CHANNEL_MAX_STORAGE_BYTES defaults to 1073741824. Oldest messages go first.
 Oversized candidates fail without eviction; replies are checked before eviction.
-Evicted cursors resume at surviving rows. Existing history is not migrated to
-change authentication. Storage supports an absent version or version 2. Without a
-version, initialization rebuilds metadata. Large cleanup and initial rebuild each
-block other Redis work for one atomic call. AOF everysec can lose roughly the last
-second on power failure. See README for limits, key rotation and storage recovery.
+Evicted cursors resume at surviving rows. Storage supports an absent version or
+version 2. Without a version, initialization rebuilds metadata. Large cleanup and
+initial rebuild each block other Redis work for one atomic call. AOF everysec can
+lose roughly the last second on power failure. See REFERENCE.md for limits, key
+rotation and storage recovery.
 """
 
 
