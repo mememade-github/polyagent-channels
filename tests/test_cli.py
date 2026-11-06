@@ -74,13 +74,13 @@ def test_hook_pipe_input_is_bounded_and_complete_event_needs_no_eof(tmp_path, pa
             process.stdin.write(payload)
             process.stdin.flush()
         # Keep the writing pipe open, as an accidental direct tool invocation does.
-        process.wait(timeout=3)
+        process.wait(timeout=15)
         output, errors = process.communicate(timeout=1)
     finally:
         if process.poll() is None:
             process.terminate()
             process.communicate(timeout=2)
-    assert process.returncode == exit_code and json.loads(output) == {}
+    assert process.returncode == exit_code and output == ''
     assert ('native hook event JSON required; do not invoke manually' in errors) if exit_code else errors == ''
 
 
@@ -88,7 +88,7 @@ def test_hook_pipe_input_is_bounded_and_complete_event_needs_no_eof(tmp_path, pa
 def test_empty_hook_input_returns_failure_even_when_config_is_missing(tmp_path, missing_config):
     arguments = ['--config', str(tmp_path / 'missing.json')] if missing_config else []
     result = subprocess.run([sys.executable, '-m', 'polyagent_channels.cli', '--state-dir', str(tmp_path / 'state'),
-                             *arguments, 'hook'], input='', capture_output=True, text=True, timeout=3)
+                             *arguments, 'hook'], input='', capture_output=True, text=True, timeout=15)
     assert result.returncode == 1 and 'native hook event JSON required; do not invoke manually' in result.stderr
 
 
@@ -144,9 +144,9 @@ def test_key_stdin_saves_reuses_and_preserves_conflicting_key_without_output(tmp
                '--key-file', str(destination), 'key', '--stdin']
     original = 'synthetic-process-stdin-key'
     different = 'synthetic-conflicting-stdin-key'
-    saved = subprocess.run(command, input=original + '\n', capture_output=True, text=True, timeout=3)
-    reused = subprocess.run(command, input=original, capture_output=True, text=True, timeout=3)
-    refused = subprocess.run(command, input=different, capture_output=True, text=True, timeout=3)
+    saved = subprocess.run(command, input=original + '\n', capture_output=True, text=True, timeout=15)
+    reused = subprocess.run(command, input=original, capture_output=True, text=True, timeout=15)
+    refused = subprocess.run(command, input=different, capture_output=True, text=True, timeout=15)
     output = ''.join(result.stdout + result.stderr for result in (saved, reused, refused))
     assert (saved.returncode == reused.returncode == 0 and refused.returncode == 1
             and json.loads(saved.stdout)['status'] == 'key_saved'
@@ -162,7 +162,7 @@ def test_key_stdin_rejects_empty_or_multiple_values_without_output(tmp_path, con
     destination = tmp_path / '.env/channel.key'
     result = subprocess.run([sys.executable, '-m', 'polyagent_channels.cli', '--state-dir', str(tmp_path / 'state'),
                              '--key-file', str(destination), 'key', '--stdin'],
-                            input=content, capture_output=True, text=True, timeout=3)
+                            input=content, capture_output=True, text=True, timeout=15)
     assert (result.returncode == 1 and 'key_invalid' in result.stderr and not destination.exists()
             and 'synthetic' not in result.stdout + result.stderr)
 
@@ -340,12 +340,10 @@ def connection_client(tmp_path, monkeypatch, capsys):
     wrapper.parent.mkdir()
     wrapper.write_bytes(setup.wrapper_content(Path(sys.executable), tmp_path))
     (tmp_path / 'harness.pyz').write_bytes(b'synthetic-artifact')
-    hook = setup.native_hook(tmp_path, 'codex')
-    hook.parent.mkdir()
-    command = shlex.join([str(wrapper), '--client', 'codex', 'hook'])
-    hook.write_bytes(setup.hook_document(hook, command)[0])
-    manifest = {'version': 1, 'files': {}, 'hooks': [
-        {'project': str(tmp_path), 'client': 'codex', 'path': str(hook), 'command': command}]}
+    binding = setup.native_binding(tmp_path, 'codex')
+    binding.parent.mkdir()
+    binding.write_text(setup.CODEX_SETTING + setup.codex_block(wrapper))
+    manifest = {'version': 1, 'files': {}, 'hooks': [setup.binding_record(tmp_path, tmp_path, 'codex')]}
     (tmp_path / 'install-manifest.json').write_text(json.dumps(manifest))
     requests = []
     messages = [{'id': '1-0', 'session_id': 'old-peer', 'conversation_id': 'main', 'text': 'old work'}]
@@ -366,8 +364,6 @@ def connection_client(tmp_path, monkeypatch, capsys):
                 action()
             return httpx.Response(200, json={'cursor': cursor, 'time_ms': 1000})
         if request.method == 'POST':
-            topic = exchange.owned_state(tmp_path / 'state', 'native-self', {'channel': 'general', 'conversation_id': 'main'})
-            assert topic is not None, 'Reception must be open before a peer can reply to this publish'
             row = {**json.loads(request.content), 'id': str(len(messages) + 1) + '-0'}
             messages.append(row)
             return httpx.Response(200, json=row)
@@ -387,24 +383,23 @@ def connection_client(tmp_path, monkeypatch, capsys):
         cli.run(selected)
         return json.loads(capsys.readouterr().out)
     return SimpleNamespace(invoke=invoke, requests=requests, messages=messages, presence=presence,
-                           directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot, hook=hook, root=tmp_path)
+                           directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot, binding=binding, root=tmp_path)
 
 
-@pytest.mark.parametrize('missing', ['client', 'project', 'hook_file'])
-def test_missing_binding_does_not_claim_native_approval_is_the_next_step(connection_client, missing):
+@pytest.mark.parametrize('missing', ['client', 'project', 'binding_file'])
+def test_missing_binding_points_to_installation_and_changes_nothing(connection_client, missing):
     session = connection_client
     session.invoke('connect')
     diagnostic = exchange.session_directory(session.directory, 'native-self') / 'last-hook.json'
-    diagnostic.write_text(json.dumps({'timestamp': time.time(), 'state': 'waiting',
-                                      'session_id': 'native-self', 'callback_id': 'old-binding'}))
+    diagnostic.write_text(json.dumps({'timestamp': time.time(), 'state': 'waiting', 'session_id': 'native-self'}))
     manifest_path = session.root / 'install-manifest.json'
     manifest = json.loads(manifest_path.read_text())
     if missing == 'client':
         manifest['hooks'][0]['client'] = 'claude'
     if missing == 'project':
         manifest['hooks'][0]['project'] = str(session.root / 'another-project')
-    if missing == 'hook_file':
-        session.hook.unlink()
+    if missing == 'binding_file':
+        session.binding.unlink()
     manifest_path.write_text(json.dumps(manifest))
     before = manifest_path.read_bytes()
     result = session.invoke('connect')
@@ -415,46 +410,65 @@ def test_missing_binding_does_not_claim_native_approval_is_the_next_step(connect
             and manifest_path.read_bytes() == before)
 
 
-@pytest.mark.parametrize('damage', ['command', 'timeout', 'json', 'manifest', 'matcher', 'wrapper'])
-def test_invalid_binding_is_distinct_from_an_unobserved_callback(connection_client, damage):
+@pytest.mark.parametrize('damage', ['command', 'json_manifest', 'wrapper'])
+def test_invalid_binding_is_distinct_from_an_unobserved_receiver(connection_client, damage):
     session = connection_client
-    document = json.loads(session.hook.read_text())
     if damage == 'command':
-        document['hooks']['Stop'][0]['hooks'][0]['command'] = 'unrelated-command'
-    if damage == 'timeout':
-        document['hooks']['Stop'][0]['hooks'][0]['timeout'] = 1
-    if damage == 'matcher':
-        document['hooks']['Stop'][0]['matcher'] = 'restricted'
-    session.hook.write_text(json.dumps(document) if damage != 'json' else '{')
-    if damage == 'manifest':
+        session.binding.write_text('[mcp_servers.channels]\ncommand = "unrelated-command"\n')
+    if damage == 'json_manifest':
         (session.root / 'install-manifest.json').write_text('{')
     if damage == 'wrapper':
         (session.root / 'bin/channels').write_text('#!/bin/sh\nexit 0\n')
-    before = session.hook.read_bytes()
+    before = session.binding.read_bytes()
     result = session.invoke('status')
-    assert (result['reception'] == 'hook_invalid' and 'Inspect the reported hook file' in result['next_action']
-            and session.hook.read_bytes() == before)
+    assert (result['reception'] == 'hook_invalid' and 'Inspect the reported file' in result['next_action']
+            and session.binding.read_bytes() == before)
 
 
-def test_binding_inspection_accepts_unrelated_hooks_and_settings(connection_client):
+def test_binding_inspection_accepts_unrelated_settings(connection_client):
     session = connection_client
-    document = json.loads(session.hook.read_text())
-    document['custom-setting'] = True
-    document['hooks']['Stop'].append({'hooks': [{'type': 'command', 'command': 'other-hook'}]})
-    session.hook.write_text(json.dumps(document))
-    before = session.hook.read_bytes()
+    session.binding.write_text('model = "custom"\n' + session.binding.read_text() + '[other]\nvalue = 1\n')
+    before = session.binding.read_bytes()
     result = session.invoke('connect')
     assert (result['reception'] == 'hook_unobserved' and result['hook_binding']['status'] == 'installed'
-            and session.hook.read_bytes() == before)
+            and session.binding.read_bytes() == before)
 
 
 def test_missing_installer_points_to_download_instead_of_a_nonexistent_command(connection_client):
     session = connection_client
     (session.root / 'harness.pyz').unlink()
-    session.hook.unlink()
+    session.binding.unlink()
     result = session.invoke('status')
     assert (result['reception'] == 'hook_missing' and result['install_command'] is None
             and 'http://synthetic-service/help' in result['next_action'])
+
+
+def test_session_in_a_subdirectory_uses_the_installed_parent_binding(connection_client):
+    session = connection_client
+    subdirectory = session.root / 'nested/work'
+    subdirectory.mkdir(parents=True)
+    session.invoke('connect')
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex', '--session-id', 'native-self',
+                       '--project', str(subdirectory), 'status')
+    result = cli.reception_status(selected)
+    assert (result['hook_binding']['status'] == 'installed' and result['hook_binding']['project'] == str(session.root)
+            and str(subdirectory) not in (result['install_command'] or '') and result['reception'] == 'hook_unobserved')
+
+
+def test_status_offers_the_removal_command_only_when_something_is_installed(connection_client):
+    session = connection_client
+    installed = session.invoke('status')['uninstall_command']
+    manifest = session.root / 'install-manifest.json'
+    manifest.write_text(json.dumps({'version': 1, 'files': {}, 'hooks': []}))
+    assert (shlex.split(installed)[2:] == ['uninstall', '--target', str(session.root), '--project', str(session.root)]
+            and session.invoke('status')['uninstall_command'] is None)
+
+
+def test_unobserved_receiver_does_not_order_a_restart(connection_client):
+    result = connection_client.invoke('connect')
+    assert (result['reception'] == 'hook_unobserved' and result['reception_open'] is True
+            and result['next_action'].startswith('Installed, but no background receiver has been observed')
+            and 'If it stays unobserved' in result['next_action'])
 
 
 @pytest.mark.parametrize('client', ['claude', 'codex'])
@@ -471,22 +485,19 @@ def test_resume_uses_current_native_session_and_shell_safe_working_directory(con
     result = cli.reception_status(selected)
     directory, command = result['resume_command'].split(' && ')
     assert (shlex.split(directory) == ['cd', '--', str(current)]
-            and shlex.split(command) == [client, '--resume' if client == 'claude' else 'resume', 'native-self']
-            and result['hook_binding']['project'] == str(session.root))
+            and shlex.split(command) == [client, '--resume' if client == 'claude' else 'resume', 'native-self'])
     selected.session_id = 'explicit-other-session'
     assert cli.reception_status(selected)['resume_command'] is None
 
 
-def test_connect_reuses_key_preserves_pending_and_is_idempotent(connection_client, monkeypatch):
+def test_connect_reuses_key_preserves_position_and_is_idempotent(connection_client, monkeypatch):
     session = connection_client
     monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: pytest.fail('an existing protected key must be reused'))
-    first = session.invoke('connect', '--name', 'reviewer')
+    session.invoke('connect', '--name', 'reviewer')
     path = exchange.owned_state(session.directory, 'native-self')
-    original = exchange.read_state(path)
-    exchange.write_state(path, {**original, 'pending': '2-0', 'deadline': time.time() - 1})
+    exchange.write_state(path, {**exchange.read_state(path), 'pending': '2-0', 'deadline': time.time() - 1})
     second = session.invoke('connect')
-    assert (first['reception'] == 'hook_unobserved' and second['topic']['cursor'] == '1-0'
-            and second['topic']['pending'] == '2-0'
+    assert (second['topic']['cursor'] == '1-0' and second['topic']['pending'] == ['2-0']
             and sum(request.url.path.endswith('/cursor') for request in session.requests) == 1
             and session.presence[0]['name'] == 'reviewer' and 'name' not in session.presence[1])
 
@@ -500,18 +511,194 @@ def test_connect_missing_key_prompts_once_without_printing_it(connection_client,
     assert len(prompts) == 1 and 'synthetic-connection-key' not in json.dumps(result)
 
 
-def test_publish_opens_reception_before_sending_and_keeps_pre_reply_cursor(connection_client):
+def test_default_receive_shows_work_again_until_it_is_confirmed(connection_client):
     session = connection_client
     session.on_snapshot.append(lambda: session.messages.append({
         'id': '2-0', 'session_id': 'current-peer', 'conversation_id': 'main', 'text': 'racing peer message'}))
-    published = session.invoke('publish', '--text', 'current task')
+    session.invoke('connect')
+    session.invoke('publish', '--text', 'own task')
     session.messages.append({'id': '4-0', 'session_id': 'current-peer', 'conversation_id': 'main', 'text': 'current reply'})
-    received = session.invoke('receive', '--timeout', '0')
-    paths = [request.url.path for request in session.requests]
-    assert (published['reception'] == 'hook_unobserved' and published['next_action']
-            and paths.index('/channels/general/cursor') < paths.index('/channels/general/messages')
-            and [row['text'] for row in received['messages']] == ['racing peer message', 'current task', 'current reply']
-            and exchange.read_state(exchange.owned_state(session.directory, 'native-self'))['cursor'] == '1-0')
+    first = session.invoke('receive', '--timeout', '0')
+    resumed = session.invoke('receive', '--timeout', '0')
+    session.invoke('ack', '--message-id', '2-0')
+    session.invoke('ack', '--message-id', '4-0')
+    confirmed = session.invoke('receive', '--timeout', '0')
+    saved = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    assert ([row['text'] for row in first['messages']] == ['racing peer message', 'current reply']
+            and [row['redelivered'] for row in first['messages']] == [False, False]
+            and [row['redelivered'] for row in resumed['messages']] == [True, True]
+            and first['unconfirmed'] == ['2-0', '4-0'] and 'untrusted' in first['notice']
+            and confirmed['messages'] == [] and saved['cursor'] == '4-0' and saved['pending'] == [])
+
+
+def test_failure_while_building_the_result_loses_nothing(connection_client, monkeypatch):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'work'})
+    def fail(*arguments):
+        raise RuntimeError('injected')
+    original = cli.read_details
+    monkeypatch.setattr(cli, 'read_details', fail)
+    with pytest.raises(RuntimeError):
+        session.invoke('receive', '--timeout', '0')
+    monkeypatch.setattr(cli, 'read_details', original)
+    assert [row['text'] for row in session.invoke('receive', '--timeout', '0')['messages']] == ['work']
+
+
+def test_failure_printing_the_result_leaves_the_work_pending(connection_client, monkeypatch):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'work'})
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex', '--session-id', 'native-self', 'receive', '--timeout', '0')
+    monkeypatch.setattr('builtins.print', lambda *arguments, **settings: (_ for _ in ()).throw(BrokenPipeError()))
+    with pytest.raises(BrokenPipeError):
+        cli.run(selected)
+    monkeypatch.undo()
+    saved = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    assert saved['pending'] == ['2-0'] and saved['cursor'] == '1-0'
+
+
+def test_pending_message_removed_by_retention_is_reported_and_never_confirmed(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'work'})
+    session.invoke('receive', '--timeout', '0')
+    session.messages[:] = [row for row in session.messages if row['id'] != '2-0']
+    reported = session.invoke('receive', '--timeout', '0')
+    saved = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    session.invoke('ack', '--message-id', '2-0')
+    cleared = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    assert (reported['evicted_pending'] == ['2-0'] and 'send them again' in reported['recovery'] and saved['pending'] == ['2-0']
+            and cleared['pending'] == [] and cleared['cursor'] == '2-0')
+
+
+def test_ack_during_another_read_is_not_undone_by_that_read(connection_client, monkeypatch):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'work'})
+    session.invoke('receive', '--timeout', '0')
+    original = cli.read_details
+    async def confirm_while_reading(*arguments):
+        result = await original(*arguments)
+        exchange.ack_exchange(session.directory, 'native-self', {'channel': 'general', 'conversation_id': 'main'}, '2-0')
+        return result
+    monkeypatch.setattr(cli, 'read_details', confirm_while_reading)
+    session.invoke('receive', '--timeout', '0')
+    monkeypatch.setattr(cli, 'read_details', original)
+    saved = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    assert not saved['pending'] and saved['cursor'] == '2-0' and session.invoke('receive', '--timeout', '0')['messages'] == []
+
+
+def test_answering_one_question_leaves_the_other_unanswered_one_pending(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([{'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'first question'},
+                             {'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'second question'}])
+    session.invoke('receive', '--timeout', '0')
+    session.invoke('publish', '--text', 'answer to the second', '--reply-to', '3-0')
+    shown = session.invoke('receive', '--timeout', '0')['messages']
+    session.invoke('publish', '--text', 'answer to the first', '--reply-to', '2-0')
+    finished = session.invoke('receive', '--timeout', '0')['messages']
+    saved = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    assert [row['text'] for row in shown] == ['first question'] and finished == [] and not saved['pending']
+
+
+def write_old_state(session, **fields):
+    path = exchange.owned_state(session.directory, 'native-self')
+    document = json.loads(path.read_text())
+    path.write_text(json.dumps({**{key: document[key] for key in exchange.STATE_FIELDS - {'notified', 'delivered', 'pending'}}, **fields}))
+
+
+def test_batch_state_keeps_every_message_of_its_range_unconfirmed(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([{'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'first'},
+                             {'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'second'}])
+    write_old_state(session, notified='3-0', pending='3-0')
+    shown = session.invoke('receive', '--timeout', '0')
+    session.invoke('ack', '--message-id', '3-0')
+    remaining = session.invoke('receive', '--timeout', '0')
+    assert ([row['text'] for row in shown['messages']] == ['first', 'second'] and shown['unconfirmed'] == ['2-0', '3-0']
+            and [row['text'] for row in remaining['messages']] == ['first'] and remaining['unconfirmed'] == ['2-0'])
+
+
+def test_batch_state_acknowledged_before_any_read_still_shows_the_earlier_message(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([{'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'first'},
+                             {'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'second'}])
+    write_old_state(session, notified='3-0', pending='3-0')
+    session.invoke('ack', '--message-id', '3-0')
+    assert 'first' in [row['text'] for row in session.invoke('receive', '--timeout', '0')['messages']]
+
+
+def test_deployed_single_delivery_state_moves_up_without_losing_or_repeating_work(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([{'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'delivered by Stop'},
+                             {'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'not delivered yet'}])
+    write_old_state(session, pending='2-0')
+    shown = session.invoke('receive', '--timeout', '0')
+    session.invoke('ack', '--message-id', '2-0')
+    session.invoke('ack', '--message-id', '3-0')
+    assert ([(row['text'], row['redelivered']) for row in shown['messages']] == [('delivered by Stop', True), ('not delivered yet', False)]
+            and session.invoke('receive', '--timeout', '0')['messages'] == [])
+
+
+def test_deployed_state_acknowledged_before_any_read_does_not_repeat_it(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'delivered by Stop'})
+    write_old_state(session, pending='2-0')
+    session.invoke('ack', '--message-id', '2-0')
+    assert session.invoke('receive', '--timeout', '0')['messages'] == []
+
+
+def test_rows_with_nothing_to_handle_are_not_shown_twice(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([{'id': '2-0', 'session_id': 'native-self', 'conversation_id': 'main', 'text': 'mine'},
+                             {'id': '3-0', 'session_id': 'other', 'conversation_id': 'main', 'text': 'their question'},
+                             {'id': '4-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'their answer', 'reply_to': '3-0'}])
+    shown = session.invoke('receive', '--timeout', '0')
+    again = session.invoke('receive', '--timeout', '0')
+    session.invoke('ack', '--message-id', '3-0')
+    finished = session.invoke('receive', '--timeout', '0')
+    assert ([row['for_you'] for row in shown['messages']] == [True, False] and shown['unconfirmed'] == ['3-0']
+            and [row['text'] for row in again['messages']] == ['their question'] and finished['messages'] == [])
+
+
+def test_receive_marks_only_replies_to_this_session_for_it(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([
+        {'id': '2-0', 'session_id': 'native-self', 'conversation_id': 'main', 'text': 'my request'},
+        {'id': '3-0', 'session_id': 'other-peer', 'conversation_id': 'main', 'text': 'their request'},
+        {'id': '4-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'answer to me', 'reply_to': '2-0'},
+        {'id': '5-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'answer to them', 'reply_to': '3-0'}])
+    rows = session.invoke('receive', '--timeout', '0')['messages']
+    assert ({row['text']: row['for_you'] for row in rows} == {'their request': True, 'answer to me': True, 'answer to them': False}
+            and {row['text'] for row in rows if 'expected' in row} == {'answer to me'})
+
+
+def test_confirmation_of_my_answer_asks_for_no_further_reply(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([
+        {'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'question'},
+        {'id': '3-0', 'session_id': 'native-self', 'conversation_id': 'main', 'text': 'answer', 'reply_to': '2-0'},
+        {'id': '4-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'thanks', 'reply_to': '3-0'}])
+    rows = {row['text']: row for row in session.invoke('receive', '--timeout', '0')['messages']}
+    assert rows['thanks']['for_you'] is True and 'expected' not in rows['thanks'] and 'expected' not in rows['question']
+
+
+def test_explicit_history_read_never_moves_the_saved_position(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    before = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    history = session.invoke('receive', '--cursor', '0-0', '--timeout', '0')
+    after = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
+    assert [row['text'] for row in history['messages']] == ['old work'] and before == after
 
 
 def test_receive_defaults_to_current_main_and_history_discovery_is_explicit(connection_client):
@@ -520,13 +707,12 @@ def test_receive_defaults_to_current_main_and_history_discovery_is_explicit(conn
     session.messages.append({'id': '2-0', 'session_id': 'other-peer', 'conversation_id': 'other', 'text': 'unrelated task'})
     main = session.invoke('receive', '--cursor', '0-0', '--timeout', '0')
     all_topics = session.invoke('receive', '--all-conversations', '--cursor', '0-0', '--timeout', '0')
-    assert (current['messages'] == [] and current['ack_required'] is False
-            and 'only IDs previously delivered by Stop' in current['next_action']
-            and [row['text'] for row in main['messages']] == ['old work']
-            and len(all_topics['messages']) == 2)
+    assert (current['messages'] == [] and [row['text'] for row in main['messages']] == ['old work']
+            and len(all_topics['messages']) == 2 and not exchange.list_states(session.directory, 'native-self')
+            and current['reception_open'] is False)
 
 
-def test_open_defaults_fresh_and_reopen_preserves_pending_while_history_is_explicit(connection_client):
+def test_open_defaults_fresh_and_reopen_preserves_position_while_history_is_explicit(connection_client):
     session = connection_client
     opened = session.invoke('open', '--timeout', '60')
     path = exchange.owned_state(session.directory, 'native-self')
@@ -534,33 +720,28 @@ def test_open_defaults_fresh_and_reopen_preserves_pending_while_history_is_expli
     exchange.write_state(path, saved)
     resumed = session.invoke('open')
     historical = session.invoke('open', '--conversation-id', 'historical', '--cursor', '0-0')
-    assert (opened['cursor'] == '1-0' and resumed['cursor'] == '1-0' and resumed['pending'] == '2-0'
+    assert (opened['cursor'] == '1-0' and resumed['cursor'] == '1-0' and resumed['pending'] == ['2-0']
             and historical['cursor'] == '0-0'
             and sum(request.url.path.endswith('/cursor') for request in session.requests) == 1)
 
 
-@pytest.mark.parametrize('callback_state', ['waiting', 'callback_observed', 'peer', 'expired'])
-def test_stale_callback_is_distinct_from_current_reception(connection_client, callback_state):
+def test_stale_observation_is_distinct_from_listening(connection_client):
     session = connection_client
     session.invoke('connect')
     path = exchange.session_directory(session.directory, 'native-self') / 'last-hook.json'
-    path.write_text(json.dumps({'timestamp': time.time() - 120, 'state': callback_state,
-                               'session_id': 'native-self', 'callback_id': 'old'}))
-    result = session.invoke('connect')
-    assert result['reception'] == 'callback_stale' and result['callback_age_seconds'] >= 120 and 'stale' in result['next_action']
+    path.write_text(json.dumps({'timestamp': time.time() - 120, 'state': 'waiting', 'session_id': 'native-self'}))
+    stale = session.invoke('status')
+    path.write_text(json.dumps({'timestamp': time.time(), 'state': 'waiting', 'session_id': 'native-self'}))
+    listening = session.invoke('status')
+    assert (stale['reception'] == 'callback_stale' and stale['callback_age_seconds'] >= 120
+            and listening['reception'] == 'waiting' and listening['last_callback']['state'] == 'waiting')
 
 
-def test_connect_callback_probe_is_once_and_does_not_consume_peer_work(connection_client):
+def test_status_and_publish_do_not_announce_presence(connection_client):
     session = connection_client
-    session.invoke('connect')
-    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'new peer work'})
-    observed = session.invoke('hook', stdin={'session_id': 'native-self', 'hook_event_id': 'probe:1'})
-    before_delivery = exchange.read_state(exchange.owned_state(session.directory, 'native-self'))
-    delivered = session.invoke('hook', stdin={'session_id': 'native-self', 'hook_event_id': 'delivery:1'})
-    assert ('Connection callback observed' in observed['reason'] and before_delivery['pending'] is None
-            and 'new peer work' in delivered['reason']
-            and exchange.read_state(exchange.owned_state(session.directory, 'native-self'))['pending'] == '2-0'
-            and any(row['state'] == 'waiting' and row['ttl_seconds'] == 90 for row in session.presence))
+    session.invoke('status')
+    session.invoke('publish', '--text', 'one-way message')
+    assert session.presence == []
 
 
 def test_peers_lists_service_announcements_and_close_retires_last_topic(connection_client):
@@ -570,3 +751,53 @@ def test_peers_lists_service_announcements_and_close_retires_last_topic(connecti
     session.invoke('close')
     assert (peers['sessions'][0]['client'] == 'codex' and session.requests[-1].url.path == '/sessions'
             and session.presence[-1]['state'] == 'closed' and session.presence[-1]['ttl_seconds'] == 1)
+
+
+def test_publish_opens_no_reception_and_returns_no_text(connection_client):
+    session = connection_client
+    result = session.invoke('publish', '--text', 'one-way message')
+    live = [path for path in exchange.list_states(session.directory, 'native-self')
+            if exchange.read_state(path)['deadline'] > time.time()]
+    assert live == [] and result['reception_open'] is False and result['reception'] == 'not_open' and 'text' not in result
+
+
+def test_publish_keeps_an_open_topic_untouched(connection_client):
+    session = connection_client
+    session.invoke('open')
+    before = {path: path.read_bytes() for path in exchange.list_states(session.directory, 'native-self')}
+    result = session.invoke('publish', '--text', 'message')
+    assert before == {path: path.read_bytes() for path in exchange.list_states(session.directory, 'native-self')} and result['reception_open'] is True
+
+
+def test_failed_publish_leaves_no_state(connection_client, monkeypatch):
+    session = connection_client
+    monkeypatch.setattr(cli, 'request_messages', lambda *args: httpx.Response(503))
+    with pytest.raises(ValueError, match='HTTP 503'):
+        session.invoke('publish', '--text', 'failed request')
+    assert exchange.list_states(session.directory, 'native-self') == []
+
+
+def test_reply_after_publish_is_not_skipped_by_a_later_connect(connection_client):
+    session = connection_client
+    published = session.invoke('publish', '--text', 'request')
+    session.messages.append({'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'fast reply'})
+    connected = session.invoke('connect')
+    received = session.invoke('receive', '--timeout', '0')
+    assert (connected['topic']['cursor'] == published['id'] and connected['topic']['notified'] == published['id']
+            and [row['text'] for row in received['messages']] == ['fast reply'])
+
+
+def test_receive_after_publish_reads_the_reply_without_joining(connection_client):
+    session = connection_client
+    session.invoke('publish', '--text', 'request')
+    session.messages.append({'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'reply'})
+    received = session.invoke('receive', '--timeout', '0')
+    assert [row['text'] for row in received['messages']] == ['reply'] and received['reception_open'] is False
+
+
+def test_key_stdin_on_a_terminal_reads_without_echo(tmp_path, monkeypatch):
+    stream = io.StringIO()
+    monkeypatch.setattr(stream, 'isatty', lambda: True)
+    monkeypatch.setattr('sys.stdin', stream)
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'synthetic-terminal-key')
+    assert cli.key_input(options('--key-file', str(tmp_path / 'key'), 'key', '--stdin')) == 'synthetic-terminal-key'

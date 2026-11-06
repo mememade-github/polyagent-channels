@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
-DEFAULT_ROOT = Path.home() / '.local/share/polyagent-channels'
+DEFAULT_ROOT = Path(os.environ.get('CHANNEL_ROOT') or Path.home() / '.local/share/polyagent-channels').expanduser().absolute()
 
 
 class ConfigError(ValueError):

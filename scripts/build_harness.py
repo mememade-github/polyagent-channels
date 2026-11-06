@@ -6,8 +6,8 @@ from pathlib import Path
 import zipfile
 
 PACKAGES = ('httpx', 'httpcore', 'h11', 'certifi', 'idna', 'anyio', 'typing-extensions',
-            'websockets', 'async-timeout', 'exceptiongroup')
-SOURCES = ('__init__.py', 'cli.py', 'exchange.py', 'client_config.py', 'setup.py')
+            'websockets', 'async-timeout', 'exceptiongroup', 'tomli')
+SOURCES = ('__init__.py', 'cli.py', 'exchange.py', 'client_config.py', 'setup.py', 'stdio_tools.py')
 ENTRY = '''import sys
 if sys.argv[1:2] and sys.argv[1] in ('plan', 'install', 'uninstall'):
     from polyagent_channels.setup import main
