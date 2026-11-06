@@ -1,0 +1,10 @@
+* text=auto
+
+# Docker/Linux runtime files must stay LF even when cloned on Windows.
+*.sh text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+LICENSE text eol=lf
+.devcontainer/Dockerfile text eol=lf
+.devcontainer/*.sh text eol=lf
+.devcontainer/.env.example text eol=lf
