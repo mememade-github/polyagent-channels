@@ -136,6 +136,44 @@ def test_key_source_permissions(tmp_path):
         cli.read_secret(source)
 
 
+def test_key_stdin_saves_reuses_and_preserves_conflicting_key_without_output(tmp_path):
+    destination = tmp_path / '.env/channel.key'
+    command = [sys.executable, '-m', 'polyagent_channels.cli', '--state-dir', str(tmp_path / 'state'),
+               '--key-file', str(destination), 'key', '--stdin']
+    original = 'synthetic-process-stdin-key'
+    different = 'synthetic-conflicting-stdin-key'
+    saved = subprocess.run(command, input=original + '\n', capture_output=True, text=True, timeout=3)
+    reused = subprocess.run(command, input=original, capture_output=True, text=True, timeout=3)
+    refused = subprocess.run(command, input=different, capture_output=True, text=True, timeout=3)
+    output = ''.join(result.stdout + result.stderr for result in (saved, reused, refused))
+    assert (saved.returncode == reused.returncode == 0 and refused.returncode == 1
+            and json.loads(saved.stdout)['status'] == 'key_saved'
+            and json.loads(reused.stdout)['status'] == 'key_unchanged'
+            and 'key_exists_different' in refused.stderr
+            and cli.read_secret(destination) == original
+            and destination.stat().st_mode & 0o077 == destination.parent.stat().st_mode & 0o077 == 0
+            and original not in output and different not in output)
+
+
+
+@pytest.mark.parametrize('content', ['', 'synthetic first\nsynthetic second'])
+def test_key_stdin_rejects_empty_or_multiple_values_without_output(tmp_path, content):
+    destination = tmp_path / '.env/channel.key'
+    result = subprocess.run([sys.executable, '-m', 'polyagent_channels.cli', '--state-dir', str(tmp_path / 'state'),
+                             '--key-file', str(destination), 'key', '--stdin'],
+                            input=content, capture_output=True, text=True, timeout=3)
+    assert (result.returncode == 1 and 'key_invalid' in result.stderr and not destination.exists()
+            and 'synthetic' not in result.stdout + result.stderr)
+
+
+
+def test_key_stdin_and_source_file_are_mutually_exclusive(capsys):
+    with pytest.raises(SystemExit) as error:
+        options('key', '--stdin', '--source-file', '/synthetic/private.key')
+    assert error.value.code == 2 and 'not allowed with argument' in capsys.readouterr().err
+
+
+
 def test_concurrent_identical_key_writers_never_observe_an_empty_key(tmp_path, monkeypatch):
     destination = tmp_path / '.env/channel.key'
     selected = options('--key-file', str(destination), 'key')

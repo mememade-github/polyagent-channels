@@ -61,8 +61,10 @@ def command_parser():
     parser.add_argument('--key-file', default=os.getenv('CHANNEL_KEY_FILE'))
     parser.add_argument('--state-dir', default=os.getenv('CHANNEL_STATE_DIR'))
     commands = parser.add_subparsers(dest='command', required=True)
-    key = commands.add_parser('key', help='Save the shared key from a protected file or hidden prompt')
-    key.add_argument('--source-file')
+    key = commands.add_parser('key', help='Save the shared key from stdin, a protected file or hidden prompt')
+    key_source = key.add_mutually_exclusive_group()
+    key_source.add_argument('--source-file')
+    key_source.add_argument('--stdin', action='store_true', help='Read the shared key from process stdin until EOF')
     key.add_argument('--replace-key', action='store_true')
     connection = commands.add_parser('connect', help='Connect this session and open automatic reception for a topic')
     connection.add_argument('channel', nargs='?', default='general')
@@ -172,8 +174,17 @@ def read_secret(path):
     return secret
 
 
+def key_input(options):
+    if options.source_file:
+        return read_secret(options.source_file)
+    if getattr(options, 'stdin', False):
+        return sys.stdin.read().strip()
+    return getpass.getpass('Shared channel key: ').strip()
+
+
+
 def save_key(options, report=True):
-    secret = read_secret(options.source_file) if options.source_file else getpass.getpass('Shared channel key: ').strip()
+    secret = key_input(options)
     if not secret or any(character.isspace() for character in secret):
         raise ValueError('key_invalid')
     path = Path(options.key_file)
