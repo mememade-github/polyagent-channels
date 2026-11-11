@@ -941,6 +941,33 @@ def test_publish_keeps_an_open_topic_untouched(connection_client):
     assert before == {path: path.read_bytes() for path in exchange.list_states(session.directory, 'native-self')} and result['reception_open'] is True
 
 
+def longest_state(pending_count):
+    """A topic state with the longest identifiers and PENDING_COUNT unconfirmed message IDs."""
+    target = {'channel': 'c' * 128, 'conversation_id': 'v' * 128, 'cursor': '1794373367910-0'}
+    state = exchange.new_state('s' * 256, target, 60)
+    return {**state, 'pending': [f'1794373367910-{number}' for number in range(1, pending_count + 1)]}
+
+
+def test_two_pages_of_unconfirmed_work_with_the_longest_names_stay_readable(tmp_path):
+    state = longest_state(200)
+    exchange.open_exchange(tmp_path, state['session_id'], state)
+    assert exchange.read_state(exchange.owned_state(tmp_path, state['session_id']))['pending'] == state['pending']
+
+
+def test_state_too_large_to_read_back_is_refused(tmp_path):
+    exchange.open_exchange(tmp_path, 's' * 256, longest_state(1))
+    with pytest.raises(ValueError, match='session_state_full'):
+        exchange.write_state(exchange.owned_state(tmp_path, 's' * 256), longest_state(1000))
+
+
+def test_refused_state_leaves_the_saved_one_readable(tmp_path):
+    exchange.open_exchange(tmp_path, 's' * 256, longest_state(1))
+    path = exchange.owned_state(tmp_path, 's' * 256)
+    with contextlib.suppress(ValueError):
+        exchange.write_state(path, longest_state(1000))
+    assert exchange.read_state(path)['pending'] == ['1794373367910-1']
+
+
 def test_failed_publish_leaves_no_state(connection_client, monkeypatch):
     session = connection_client
     monkeypatch.setattr(cli, 'post_message', lambda *args: httpx.Response(503))

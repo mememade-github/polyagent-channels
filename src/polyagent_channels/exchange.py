@@ -22,7 +22,7 @@ RECEPTION_TIMEOUT = 604800
 POLL_TIMEOUT = 60
 WATCH_POLL = 30
 MAX_SESSION_TOPICS = 16
-STATE_MAX_BYTES = 4096
+STATE_MAX_BYTES = 16384
 STATE_FIELDS = {'session_id', 'channel', 'conversation_id', 'cursor', 'notified', 'delivered', 'deadline', 'errors', 'pending'}
 LARGEST_SEQUENCE = 2**64 - 1
 
@@ -262,11 +262,14 @@ def receiver_slot(directory):
 
 
 def write_state(path, state):
+    text = json.dumps(state) + '\n'
+    # A larger file would make read_state refuse the topic; refusing the write keeps the saved state usable.
+    if len(text.encode('utf-8')) > STATE_MAX_BYTES:
+        raise ValueError('session_state_full')
     descriptor, temporary = tempfile.mkstemp(prefix='.exchange-', dir=path.parent)
     try:
         with os.fdopen(descriptor, 'w', encoding='utf-8') as output:
-            json.dump(state, output)
-            output.write('\n')
+            output.write(text)
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)

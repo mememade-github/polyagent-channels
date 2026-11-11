@@ -269,7 +269,11 @@ and answering loses nothing.
   you reply or `ack` when 100 unconfirmed ones fill the page or when they lie
   more than 5,000 records past that position.
 - If retention removes unconfirmed work, `receive` reports `evicted_pending`.
-  Ask the peer to send it again, then `ack` it.
+  Ask the peer to send it again, then `ack` it. Such IDs stay unconfirmed, so
+  they add up; when a topic's saved state would pass 16 KiB (several hundred
+  IDs), `receive` and other updates of that topic fail with
+  `session_state_full` until you `ack` some. `status` lists the IDs under
+  `pending`.
 - A topic with unconfirmed work refuses `close`.
 - A resumed session gets one new notice for what it had not confirmed.
 
