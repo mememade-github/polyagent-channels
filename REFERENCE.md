@@ -519,12 +519,20 @@ archive holds every retained message: keep it private and outside the
 repository. It is streamed, so it lands where the command runs even when the
 Docker daemon sees another path.
 
+Save the block as a script and run it with `bash`; pasted into an interactive
+shell, `set -e` would close that shell on the first failure. If it stops after
+`docker compose stop`, start the previous service again with
+`docker compose up -d --no-build`.
+
 ```bash
 set -e
-git fetch --tags && git checkout <release tag> && git status --short   # no output
+git fetch --tags
+git checkout <release tag>
+test -z "$(git status --short)"
 docker image tag "$(docker inspect -f '{{.Image}}' polyagent-channels)" polyagent-channels:previous
 docker image inspect polyagent-channels:previous > /dev/null
 docker compose build                     # the running service stays up meanwhile
+docker pull alpine
 docker compose stop
 docker run --rm -v polyagent-channels_channel-data:/data alpine tar czf - -C /data . > ~/channel-data-previous.tgz
 test -s ~/channel-data-previous.tgz && chmod 600 ~/channel-data-previous.tgz
