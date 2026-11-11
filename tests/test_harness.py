@@ -898,6 +898,13 @@ def test_help_uses_request_origin_and_quotes_host_data(monkeypatch, server_modul
             harness.setup_help('http://host\nwhoami')) == (True, True, None)
 
 
+def test_help_states_how_to_run_claude_headless_in_an_installed_project(monkeypatch):
+    from polyagent_channels import harness
+
+    monkeypatch.setattr(harness, 'artifact_bytes', lambda: b'synthetic-artifact')
+    assert '--settings \'{"disableAllHooks": true}\' for headless runs' in harness.setup_help('http://localhost:18765')
+
+
 def test_help_commands_install_and_save_a_key_in_a_custom_root(artifact, tmp_path, monkeypatch):
     from polyagent_channels import harness
 

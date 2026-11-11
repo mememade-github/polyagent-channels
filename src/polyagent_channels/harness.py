@@ -87,7 +87,9 @@ receive, replies with publish reply_to, and a confirmation ends the exchange.
 A message with neither a reply nor its own ack is shown again after an interruption.
 A Codex session starts listening after its first channels tool call. Claude listens
 from the start of the session. A closed Claude session has no receiver. Codex ends
-a session once its window is closed and no turn is running.
+a session once its window is closed and no turn is running. claude -p in an
+installed project does not exit while the receiver listens; add
+--settings '{"disableAllHooks": true}' for headless runs.
 
 Without the tools, the same commands exist on the command line:
 "$CHANNELS" --client "$CLIENT" publish --text 'hello world'
