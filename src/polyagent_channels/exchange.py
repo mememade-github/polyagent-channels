@@ -287,6 +287,32 @@ def write_state_text(path, text):
         Path(temporary).unlink(missing_ok=True)
 
 
+def make_room(directory, session_id):
+    """At the topic limit, drop the oldest topic that is neither listening nor holding unconfirmed work.
+
+    Such a state only remembers a position, as publish leaves one; live topics and pending work always stay."""
+    states = [(read_state(path), path) for path in list_states(directory, session_id)]
+    idle = sorted((state['deadline'], str(path)) for state, path in states
+                  if state['deadline'] <= time.time() and not state['pending'])
+    if len(states) < MAX_SESSION_TOPICS:
+        return
+    if not idle:
+        raise ValueError('session_topic_limit')
+    drop_idle(Path(idle[0][1]))
+
+
+def require_idle(state):
+    if state['deadline'] > time.time() or state['pending']:
+        raise ValueError('session_topic_limit')
+
+
+def drop_idle(path):
+    """Check again under the topic's own lock, so a receive recording work there at that moment keeps it."""
+    with (contextlib.nullcontext() if path.name == 'exchange.json' else locked_state(path)):
+        require_idle(read_state(path))
+        path.unlink()
+
+
 def open_exchange(directory, session_id, state, reuse=False):
     validate_state(state)
     if state['session_id'] != session_id:
@@ -297,8 +323,8 @@ def open_exchange(directory, session_id, state, reuse=False):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with locked_state(path.parent / 'exchange.json'):
         existing_path = owned_state(directory, session_id, state)
-        if existing_path is None and len(list_states(directory, session_id)) >= MAX_SESSION_TOPICS:
-            raise ValueError('session_topic_limit')
+        if existing_path is None:
+            make_room(directory, session_id)
         if existing_path is not None:
             path = existing_path
         with (contextlib.nullcontext() if path.name == 'exchange.json' else locked_state(path)):

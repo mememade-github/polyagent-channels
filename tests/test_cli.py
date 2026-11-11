@@ -888,6 +888,45 @@ def test_open_cursor_refuses_to_hide_unconfirmed_work(connection_client):
         session.invoke('open', '--cursor', '0-0')
 
 
+def publish_to_conversations(session, count):
+    for number in range(count):
+        session.invoke('publish', '--conversation-id', f'sent-{number}', '--text', 'hello')
+
+
+def test_topics_only_published_to_leave_room_for_a_new_one(connection_client):
+    publish_to_conversations(connection_client, 16)
+    assert connection_client.invoke('connect', '--conversation-id', 'new')['type'] == 'connected'
+
+
+def test_listening_topics_keep_their_slots(connection_client):
+    for number in range(16):
+        connection_client.invoke('connect', '--conversation-id', f'live-{number}')
+    with pytest.raises(ValueError, match='session_topic_limit'):
+        connection_client.invoke('connect', '--conversation-id', 'new')
+
+
+def test_topic_that_gained_unconfirmed_work_is_not_replaced(tmp_path):
+    target = {'channel': 'general', 'conversation_id': 'main', 'cursor': '1-0'}
+    state = {**exchange.new_state('native-self', target, 60), 'deadline': 1.0}
+    exchange.open_exchange(tmp_path, 'native-self', state)
+    path = exchange.owned_state(tmp_path, 'native-self')
+    exchange.write_state(path, {**state, 'pending': ['2-0']})  # recorded after the replacement candidates were read
+    with pytest.raises(ValueError, match='session_topic_limit'):
+        exchange.drop_idle(path)
+
+
+def test_unconfirmed_work_keeps_its_topic(connection_client):
+    session = connection_client
+    session.invoke('publish', '--text', 'hello')
+    add_peer_rows(session, 'main', 'question', 1)
+    question = session.messages[-1]['id']
+    session.invoke('receive', '--timeout', '0')
+    publish_to_conversations(session, 15)
+    session.invoke('connect', '--conversation-id', 'new')
+    target = {'channel': 'general', 'conversation_id': 'main'}
+    assert exchange.read_state(exchange.owned_state(session.directory, 'native-self', target))['pending'] == [question]
+
+
 def test_open_cursor_on_a_listening_topic_reports_that_first(connection_client):
     session = connection_client
     session.invoke('connect')
