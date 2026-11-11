@@ -36,9 +36,7 @@ def server_module(monkeypatch, tmp_path, storage):
     artifact.write_bytes(b'synthetic-built-artifact')
     monkeypatch.setenv('CHANNEL_HARNESS_FILE', str(artifact))
     monkeypatch.setenv('CHANNEL_KEY_FILE', str(tmp_path / '.env/channel.key'))
-    server = importlib.reload(importlib.import_module('polyagent_channels.server'))
-    monkeypatch.setattr(server, 'redis', storage)
-    return server
+    return importlib.reload(importlib.import_module('polyagent_channels.server'))
 
 
 @pytest.fixture

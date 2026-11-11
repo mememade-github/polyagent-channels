@@ -12,24 +12,30 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError, ResponseError
 
 
+DEFAULT_REDIS_URL = 'redis://127.0.0.1:6379/0'
+DEFAULT_RETENTION_DAYS = 7
+DEFAULT_MAX_STORAGE_BYTES = 1073741824
+
+
 def retention_days():
-    value = os.environ.get('CHANNEL_RETENTION_DAYS', '7')
+    value = os.environ.get('CHANNEL_RETENTION_DAYS', str(DEFAULT_RETENTION_DAYS))
     if not re.fullmatch(r'[0-9]+', value):
         raise ValueError('CHANNEL_RETENTION_DAYS must be a nonnegative integer (0 disables expiration)')
     return int(value)
 
 
 def max_storage_bytes():
-    value = os.environ.get('CHANNEL_MAX_STORAGE_BYTES', '1073741824')
+    value = os.environ.get('CHANNEL_MAX_STORAGE_BYTES', str(DEFAULT_MAX_STORAGE_BYTES))
     if not re.fullmatch(r'[0-9]+', value) or not 0 < int(value) <= 2**53 - 1:
         raise ValueError('CHANNEL_MAX_STORAGE_BYTES must be a positive integer <= 9007199254740991')
     return int(value)
 
 
-MAX_STORAGE_BYTES = max_storage_bytes()
+# configure_storage() replaces these from the environment when the service starts; importing reads nothing.
+MAX_STORAGE_BYTES = DEFAULT_MAX_STORAGE_BYTES
 LIFECYCLE = files('polyagent_channels').joinpath('lifecycle.lua').read_text(encoding='utf-8')
 STORAGE_KEYS = ('channels:heads', 'channels:bytes', 'channels:version', 'channels:clock')
-RETENTION_DAYS = retention_days()
+RETENTION_DAYS = DEFAULT_RETENTION_DAYS
 RETENTION_SWEEP_SECONDS = 60
 MAX_TEXT = 8 * 1024 * 1024
 STORAGE_STATE_REPLIES = frozenset({
@@ -39,11 +45,32 @@ STORAGE_STATE_REPLIES = frozenset({
 # Lua error() adds the script position; Redis and redis-py add the script SHA and source suffix.
 STORAGE_TYPE_ERROR = re.compile(
     r'user_script:[0-9]+: Unexpected storage key type script: [0-9a-f]{40}, on @user_script:[0-9]+\.')
-redis = Redis.from_url(
-    os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0'),
-    decode_responses=True, max_connections=256,
-    socket_connect_timeout=3, socket_timeout=65,
-)
+redis = None
+
+
+def configure_storage():
+    """Read the storage settings and create the Redis client; the service calls this once when it starts."""
+    global redis, RETENTION_DAYS, MAX_STORAGE_BYTES
+    RETENTION_DAYS, MAX_STORAGE_BYTES = retention_days(), max_storage_bytes()
+    redis = Redis.from_url(os.environ.get('REDIS_URL', DEFAULT_REDIS_URL), decode_responses=True,
+                           max_connections=256, socket_connect_timeout=3, socket_timeout=65)
+
+
+def storage_address():
+    """Connection target exactly as configured: no library defaults, and never credentials."""
+    settings = redis.connection_pool.connection_kwargs
+    database = settings.get('db', 0)
+    if 'path' in settings:
+        return f"unix:{settings['path']}/{database}"
+    return f"{settings.get('host', '')}:{settings.get('port', '')}/{database}"
+
+
+async def ping_storage():
+    await redis.ping()
+
+
+async def close_storage():
+    await redis.aclose()
 
 
 class StorageStateError(RedisError):

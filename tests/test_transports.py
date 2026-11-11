@@ -1,6 +1,10 @@
 import asyncio
 import importlib
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -198,6 +202,26 @@ def test_importing_the_server_reads_no_key(monkeypatch, tmp_path):
     monkeypatch.setenv('CHANNEL_KEY_FILE', str(tmp_path / '.env/channel.key'))
     importlib.reload(importlib.import_module('polyagent_channels.server'))
     assert not (tmp_path / '.env').exists()
+
+
+def test_importing_the_service_reads_no_storage_settings(tmp_path):
+    environment = {**os.environ, 'PYTHONPATH': str(Path(__file__).parents[1] / 'src'),
+                   'CHANNEL_MAX_STORAGE_BYTES': 'invalid', 'CHANNEL_RETENTION_DAYS': 'invalid'}
+    imported = subprocess.run([sys.executable, '-c', 'import polyagent_channels.server'], cwd=tmp_path,
+                              env=environment, capture_output=True, timeout=60)
+    assert imported.returncode == 0
+
+
+def test_service_start_reads_storage_settings(server_module, monkeypatch):
+    monkeypatch.setenv('CHANNEL_MAX_STORAGE_BYTES', 'invalid')
+    with pytest.raises(ValueError, match='CHANNEL_MAX_STORAGE_BYTES'):
+        server_module.create_app()
+
+
+def test_service_start_connects_to_the_configured_redis(server_module, monkeypatch):
+    monkeypatch.setenv('REDIS_URL', 'redis://synthetic-redis:6390/3')
+    server_module.create_app()
+    assert server_module.storage_address() == 'synthetic-redis:6390/3'
 
 
 def test_production_app_wires_guard_with_message_body_limit(server_module):

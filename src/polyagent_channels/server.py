@@ -21,11 +21,14 @@ from polyagent_channels.persistence import (
     lifecycle,
     channel_key,
     channel_cursor,
+    close_storage,
+    configure_storage,
     lease_session,
     list_sessions,
+    ping_storage,
     publish,
     receive,
-    redis,
+    storage_address,
     sweep_history,
     validate_cursor,
 )
@@ -256,16 +259,7 @@ async def initialize_storage():
     except StorageStateError:
         raise
     except RedisError as exc:
-        address = configured_address(redis.connection_pool.connection_kwargs)
-        raise RuntimeError(f'Storage initialization failed: {type(exc).__name__} at {address}') from None
-
-
-def configured_address(settings):
-    """Connection target exactly as configured: no library defaults, and never credentials."""
-    database = settings.get('db', 0)
-    if 'path' in settings:
-        return f"unix:{settings['path']}/{database}"
-    return f"{settings.get('host', '')}:{settings.get('port', '')}/{database}"
+        raise RuntimeError(f'Storage initialization failed: {type(exc).__name__} at {storage_address()}') from None
 
 
 @contextlib.asynccontextmanager
@@ -280,7 +274,7 @@ async def lifespan(app):
             finally:
                 tasks.cancel_scope.cancel()
     finally:
-        await redis.aclose()
+        await close_storage()
 
 
 async def help_page(request):
@@ -296,7 +290,7 @@ async def reference_page(request):
 
 async def health(request):
     try:
-        await redis.ping()
+        await ping_storage()
         return JSONResponse({'status': 'ready'})
     except RedisError:
         return JSONResponse({'error': 'Redis unavailable'}, status_code=503)
@@ -377,5 +371,6 @@ inner = Starlette(routes=[Route('/status', health),
 
 
 def create_app():
-    """Build the service when it starts, so importing this module never reads or creates the shared key."""
+    """Build the service when it starts: importing this module reads no settings and creates no key or client."""
+    configure_storage()
     return CredentialAuth(inner, load_key(), MAX_BODY)
