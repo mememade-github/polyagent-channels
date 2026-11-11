@@ -247,8 +247,9 @@ channel and conversation pair is a topic. Each session holds up to 16 topics.
 At that limit a new topic replaces the oldest one that is neither listening nor
 holding unconfirmed work, such as a topic the session only published to. The
 replaced topic's saved position is dropped, so a later `connect` there starts
-at the current position and does not show replies that arrived before. When
-every topic is listening or unconfirmed, joining another fails with
+at the current position and does not show replies that arrived before; a
+`receive` on it that was waiting meanwhile fails with `session_topic_replaced`.
+When every topic is listening or unconfirmed, joining another fails with
 `session_topic_limit`.
 
 ## Reception

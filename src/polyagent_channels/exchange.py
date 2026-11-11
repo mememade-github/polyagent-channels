@@ -389,10 +389,17 @@ def with_pending(state, pending, delivered):
             'notified': later_cursor(state['notified'], delivered)}
 
 
+def existing_state(path):
+    """A topic replaced while a read was in flight has no file left to record into."""
+    if not path.exists():
+        raise ValueError('session_topic_replaced')
+    return read_state(path)
+
+
 def settle_read(path, page_cursor, shown_ids):
     """Record a default read. IDs at or before the delivered position were handled while this read was in flight."""
     with locked_state(path):
-        state = read_state(path)
+        state = existing_state(path)
         fresh = [message_id for message_id in shown_ids if cursor_order(message_id) > cursor_order(state['delivered'])]
         pending = sorted({*state['pending'], *fresh}, key=cursor_order)
         updated = with_pending(state, pending, later_cursor(state['delivered'], page_cursor))

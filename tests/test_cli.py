@@ -915,6 +915,16 @@ def test_topic_that_gained_unconfirmed_work_is_not_replaced(tmp_path):
         exchange.drop_idle(path)
 
 
+def test_read_of_a_topic_replaced_meanwhile_names_the_cause(tmp_path):
+    for number in range(exchange.MAX_SESSION_TOPICS + 1):
+        target = {'channel': 'general', 'conversation_id': f'sent-{number}', 'cursor': '1-0'}
+        exchange.open_exchange(tmp_path, 'native-self', {**exchange.new_state('native-self', target, 60), 'deadline': 1.0 + number})
+    replaced = exchange.session_directory(tmp_path, 'native-self') / exchange.topic_name(
+        {'channel': 'general', 'conversation_id': 'sent-0'})
+    with pytest.raises(ValueError, match='session_topic_replaced'):
+        exchange.settle_read(replaced, '99-0', ['99-0'])
+
+
 def test_unconfirmed_work_keeps_its_topic(connection_client):
     session = connection_client
     session.invoke('publish', '--text', 'hello')
