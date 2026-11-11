@@ -129,42 +129,78 @@ def receiver_callback(command):
     return {'type': 'command', 'command': command, 'asyncRewake': True, 'timeout': RECEPTION_TIMEOUT}
 
 
-def update_hook_event(data, event, command, replace=False, remove=False):
-    """Replace or remove this root's callback for one event, keeping every unrelated hook."""
-    entries = data.get('hooks', {}).get(event)
-    if remove and entries is None:
-        return []
-    selected = shlex.split(command)
-    binding = (str(Path(selected[0]).parent.parent), '--client', selected[2])
-    retained = []
-    previous = []
-    for entry_index, entry in enumerate(entries or []):
-        hooks = []
-        for hook_index, hook in enumerate(entry.get('hooks', [])):
-            try:
-                owned = managed_binding(hook.get('command', ''))
-            except ValueError:
-                raise SetupError(f'Ambiguous receiver at {event}[{entry_index}].hooks[{hook_index}]; inspect manually') from None
-            exact = hook.get('type') == 'command' and hook.get('command') == command
-            if remove:
-                if exact and owned == binding:
-                    continue
-                hooks.append(hook)
-                continue
-            if owned is None or (owned[1] == '--client' and owned[2] != selected[2]):
-                hooks.append(hook)
-                continue
-            if owned != binding and not (replace and owned[1] == '--profile'):
-                raise SetupError(f'Native scope conflict at {event}; --replace only replaces verified legacy callbacks')
-            if not exact and owned[1] != '--profile':
-                raise SetupError(f'Ambiguous managed callback at {event}; inspect manually')
-            previous.append(list(owned))
-        if hooks or not entry.get('hooks'):
-            retained.append({**entry, 'hooks': hooks})
-    if not remove:
-        retained.append({'hooks': [receiver_callback(command)]})
-    data.setdefault('hooks', {})[event] = retained
-    return previous
+LEGACY_CALLBACK_KIND = '--profile'
+# install --replace may replace callbacks of these kinds; without it they conflict.
+REPLACEABLE_WITH_FLAG = (LEGACY_CALLBACK_KIND,)
+
+
+def hook_owner(hook, position):
+    """The managed binding a hook's command names, or None for an unrelated hook."""
+    try:
+        return managed_binding(hook.get('command', ''))
+    except ValueError:
+        raise SetupError(f'Ambiguous receiver at {position}; inspect manually') from None
+
+
+def owned_hooks(data, event):
+    """Each entry of EVENT with its hooks paired with their owners; every hook is checked before anything changes."""
+    return [(entry, [(hook, hook_owner(hook, f'{event}[{entry_index}].hooks[{hook_index}]'))
+                     for hook_index, hook in enumerate(entry.get('hooks', []))])
+            for entry_index, entry in enumerate(data.get('hooks', {}).get(event) or [])]
+
+
+def callback_binding(command):
+    words = shlex.split(command)
+    return (str(Path(words[0]).parent.parent), '--client', words[2])
+
+
+def is_callback(hook, command):
+    return hook.get('type') == 'command' and hook.get('command') == command
+
+
+def owned_by_client(owner, client):
+    """A legacy callback, or one bound to this client; another client's callback is left alone."""
+    return owner is not None and not (owner[1] == '--client' and owner[2] != client)
+
+
+def remaining_entries(filtered):
+    """Entries with their remaining hooks; an entry left without hooks goes unless it held none to begin with."""
+    return [{**entry, 'hooks': hooks} for entry, hooks in filtered if hooks or not entry.get('hooks')]
+
+
+def remove_hook_event(data, event, command):
+    """Remove this root's callback for one event, keeping every unrelated hook."""
+    if data.get('hooks', {}).get(event) is None:
+        return
+    binding = callback_binding(command)
+    filtered = [(entry, [hook for hook, owner in hooks if not (is_callback(hook, command) and owner == binding)])
+                for entry, hooks in owned_hooks(data, event)]
+    data['hooks'][event] = remaining_entries(filtered)
+
+
+def replacement_problem(hook, owner, command, replaceable):
+    """Why an existing callback of this client may not be replaced, as a message template, or None."""
+    if owner != callback_binding(command) and owner[1] not in replaceable:
+        return 'Native scope conflict at {event}; --replace only replaces verified legacy callbacks'
+    if not is_callback(hook, command) and owner[1] != LEGACY_CALLBACK_KIND:
+        return 'Ambiguous managed callback at {event}; inspect manually'
+    return None
+
+
+def add_hook_event(data, event, command, replaceable):
+    """Put this root's callback on one event and return the earlier callbacks it replaces.
+
+    REPLACEABLE names the legacy callback kinds that may be replaced; any other managed callback of this client
+    stops installation."""
+    client = shlex.split(command)[2]
+    classified = owned_hooks(data, event)
+    ours = [(hook, owner) for _, hooks in classified for hook, owner in hooks if owned_by_client(owner, client)]
+    problems = [problem for hook, owner in ours if (problem := replacement_problem(hook, owner, command, replaceable))]
+    if problems:
+        raise SetupError(problems[0].format(event=event))
+    filtered = [(entry, [hook for hook, owner in hooks if not owned_by_client(owner, client)]) for entry, hooks in classified]
+    data.setdefault('hooks', {})[event] = remaining_entries(filtered) + [{'hooks': [receiver_callback(command)]}]
+    return [list(owner) for _, owner in ours]
 
 
 def json_bytes(data):
@@ -186,13 +222,13 @@ def claude_created_entries(path, data):
     return [name for name, created in candidates.items() if created]
 
 
-def claude_settings(path, command, replace=False):
+def claude_settings(path, command, replaceable):
     """Return the settings bytes with both background callbacks and the tool rule, and what they add."""
     data = settings_document(path)
     created = claude_created_entries(path, data)
     previous = []
     for event in RECEIVER_EVENTS:
-        previous.extend(update_hook_event(data, event, command, replace))
+        previous.extend(add_hook_event(data, event, command, replaceable))
     allowed = data.setdefault('permissions', {}).setdefault('allow', [])
     if CLAUDE_TOOL_RULE not in allowed:
         allowed.append(CLAUDE_TOOL_RULE)
@@ -203,7 +239,7 @@ def claude_settings_removed(path, command, created):
     """Return the settings with this binding removed; only keys this install created disappear."""
     data = settings_document(path)
     for event in RECEIVER_EVENTS:
-        update_hook_event(data, event, command, remove=True)
+        remove_hook_event(data, event, command)
     if 'rule' in created and CLAUDE_TOOL_RULE in data.get('permissions', {}).get('allow', []):
         data['permissions']['allow'].remove(CLAUDE_TOOL_RULE)
     for name in ('hooks.SessionStart', 'hooks.Stop', 'hooks', 'permissions.allow', 'permissions'):
@@ -569,7 +605,8 @@ def install(options, root, project):
     command = binding_command(root, options.client)
     previous, binding_bytes, created = [], b'', []
     if options.client == 'claude':
-        binding_bytes, previous, created = claude_settings(binding, command, options.replace)
+        replaceable = REPLACEABLE_WITH_FLAG if options.replace else ()
+        binding_bytes, previous, created = claude_settings(binding, command, replaceable)
     if options.client == 'codex':
         binding_bytes, created = codex_config(binding, wrapper)
         legacy_hooks_update(project, root)
@@ -643,7 +680,7 @@ def legacy_hooks_update(project, root):
 def legacy_hooks_without_callback(path, root):
     data = settings_document(path)
     before = json.dumps(data)
-    update_hook_event(data, 'Stop', shlex.join([str(root / 'bin/channels'), '--client', 'codex', 'hook']), remove=True)
+    remove_hook_event(data, 'Stop', shlex.join([str(root / 'bin/channels'), '--client', 'codex', 'hook']))
     if json.dumps(data) == before:
         return None
     if not data['hooks']['Stop']:
