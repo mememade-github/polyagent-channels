@@ -866,6 +866,37 @@ def test_open_defaults_fresh_and_reopen_preserves_position_while_history_is_expl
             and sum(request.url.path.endswith('/cursor') for request in session.requests) == 1)
 
 
+def test_open_cursor_moves_the_position_publish_saved(connection_client):
+    session = connection_client
+    session.invoke('publish', '--text', 'hello')
+    assert session.invoke('open', '--cursor', '0-0')['cursor'] == '0-0'
+
+
+def test_open_cursor_shows_history_after_publish(connection_client):
+    session = connection_client
+    session.invoke('publish', '--text', 'hello')
+    session.invoke('open', '--cursor', '0-0')
+    assert [row['text'] for row in session.invoke('receive', '--timeout', '0')['messages']] == ['old work']
+
+
+def test_open_cursor_refuses_to_hide_unconfirmed_work(connection_client):
+    session = connection_client
+    session.invoke('publish', '--text', 'hello')
+    add_peer_rows(session, 'main', 'question', 1)
+    session.invoke('receive', '--timeout', '0')
+    with pytest.raises(ValueError, match='session_pending_ack_required'):
+        session.invoke('open', '--cursor', '0-0')
+
+
+def test_open_cursor_on_a_listening_topic_reports_that_first(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    add_peer_rows(session, 'main', 'question', 1)
+    session.invoke('receive', '--timeout', '0')
+    with pytest.raises(ValueError, match='session_topic_already_live'):
+        session.invoke('open', '--cursor', '0-0')
+
+
 def test_stale_observation_is_distinct_from_listening(connection_client):
     session = connection_client
     session.invoke('connect')

@@ -664,6 +664,15 @@ def run_receiver(options, join_default=False, redeliver=False):
     return status
 
 
+def open_topic(options, target):
+    """Open reception; an explicit --cursor also moves a position saved earlier, for example by publish."""
+    path = exchange.owned_state(options.state_dir, options.session_id, target)
+    if path is not None and options.cursor is not None:
+        exchange.move_position(path, options.cursor)
+    state = exchange.new_state(options.session_id, target, options.timeout)
+    return exchange.open_exchange(options.state_dir, options.session_id, state)
+
+
 async def run_exchange(options, key):
     target = {**exchange_target(options), 'session_id': options.session_id}
     if options.command == 'ack':
@@ -687,8 +696,7 @@ async def run_exchange(options, key):
                 target['cursor'] = response.json()['cursor']
             exchange.validate_cursor(target['cursor'])
     if options.command == 'open':
-        state = exchange.new_state(options.session_id, target, options.timeout)
-        state = exchange.open_exchange(options.state_dir, options.session_id, state)
+        state = open_topic(options, target)
         print(json.dumps({'type': 'open', **state, **reception_status(options)}))
         return 0
     exchange.close_exchange(options.state_dir, options.session_id, target)

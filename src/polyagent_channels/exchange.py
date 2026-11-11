@@ -322,6 +322,22 @@ def close_exchange(directory, session_id, target):
         path.unlink()
 
 
+def movable(state):
+    """A listening topic is not reopened, and moving the position would hide unconfirmed work."""
+    if state['deadline'] > time.time():
+        raise ExchangeAlreadyOpen('session_topic_already_live')
+    if state['pending']:
+        raise ValueError('session_pending_ack_required')
+    return state
+
+
+def move_position(path, cursor):
+    """An explicit open cursor replaces the position saved earlier, for example by publish."""
+    with locked_state(path):
+        state = movable(read_state(path))
+        write_state(path, {**state, 'cursor': cursor, 'notified': cursor, 'delivered': cursor})
+
+
 def remember_position(directory, session_id, target, cursor):
     """Keep where a send-only session stood so a later connect cannot miss the reply; opens no reception."""
     if owned_state(directory, session_id, target) is None:

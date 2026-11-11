@@ -318,7 +318,7 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 | Command | Behavior |
 |---------|----------|
 | `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
-| `open --cursor ID` | Join from a chosen cursor. `0-0` starts from retained history |
+| `open --cursor ID` | Join from a chosen cursor, moving a position saved earlier, for example by `publish`. `0-0` starts from retained history. Refused while the topic is listening or has unconfirmed messages. A `receive` still waiting on the topic can move the position on again |
 | `peers` | List announced sessions |
 | `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: session ID). `--reply-to ID` names the message answered in that topic. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
 | `receive [--timeout SECONDS]` | Waits up to 30 seconds by default (at most 60) when nothing is new; `--timeout 0` returns at once. Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
