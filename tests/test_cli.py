@@ -290,16 +290,20 @@ def test_publish_posts_the_message(monkeypatch):
     assert captured[0].method == 'POST'
 
 
-async def listen_behind_a_redirect(received):
-    """The configured address answers 302 with another port; that port records every request it gets."""
+REDIRECT_TARGETS = ['ws://127.0.0.1:{port}/subscribe', 'https://127.0.0.1:{port}/subscribe',
+                    'http://127.0.0.1:{port}/subscribe', '/same-origin']
+
+
+async def listen_behind_a_redirect(received, target):
+    """The configured address answers 302 with TARGET; the other port records every request it gets."""
     async def other_origin(reader, writer):
         received.append(await reader.read(65536))
         writer.close()
 
     async def configured(reader, writer):
         await reader.read(65536)
-        writer.write(f'HTTP/1.1 302 Found\r\nLocation: ws://127.0.0.1:{other_port}/subscribe\r\n'
-                     'Content-Length: 0\r\n\r\n'.encode())
+        location = target.format(port=other_port)
+        writer.write(f'HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n'.encode())
         await writer.drain()
         writer.close()
 
@@ -311,15 +315,17 @@ async def listen_behind_a_redirect(received):
                          {'Authorization': 'Bearer synthetic-key'}, '0-0')
 
 
-def test_listener_refuses_a_redirect():
+@pytest.mark.parametrize('target', REDIRECT_TARGETS)
+def test_listener_refuses_a_redirect(target):
     with pytest.raises(ValueError, match='HTTP redirect refused'):
-        asyncio.run(listen_behind_a_redirect([]))
+        asyncio.run(listen_behind_a_redirect([], target))
 
 
-def test_listener_sends_nothing_to_a_redirect_target():
+@pytest.mark.parametrize('target', REDIRECT_TARGETS)
+def test_listener_sends_nothing_to_a_redirect_target(target):
     received = []
     with contextlib.suppress(Exception):
-        asyncio.run(listen_behind_a_redirect(received))
+        asyncio.run(listen_behind_a_redirect(received, target))
     assert received == []
 
 

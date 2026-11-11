@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 
 import httpx
 from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 
 from polyagent_channels import exchange
 from polyagent_channels.client_config import ConfigError, apply_config
@@ -231,7 +232,8 @@ class DirectConnect(connect):
     """websockets follows redirects with the same headers, so it would carry the shared key to another address."""
 
     def process_redirect(self, exc):
-        return exc if super().process_redirect(exc) is exc else ValueError('HTTP redirect refused')
+        redirected = isinstance(exc, InvalidStatus) and 300 <= exc.response.status_code < 400
+        return ValueError('HTTP redirect refused') if redirected else exc
 
 
 async def listen(channel_url, headers, cursor, conversation_id=None):
