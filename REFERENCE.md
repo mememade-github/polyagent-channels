@@ -499,23 +499,36 @@ greater than the rebuilt clock must reread from `0-0`.
 ## Upgrade and rollback
 
 Run these where Compose manages the service, from the repository directory, on
-a release tag with a clean tree. Recreating the service container ends
-everything running inside it, including an agent session working in that
-DevContainer, so run them from outside it. The names below assume the default
-project name `polyagent-channels`: volume `polyagent-channels_channel-data`,
-image `polyagent-channels-polyagent-channels:latest`, service container
+a release tag with a clean tree, and from outside the service container. The
+names below assume the default project name `polyagent-channels`: volume
+`polyagent-channels_channel-data`, image
+`polyagent-channels-polyagent-channels:latest`, service container
 `polyagent-channels` (`INSTANCE_NAME`) and Redis container
-`polyagent-channels-redis-1`. The backup is streamed, so it lands where the
-command runs even when the Docker daemon sees another path; keep it outside the
-repository.
+`polyagent-channels-redis-1`.
+
+Recreating the service container ends everything running inside it and
+discards its home directory and `/tmp`: an agent session working in that
+DevContainer, its Claude and Codex logins (`~/.claude`, `~/.codex`) and
+anything under `~/.config`. The repository at `/workspaces`, including `.env/`
+and `.devcontainer/.env`, and the data volume stay. Copy out anything else you
+need first, and sign the clients in again afterwards.
+
+Run the procedure once. Before running it again, rename the
+`polyagent-channels:previous` tag and the archive, or they are replaced. The
+archive holds every retained message: keep it private and outside the
+repository. It is streamed, so it lands where the command runs even when the
+Docker daemon sees another path.
 
 ```bash
-git fetch --tags && git checkout v0.1.0 && git status --short   # no output
-docker compose build                     # the running service stays up meanwhile
+set -e
+git fetch --tags && git checkout <release tag> && git status --short   # no output
 docker image tag "$(docker inspect -f '{{.Image}}' polyagent-channels)" polyagent-channels:previous
+docker image inspect polyagent-channels:previous > /dev/null
+docker compose build                     # the running service stays up meanwhile
 docker compose stop
 docker run --rm -v polyagent-channels_channel-data:/data alpine tar czf - -C /data . > ~/channel-data-previous.tgz
-test -s ~/channel-data-previous.tgz
+test -s ~/channel-data-previous.tgz && chmod 600 ~/channel-data-previous.tgz
+tar tzf ~/channel-data-previous.tgz > /dev/null
 docker compose up -d
 ```
 
