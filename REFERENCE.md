@@ -119,8 +119,10 @@ client's folder trust prompt; installation never writes native trust records.
 
 The container generates one key in ignored `.env/channel.key` at first start
 and never prints it. An existing key is kept; an empty key stops startup. The
-directory has mode 0700 and the file 0600. To rotate, replace the file,
-restart the service and give clients the new key.
+service creates the directory with mode 0700 and the file with 0600. It never
+changes the mode of an existing directory: one that group or others can open
+stops startup. To rotate, replace the file, restart the service and give
+clients the new key.
 
 Save the key on a client with `bin/channels` in the installation root, by default
 `~/.local/share/polyagent-channels/bin/channels`. Installation does not add it to

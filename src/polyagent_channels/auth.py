@@ -11,10 +11,17 @@ ERRORS = {400: 'invalid Content-Length', 401: 'Unauthorized', 411: 'Content-Leng
           413: 'request exceeds size limit', 503: 'Redis unavailable'}
 
 
+def prepare_key_directory(directory):
+    """Create a private key directory; one that already exists must be private, since others may share it."""
+    if not directory.exists():
+        directory.mkdir(parents=True, mode=0o700)
+    if directory.stat().st_mode & 0o077:
+        raise RuntimeError(f'Shared key directory {directory} must have mode 0700')
+
+
 def load_key():
     path = Path(os.environ.get('CHANNEL_KEY_FILE', '.env/channel.key'))
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.parent.chmod(0o700)
+    prepare_key_directory(path.parent)
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:

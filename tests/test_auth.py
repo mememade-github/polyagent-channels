@@ -1,3 +1,4 @@
+import contextlib
 import stat
 
 import pytest
@@ -17,6 +18,27 @@ def test_admin_key_is_preserved(monkeypatch, tmp_path):
     key_path.write_text('synthetic-admin-key\n')
     monkeypatch.setenv('CHANNEL_KEY_FILE', str(key_path))
     assert load_key() == 'synthetic-admin-key'
+
+
+def open_key_directory(monkeypatch, tmp_path):
+    shared = tmp_path / 'shared'
+    shared.mkdir()
+    shared.chmod(0o755)
+    monkeypatch.setenv('CHANNEL_KEY_FILE', str(shared / 'channel.key'))
+    return shared
+
+
+def test_existing_open_directory_fails_startup(monkeypatch, tmp_path):
+    open_key_directory(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError, match='must have mode 0700'):
+        load_key()
+
+
+def test_existing_open_directory_keeps_its_mode(monkeypatch, tmp_path):
+    shared = open_key_directory(monkeypatch, tmp_path)
+    with contextlib.suppress(RuntimeError):
+        load_key()
+    assert stat.S_IMODE(shared.stat().st_mode) == 0o755
 
 
 def test_empty_key_fails_startup(monkeypatch, tmp_path):
