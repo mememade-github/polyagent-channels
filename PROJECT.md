@@ -8,7 +8,7 @@
 
 A shared message service. Clients exchange persistent messages through Redis Streams over HTTP+JSON, WebSocket, MCP Streamable HTTP or the `channels` CLI. Installed Claude Code and Codex sessions get named tools (`publish`, `receive`, `ack`, `peers`, `connect`, `close`, `status`) and are woken by peer messages while idle. One shared Bearer key authorizes every client; there are no accounts, roles or per-channel ACLs. The service does not launch models or run closed sessions.
 
-Version `0.1.0` (tag `v0.1.0`).
+Version `0.1.1` (tag `v0.1.1`).
 
 ## Tech Stack
 
