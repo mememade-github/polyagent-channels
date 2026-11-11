@@ -177,7 +177,7 @@ def call(options, params, receivers):
         source = {'input': text} if text is not None else {'stdin': subprocess.DEVNULL}
         done = subprocess.run([*prefix, *command], capture_output=True, encoding='utf-8', timeout=70,
                               env={**os.environ, 'PYTHONUTF8': '1'}, **source)
-    except (KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as error:
         return tool_error(type(error).__name__)
     return {'content': [{'type': 'text', 'text': done.stdout or done.stderr}], 'isError': done.returncode != 0}
 
