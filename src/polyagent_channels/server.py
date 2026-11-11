@@ -157,7 +157,11 @@ async def read_json(request):
         payload.extend(chunk)
         if len(payload) > MAX_BODY:
             raise RequestTooLarge()
-    return json.loads(payload)
+    # The parser recurses once per nesting level, so a deeply nested body would otherwise become a server error.
+    try:
+        return json.loads(payload)
+    except RecursionError:
+        raise ValueError('JSON nesting is too deep') from None
 
 
 async def read_message(request):

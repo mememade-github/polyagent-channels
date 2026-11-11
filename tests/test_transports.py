@@ -91,6 +91,11 @@ def test_http_rejects_invalid_message_objects(client, headers, payload):
     assert client.post('/channels/general/messages', headers=headers, content=payload).status_code == 400
 
 
+@pytest.mark.parametrize('path', ['/channels/general/messages', '/sessions'])
+def test_http_rejects_deeply_nested_json(client, headers, path):
+    assert client.post(path, headers=headers, content='[' * 200_000).status_code == 400
+
+
 def test_http_rejects_invalid_query(client, headers):
     assert client.get('/channels/general/messages?timeout=invalid', headers=headers).status_code == 400
 
