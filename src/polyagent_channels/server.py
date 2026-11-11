@@ -204,6 +204,50 @@ mcp = FastMCP('Polyagent Channels', stateless_http=True, json_response=True,
 mcp.tool()(storage_masked_tool(publish))
 mcp.tool()(storage_masked_tool(receive))
 mcp_app = mcp.streamable_http_app()
+NESTING_ERROR = {'jsonrpc': '2.0', 'id': 'server-error',
+                 'error': {'code': -32700, 'message': 'Parse error: JSON nesting is too deep'}}
+
+
+def nested_too_deeply(body):
+    try:
+        json.loads(body)
+    except RecursionError:
+        return True
+    except ValueError:
+        return False  # the MCP library reports other invalid JSON itself
+    return False
+
+
+async def request_messages(receive):
+    """Collect the request body messages; CredentialAuth bounds the size of a POST /mcp body."""
+    messages = [await receive()]
+    while messages[-1].get('more_body'):
+        messages.append(await receive())
+    return messages
+
+
+def replayed(messages, receive):
+    """A receive callable that hands the collected messages on again before reading further ones."""
+    pending = list(messages)
+
+    async def receive_again():
+        return pending.pop(0) if pending else await receive()
+    return receive_again
+
+
+class JsonNestingGuard:
+    """The MCP library answers only JSONDecodeError with 400, so a deeply nested body would end in its 500."""
+
+    def __init__(self, application):
+        self.application = application
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or scope['method'] != 'POST' or scope['path'] != '/mcp':
+            return await self.application(scope, receive, send)
+        messages = await request_messages(receive)
+        if nested_too_deeply(b''.join(message.get('body', b'') for message in messages)):
+            return await JSONResponse(NESTING_ERROR, status_code=400)(scope, receive, send)
+        return await self.application(scope, replayed(messages, receive), send)
 
 
 async def initialize_storage():
@@ -329,7 +373,7 @@ inner = Starlette(routes=[Route('/status', health),
     Route('/help/reference', reference_page),
     Route('/channels/{channel}/messages', messages, methods=['GET', 'POST']),
     Route('/channels/{channel}/cursor', cursor), Route('/sessions', sessions, methods=['GET', 'POST']),
-    WebSocketRoute('/channels/{channel}/subscribe', subscribe), Mount('/', app=mcp_app)], lifespan=lifespan)
+    WebSocketRoute('/channels/{channel}/subscribe', subscribe), Mount('/', app=JsonNestingGuard(mcp_app))], lifespan=lifespan)
 
 
 app = CredentialAuth(inner, load_key(), MAX_BODY)

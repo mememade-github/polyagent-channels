@@ -206,7 +206,7 @@ def reply_to_line(options, line, receivers):
     """Answer one JSON-RPC line. A bad request gets its own error and never ends the connection."""
     try:
         message = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):
         return protocol_error(None, -32700, 'Parse error')
     if not isinstance(message, dict):
         return protocol_error(None, -32600, 'Invalid request')

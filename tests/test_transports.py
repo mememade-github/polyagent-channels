@@ -96,6 +96,19 @@ def test_http_rejects_deeply_nested_json(client, headers, path):
     assert client.post(path, headers=headers, content='[' * 200_000).status_code == 400
 
 
+MCP_HEADERS = {'Accept': 'application/json, text/event-stream', 'Content-Type': 'application/json'}
+
+
+def test_mcp_rejects_deeply_nested_json(client, headers):
+    assert client.post('/mcp', headers={**headers, **MCP_HEADERS}, content='[' * 200_000).json()['error']['code'] == -32700
+
+
+@pytest.mark.parametrize('path', ['/nope', '/mcp/', '/status'])
+def test_nesting_guard_reads_no_body_outside_mcp(client, headers, path):
+    response = client.post(path, headers={**headers, **MCP_HEADERS}, content='[' * 200_000, follow_redirects=False)
+    assert response.status_code in (404, 405, 307)
+
+
 def test_http_rejects_invalid_query(client, headers):
     assert client.get('/channels/general/messages?timeout=invalid', headers=headers).status_code == 400
 

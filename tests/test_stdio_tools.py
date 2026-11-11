@@ -85,6 +85,10 @@ def test_display_name_cannot_become_an_option(tmp_path, monkeypatch, executed):
     assert executed[0][0][-1] == '--name=--client=codex'
 
 
+def test_deeply_nested_line_is_a_parse_error():
+    assert stdio_tools.reply_to_line(None, '[' * 200_000, None)['error']['code'] == -32700
+
+
 def test_ack_runs_the_confirmation_command_for_the_chosen_topic(tmp_path, monkeypatch, executed):
     monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'session')
     stdio_tools.call(adapter_options(tmp_path, 'claude'), {'name': 'ack', 'arguments': {
