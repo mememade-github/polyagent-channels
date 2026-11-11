@@ -13,11 +13,23 @@ def test_first_start_creates_private_key(monkeypatch, tmp_path):
     assert (bool(key), stat.S_IMODE(key_path.stat().st_mode), stat.S_IMODE(key_path.parent.stat().st_mode)) == (True, 0o600, 0o700)
 
 
-def test_admin_key_is_preserved(monkeypatch, tmp_path):
+def private_key_file(tmp_path, content):
+    tmp_path.chmod(0o700)
     key_path = tmp_path / 'channel.key'
-    key_path.write_text('synthetic-admin-key\n')
-    monkeypatch.setenv('CHANNEL_KEY_FILE', str(key_path))
-    assert load_key() == 'synthetic-admin-key'
+    key_path.write_text(content)
+    return key_path
+
+
+def test_admin_key_is_preserved(monkeypatch, tmp_path):
+    monkeypatch.setenv('CHANNEL_KEY_FILE', str(private_key_file(tmp_path, 'synthetic-admin-key-0123456789abcdef\n')))
+    assert load_key() == 'synthetic-admin-key-0123456789abcdef'
+
+
+@pytest.mark.parametrize('content', ['synthetic two words in a key of length\n', 'synthetic-short-key\n'])
+def test_key_no_client_accepts_fails_startup(monkeypatch, tmp_path, content):
+    monkeypatch.setenv('CHANNEL_KEY_FILE', str(private_key_file(tmp_path, content)))
+    with pytest.raises(RuntimeError, match='at least 32 characters with no whitespace'):
+        load_key()
 
 
 def open_key_directory(monkeypatch, tmp_path):
@@ -42,9 +54,7 @@ def test_existing_open_directory_keeps_its_mode(monkeypatch, tmp_path):
 
 
 def test_empty_key_fails_startup(monkeypatch, tmp_path):
-    key_path = tmp_path / 'channel.key'
-    key_path.touch()
-    monkeypatch.setenv('CHANNEL_KEY_FILE', str(key_path))
+    monkeypatch.setenv('CHANNEL_KEY_FILE', str(private_key_file(tmp_path, '')))
     with pytest.raises(RuntimeError, match='empty'):
         load_key()
 

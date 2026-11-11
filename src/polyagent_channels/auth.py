@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse
 
 ERRORS = {400: 'invalid Content-Length', 401: 'Unauthorized', 411: 'Content-Length required',
           413: 'request exceeds size limit', 503: 'Redis unavailable'}
+KEY_MIN_LENGTH = 32
 
 
 def prepare_key_directory(directory):
@@ -17,6 +18,15 @@ def prepare_key_directory(directory):
         directory.mkdir(parents=True, mode=0o700)
     if directory.stat().st_mode & 0o077:
         raise RuntimeError(f'Shared key directory {directory} must have mode 0700')
+
+
+def checked_key(key):
+    """Clients refuse a key with whitespace, so the service refuses one too rather than start with it."""
+    if not key:
+        raise RuntimeError('Shared key file is empty')
+    if len(key) < KEY_MIN_LENGTH or any(character.isspace() for character in key):
+        raise RuntimeError(f'Shared key must be at least {KEY_MIN_LENGTH} characters with no whitespace')
+    return key
 
 
 def load_key():
@@ -30,10 +40,7 @@ def load_key():
         with os.fdopen(descriptor, 'w') as key_file:
             key_file.write(secrets.token_urlsafe(48) + '\n')
     path.chmod(0o600)
-    key = path.read_text().strip()
-    if not key:
-        raise RuntimeError('Shared key file is empty')
-    return key
+    return checked_key(path.read_text().strip())
 
 
 class CredentialAuth:

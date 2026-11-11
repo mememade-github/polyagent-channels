@@ -118,10 +118,11 @@ client's folder trust prompt; installation never writes native trust records.
 ### Shared key
 
 The container generates one key in ignored `.env/channel.key` at first start
-and never prints it. An existing key is kept; an empty key stops startup. The
-service creates the directory with mode 0700 and the file with 0600. It never
-changes the mode of an existing directory: one that group or others can open
-stops startup. To rotate, replace the file, restart the service and give
+and never prints it. An existing key is kept. A key that is empty, shorter than
+32 characters or contains whitespace stops startup, since clients refuse it.
+The service creates the directory with mode 0700 and the file with 0600. It
+never changes the mode of an existing directory: one that group or others can
+open stops startup. To rotate, replace the file, restart the service and give
 clients the new key.
 
 Save the key on a client with `bin/channels` in the installation root, by default
