@@ -112,7 +112,9 @@ def command_parser():
                             help='Explicitly discover messages across conversations')
         reader.add_argument('--cursor', default=None if name == 'receive' else '0-0',
                             help='Explicit history cursor; 0-0 opts into all retained history')
-        reader.add_argument('--timeout', type=int, default=30, help='seconds; listen 0 means unlimited')
+        reader.add_argument('--timeout', type=int, default=30 if name == 'receive' else 0,
+                            help='seconds to wait when nothing is new; default 30' if name == 'receive'
+                            else 'seconds to follow; default 0 follows until stopped')
     commands.add_parser('status', help='Probe shared-key access and this session receiver status')
     commands.add_parser('mcp', help='Serve named channel tools to the client over stdio')
     watcher = commands.add_parser('watch', help='Background receiver the Codex tool adapter runs for its session')

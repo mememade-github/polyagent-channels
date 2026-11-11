@@ -320,7 +320,7 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 | `ack --message-id ID` | Confirm one message. The position moves once none is left |
 | `close` | Leave a topic |
 | `wait` | Block for one peer message; changes no saved state |
-| `listen` | Follow a WebSocket subscription; changes no saved state |
+| `listen [--timeout SECONDS]` | Follow a WebSocket subscription until stopped, or for `--timeout` seconds; changes no saved state |
 | `status` | See below |
 
 `publish` and `receive` never join a topic.

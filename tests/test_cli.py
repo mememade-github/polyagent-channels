@@ -258,6 +258,10 @@ def test_publish_reads_unicode_file(tmp_path):
     assert cli.publish_payload(options)['text'] == 'hello🙂'
 
 
+def test_listener_follows_until_stopped_by_default():
+    assert options('--session-id', 'reader', 'listen').timeout == 0
+
+
 def test_listener_rejects_negative_timeout():
     with pytest.raises(ValueError, match='nonnegative'):
         asyncio.run(cli.listen_until_timeout(SimpleNamespace(timeout=-1), 'http://localhost', {}))
