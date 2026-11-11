@@ -299,14 +299,12 @@ async def health(request):
 async def messages(request):
     try:
         if request.method == 'POST':
-            data = await read_message(request)
-            result = await publish(request.path_params['channel'], **data)
-        else:
-            query_parameters = request.query_params
-            result = await receive(request.path_params['channel'], query_parameters.get('cursor', '0-0'),
-                                   int(query_parameters.get('timeout', '0')), int(query_parameters.get('limit', '100')),
-                                   query_parameters.get('conversation_id'))
-        return JSONResponse(result)
+            return JSONResponse(await publish(request.path_params['channel'], **await read_message(request)))
+        query_parameters = request.query_params
+        return JSONResponse(await receive(request.path_params['channel'], query_parameters.get('cursor', '0-0'),
+                                          int(query_parameters.get('timeout', '0')),
+                                          int(query_parameters.get('limit', '100')),
+                                          query_parameters.get('conversation_id')))
     except RequestTooLarge:
         return JSONResponse({'error': ERRORS[413]}, status_code=413)
     except (ValueError, TypeError, UnicodeError) as exc:
@@ -327,10 +325,8 @@ async def cursor(request):
 async def sessions(request):
     try:
         if request.method == 'POST':
-            result = await lease_session(**await read_session(request))
-        else:
-            result = await list_sessions()
-        return JSONResponse(result)
+            return JSONResponse(await lease_session(**await read_session(request)))
+        return JSONResponse(await list_sessions())
     except RequestTooLarge:
         return JSONResponse({'error': ERRORS[413]}, status_code=413)
     except (ValueError, TypeError, UnicodeError) as exc:

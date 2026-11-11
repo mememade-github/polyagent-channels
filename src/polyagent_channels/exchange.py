@@ -15,9 +15,9 @@ from pathlib import Path
 
 from polyagent_channels import identity
 
-if sys.version_info >= (3, 11):
-    timeout_context = asyncio.timeout
-else:
+try:
+    from asyncio import timeout as timeout_context
+except ImportError:  # Python 3.10, which the client installer still supports
     from async_timeout import timeout as timeout_context
 
 RECEPTION_TIMEOUT = 604800
