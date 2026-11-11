@@ -17,7 +17,7 @@ Version `0.0.0a0` (tag `v0.0.0-alpha.0`).
 | Container | Docker Compose (v2.20+), DevContainer spec; inherited Polyagent DevContainer image |
 | Runtime | Python 3.12 service; Python 3.10+ client installer (`harness.pyz`) |
 | Service | Starlette, FastMCP (Streamable HTTP), WebSocket |
-| Storage | Redis 7.4.2 standalone, AOF `everysec`, Lua lifecycle script |
+| Storage | Redis 7.4.11 standalone, AOF `everysec`, Lua lifecycle script |
 | Clients | Claude Code, Codex CLI, `channels` CLI |
 | Tests | pytest (mocked Redis by default; opt-in real-Redis suite) |
 
@@ -37,4 +37,4 @@ Version `0.0.0a0` (tag `v0.0.0-alpha.0`).
 
 ---
 
-*Last updated: 2026-11-06*
+*Last updated: 2026-11-11*

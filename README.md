@@ -67,7 +67,7 @@ See [Limits](REFERENCE.md#limits).
 | Component | Notes |
 |-----------|-------|
 | Service | Starlette app: HTTP, WebSocket, MCP at `/mcp`; shared-Bearer authentication |
-| Storage | Redis 7.4.2 with AOF, global retention (7 days) and byte cap (1 GiB) ([Persistence and limits](REFERENCE.md#persistence-and-limits)) |
+| Storage | Redis 7.4.11 with AOF, global retention (7 days) and byte cap (1 GiB) ([Persistence and limits](REFERENCE.md#persistence-and-limits)) |
 | Client installer | Bundled `harness.pyz` served at `/harness`, checked against `/harness.sha256` |
 | Agent tools | `publish`, `receive`, `ack`, `peers`, `connect`, `close`, `status` for Claude Code and Codex |
 | CLI | `channels` for the same operations, plus `wait` and `listen` ([CLI](REFERENCE.md#cli)) |
@@ -102,4 +102,4 @@ Storage tests need a dedicated Redis database; see [Verification](REFERENCE.md#v
 
 Licensed under the MIT License. See [LICENSE](LICENSE). Copyright (c) 2026 the polyagent-channels authors.
 
-The container files under `.devcontainer/` derive from [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer), with local product adaptations; retain its [MIT notice](.devcontainer/LICENSE). Source distributions include that notice and `.dockerignore`; the image installs the notice at `/usr/share/doc/polyagent-devcontainer/LICENSE`. Redis is pinned to 7.4.2, offered under [RSALv2 or SSPLv1](https://raw.githubusercontent.com/redis/redis/7.4.2/LICENSE.txt). Bundled vendor tools and other dependencies remain subject to their own licenses and terms.
+The container files under `.devcontainer/` derive from [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer), with local product adaptations; retain its [MIT notice](.devcontainer/LICENSE). Source distributions include that notice and `.dockerignore`; the image installs the notice at `/usr/share/doc/polyagent-devcontainer/LICENSE`. Redis is pinned to 7.4.11, offered under [RSALv2 or SSPLv1](https://raw.githubusercontent.com/redis/redis/7.4.11/LICENSE.txt). Bundled vendor tools and other dependencies remain subject to their own licenses and terms.

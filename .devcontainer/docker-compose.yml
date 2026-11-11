@@ -40,7 +40,7 @@ services:
       timeout: 5s
       retries: 6
   redis:
-    image: redis:7.4.2-alpine
+    image: redis:7.4.11-alpine
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec",
               "--auto-aof-rewrite-percentage", "${REDIS_AOF_REWRITE_PERCENTAGE:-50}",
               "--auto-aof-rewrite-min-size", "${REDIS_AOF_REWRITE_MIN_SIZE:-64mb}",
