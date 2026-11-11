@@ -67,10 +67,14 @@ save `CHANNEL_BIND=127.0.0.1` before the first start, or use HTTPS through a
 proxy or a VPN.
 
 Clients send the key only to the configured address: HTTP requests do not
-follow redirects, and `listen` refuses a WebSocket redirect with
-`HTTP redirect refused`. Clients do use the standard proxy variables
-(`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`); over plaintext HTTP
-such a proxy can read the key.
+follow redirects, and `listen` refuses any WebSocket redirect with
+`HTTP redirect refused`. Clients do use proxies from the environment, and over
+plaintext HTTP a proxy can read the key:
+
+- HTTP requests use `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`.
+- `listen` uses `WS_PROXY` or `WSS_PROXY`, else `HTTPS_PROXY`, else for `ws`
+  `HTTP_PROXY`, and honors `NO_PROXY`. It ignores `ALL_PROXY`.
+- SOCKS proxies are not supported; a SOCKS setting makes the client fail.
 
 After a change, run `docker compose up -d` and confirm the published address
 with `docker compose ps`. On Docker Desktop the previous host port can stay
