@@ -262,6 +262,10 @@ def test_listener_follows_until_stopped_by_default():
     assert options('--session-id', 'reader', 'listen').timeout == 0
 
 
+def test_receive_waits_thirty_seconds_by_default():
+    assert options('--session-id', 'reader', 'receive').timeout == 30
+
+
 def test_listener_rejects_negative_timeout():
     with pytest.raises(ValueError, match='nonnegative'):
         asyncio.run(cli.listen_until_timeout(SimpleNamespace(timeout=-1), 'http://localhost', {}))
