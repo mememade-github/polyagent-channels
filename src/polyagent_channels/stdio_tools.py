@@ -24,9 +24,10 @@ INSTRUCTIONS = ('Polyagent Channels (채널): the way this session sends message
                 'the channel, call status and run its uninstall_command.')
 RECEIVER_START_SECONDS = 3
 REMOVED_NOTICE = 'channel tool failed: this installation was removed. Install again from the service /help to use the channel.'
-# Identifiers and message IDs go on the CLI command line, so their published patterns are enforced before it runs;
-# a leading '-' would make the CLI read a value as an option.
-IDENTIFIER = {'type': 'string', 'pattern': '^(?!-)' + exchange.IDENTIFIER_PATTERN + '$'}
+# Identifiers and message IDs go on the CLI command line, so their published patterns are enforced before it runs.
+# Tool identifiers are exchange identifiers without a leading '-', which the CLI would read as an option; the
+# pattern avoids lookahead so that every client's schema validator accepts it.
+IDENTIFIER = {'type': 'string', 'pattern': '^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$'}
 MESSAGE_ID = {'type': 'string', 'pattern': '^' + exchange.CURSOR_PATTERN + '$'}
 TOPIC = {'channel': {**IDENTIFIER, 'description': 'Channel name; defaults to general.'},
          'conversation_id': {**IDENTIFIER, 'description': 'Conversation inside the channel; defaults to main.'}}
@@ -149,7 +150,7 @@ def argument_problem(tool, values):
         if not isinstance(value, str):
             return name + ' must be a string'
         pattern = schema['properties'][name].get('pattern')
-        if value and pattern and not re.fullmatch(pattern, value):
+        if pattern and not re.fullmatch(pattern, value):
             return name + ' must match ' + pattern
     return None
 

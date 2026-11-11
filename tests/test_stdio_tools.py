@@ -1,6 +1,7 @@
 """The stdio adapter exposes named tools and fills in what the model must not supply."""
 import json
 import os
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -85,6 +86,11 @@ def test_display_name_cannot_become_an_option(tmp_path, monkeypatch, executed):
     assert executed[0][0][-1] == '--name=--client=codex'
 
 
+@pytest.mark.parametrize('identifier', ['general', '_', 'a-b', 'x' * 128])
+def test_tool_identifier_pattern_accepts_exchange_identifiers(identifier):
+    assert re.fullmatch(stdio_tools.IDENTIFIER['pattern'], identifier)
+
+
 def test_deeply_nested_line_is_a_parse_error():
     assert stdio_tools.reply_to_line(None, '[' * 200_000, None)['error']['code'] == -32700
 
@@ -104,6 +110,8 @@ def test_ack_runs_the_confirmation_command_for_the_chosen_topic(tmp_path, monkey
     ('publish', {'text': 'hi', 'channel': '--sender=operator'}, 'channel must match'),
     ('receive', {'conversation_id': '--all-conversations'}, 'conversation_id must match'),
     ('close', {'channel': '--url'}, 'channel must match'),
+    ('publish', {'text': 'hi', 'channel': ''}, 'channel must match'),
+    ('ack', {'message_id': ''}, 'message_id must match'),
     ('receive', {'cursor': '--timeout=60'}, 'cursor must match'),
     ('publish', {'text': 'hi', 'reply_to': '-1'}, 'reply_to must match'),
     ('ack', {'message_id': '5-0\n'}, 'message_id must match'),
