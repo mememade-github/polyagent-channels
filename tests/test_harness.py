@@ -781,16 +781,15 @@ def test_uninstall_proceeds_while_a_session_listens_and_the_receiver_cleans_up(a
     assert (held, removed.returncode, during, root.exists(), list(tmp_path.glob('.claude/*'))) == (True, 0, ['receiver.lock'], False, [])
 
 
-def test_help_uses_request_origin_and_quotes_host_data(monkeypatch):
+def test_help_uses_request_origin_and_quotes_host_data(monkeypatch, server_module):
     from polyagent_channels import harness
-    from polyagent_channels.server import help_page
     from starlette.requests import Request
     import asyncio
 
     monkeypatch.setattr(harness, 'artifact_bytes', lambda: b'synthetic-artifact')
     request = Request({'type': 'http', 'scheme': 'https', 'path': '/help', 'root_path': '',
                        'headers': [(b'host', b'channels.example:2345')], 'server': ('localhost', 80)})
-    response = asyncio.run(help_page(request))
+    response = asyncio.run(server_module.help_page(request))
     malicious = 'http://host$(id)'
     assert ('SERVICE=https://channels.example:2345' in response.body.decode(),
             'SERVICE=' + shlex.quote(malicious) in harness.setup_help(malicious),

@@ -467,8 +467,10 @@ python3.12 -m venv .venv
 .venv/bin/python -m pytest --cov=polyagent_channels --cov-branch --cov-report=term-missing
 ```
 
-The default suite uses mocked Redis and synthetic data; real-storage tests skip
-without `REDIS_TEST_URL`. For them, start a separate Redis and supply a fresh,
+The default suite uses mocked Redis and synthetic data. It clears inherited
+`CHANNEL_*`, `REDIS_URL` and client session variables first, so it also runs
+inside the service container. Real-storage tests skip without `REDIS_TEST_URL`.
+For them, start a separate Redis and supply a fresh,
 dedicated, nonzero database, never the operator database. The suite refuses a
 nonempty database and removes only its own keys.
 

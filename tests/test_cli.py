@@ -23,12 +23,6 @@ def options(*arguments):
     return result
 
 
-@pytest.fixture(autouse=True)
-def clean_native_environment(monkeypatch):
-    monkeypatch.delenv('CODEX_THREAD_ID', raising=False)
-    monkeypatch.delenv('CLAUDE_CODE_SESSION_ID', raising=False)
-
-
 def test_session_selection_uses_raw_native_id(monkeypatch):
     monkeypatch.setenv('CODEX_THREAD_ID', 'raw.codex:123')
     assert cli.select_session(options('publish', '--text', 'hello')) == 'raw.codex:123'
