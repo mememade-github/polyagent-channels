@@ -23,7 +23,9 @@ The service image keeps the inherited Polyagent DevContainer shape:
   (`NOPASSWD:ALL`). The Claude, Codex and Antigravity CLIs, the Docker CLI
   and Node are installed.
 - The build needs internet access and fetches provider installers at their
-  latest, unpinned versions, so a rebuild is not reproducible.
+  latest, unpinned versions, so a rebuild is not reproducible. The service's
+  Python dependencies are the exception: `requirements.lock` pins them with
+  hashes, and a package whose hash differs stops the build.
 - The service process can write to the repository mounted at `/workspaces`.
   `setup-env.sh` sets `core.filemode false` in that repository's git config
   at each start.

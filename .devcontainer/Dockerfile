@@ -212,7 +212,7 @@ CMD ["sleep", "infinity"]
 WORKDIR /opt/polyagent-channels
 RUN uv python install 3.12
 COPY --chown=vscode:vscode requirements.lock requirements.txt pyproject.toml README.md LICENSE ./
-RUN uv venv --python 3.12 /home/vscode/channels-venv && uv pip install --python /home/vscode/channels-venv/bin/python -r requirements.lock
+RUN uv venv --python 3.12 /home/vscode/channels-venv && uv pip install --python /home/vscode/channels-venv/bin/python --require-hashes -r requirements.lock
 COPY --chown=vscode:vscode src ./src
 RUN uv pip install --python /home/vscode/channels-venv/bin/python --no-deps .
 COPY --chown=vscode:vscode scripts/build_harness.py ./scripts/build_harness.py
