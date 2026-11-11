@@ -58,6 +58,7 @@ Uninstall removes only what installation added. Unconfirmed work is kept and rep
 - A notice reaches an open session only. Nothing starts a closed session.
 - A Codex session needs one input after it is resumed before it listens again.
 - A turn already running when a Codex window closes finishes first.
+- `claude -p` in an installed project does not exit while the receiver listens; add `--settings '{"disableAllHooks": true}'` for headless runs.
 - Codex installation sets `thread_unload_delay_secs = 0` in the project, which removes the default 60-second grace for every Codex thread there.
 
 See [Limits](REFERENCE.md#limits).

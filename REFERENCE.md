@@ -302,6 +302,7 @@ notice that arrives during a turn is handled after that turn.
 | Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn; listens again after it |
 | `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and the session starts at the current stream position | — |
 | Wake-up delay | A few seconds | Within about 10 seconds when the session runs without the shared background server. `status` reports `notify_failed` while `codex queue` keeps failing |
+| Headless runs | `claude -p` in an installed project does not exit, because the background receiver keeps running. Add `--settings '{"disableAllHooks": true}'` for runs that should not listen | — |
 
 A topic stays open for seven days from the last receiver start, and each Claude
 Code turn renews it. After that the session stops listening and `connect`
