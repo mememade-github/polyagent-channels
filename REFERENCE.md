@@ -501,11 +501,9 @@ greater than the rebuilt clock must reread from `0-0`.
 Run these where Compose manages the service, from the repository directory, on
 a release tag with a clean tree. Recreating the service container ends
 everything running inside it, including an agent session working in that
-DevContainer, so run them from outside it. Build with Compose, which uses
-BuildKit; the legacy builder of a Docker CLI without buildx cannot build this
-image. The names below assume the default project name `polyagent-channels`:
-volume `polyagent-channels_channel-data`, image
-`polyagent-channels-polyagent-channels:latest`, service container
+DevContainer, so run them from outside it. The names below assume the default
+project name `polyagent-channels`: volume `polyagent-channels_channel-data`,
+image `polyagent-channels-polyagent-channels:latest`, service container
 `polyagent-channels` (`INSTANCE_NAME`) and Redis container
 `polyagent-channels-redis-1`. The backup is streamed, so it lands where the
 command runs even when the Docker daemon sees another path; keep it outside the

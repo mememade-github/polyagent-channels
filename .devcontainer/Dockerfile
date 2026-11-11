@@ -209,6 +209,11 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]
 
 # Polyagent Channels product layer; no prebuilt local image is required.
+# The build user owns the product directory, so the package builds in place under BuildKit and the legacy builder alike;
+# the legacy builder would create a WORKDIR owned by root.
+USER root
+RUN install -d -o ${USERNAME} -g ${USERNAME} /opt/polyagent-channels
+USER ${USERNAME}
 WORKDIR /opt/polyagent-channels
 RUN uv python install 3.12
 COPY --chown=vscode:vscode requirements.lock requirements.txt pyproject.toml README.md LICENSE ./
