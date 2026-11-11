@@ -494,26 +494,3 @@ IDs. Install from `/help` with each and leave both idle. Ask one in plain words 
 question the other. The idle peer should wake without key input, reply according
 to the content, and `session_id` and `reply_to` should match. A scripted stand-in
 proves adapter wiring only.
-
-## Fable audit
-
-A Fable audit is a review of this repository by Claude's Fable model in a fresh
-Claude process. Run it where `claude` and `jq` are installed, such as the
-service container:
-
-```bash
-bash scripts/run-fable-audit.sh <prompt-file> [output-file]
-```
-
-The script first uses the dedicated key in the ignored `.env/fable-audit.env`.
-The file holds one line, `FABLE_AUDIT_TOKEN=<Claude OAuth token>`; keep it at
-mode 0600. When the key is missing or rejected with HTTP 401, the script uses
-the caller's Claude login. Any other failure, such as a usage limit on the key,
-stops with an error. Standard error names the credential used.
-
-The key reaches Claude on a file descriptor, never in an environment variable
-or a command line. The auditor can still read the whole repository, `.env/`
-included, with its Read and Bash tools, so this is not a security boundary.
-The output file is emptied at the start and stays empty when the audit fails.
-Inside a git work tree it must be ignored by git, and it must never be an env
-or key file.

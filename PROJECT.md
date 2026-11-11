@@ -25,7 +25,6 @@ Version `0.0.0a0` (tag `v0.0.0-alpha.0`).
 
 - **Configuration**: ignored `.devcontainer/.env` (see [REFERENCE.md § Configuration](REFERENCE.md#configuration-devcontainerenv)); defaults need no file.
 - **Shared key**: ignored `.env/channel.key`, generated on first start (directory 0700, file 0600).
-- **Fable audit key**: optional, ignored `.env/fable-audit.env` (see [REFERENCE.md § Fable audit](REFERENCE.md#fable-audit)).
 - **Persistent volume**: `channel-data` (Redis AOF).
 - **Default address**: `http://127.0.0.1:18765` on the Docker host (container port 8080).
 - **Client root**: `~/.local/share/polyagent-channels` (installer, wrapper, URL-only config, session state).
@@ -38,4 +37,4 @@ Version `0.0.0a0` (tag `v0.0.0-alpha.0`).
 
 ---
 
-*Last updated: 2026-11-11*
+*Last updated: 2026-11-06*
