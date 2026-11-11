@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import json
 from unittest.mock import AsyncMock
 
@@ -193,8 +194,14 @@ def test_retention_task_starts_and_stops_before_redis_closes(server_module, stor
     storage.aclose.assert_awaited_once()
 
 
+def test_importing_the_server_reads_no_key(monkeypatch, tmp_path):
+    monkeypatch.setenv('CHANNEL_KEY_FILE', str(tmp_path / '.env/channel.key'))
+    importlib.reload(importlib.import_module('polyagent_channels.server'))
+    assert not (tmp_path / '.env').exists()
+
+
 def test_production_app_wires_guard_with_message_body_limit(server_module):
-    app = server_module.app
+    app = server_module.create_app()
     assert isinstance(app, CredentialAuth) and app.application is server_module.inner
     assert app.max_body == server_module.MAX_BODY == server_module.MAX_TEXT + 65536
 

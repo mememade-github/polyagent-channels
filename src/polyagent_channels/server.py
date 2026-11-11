@@ -376,4 +376,6 @@ inner = Starlette(routes=[Route('/status', health),
     WebSocketRoute('/channels/{channel}/subscribe', subscribe), Mount('/', app=JsonNestingGuard(mcp_app))], lifespan=lifespan)
 
 
-app = CredentialAuth(inner, load_key(), MAX_BODY)
+def create_app():
+    """Build the service when it starts, so importing this module never reads or creates the shared key."""
+    return CredentialAuth(inner, load_key(), MAX_BODY)
