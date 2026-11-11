@@ -1,25 +1,28 @@
 import importlib
 import os
-import tempfile
 from unittest.mock import AsyncMock
 
 import pytest
 from starlette.testclient import TestClient
 
-# The service container exports settings for the live deployment, including the path of its shared key, and
-# client sessions export their own IDs. The package reads some of them at import time, so clear them before
-# any test module imports it; tests that need one set it themselves. REDIS_TEST_URL is the opt-in exception.
+from polyagent_channels import persistence
+from polyagent_channels.auth import CredentialAuth
+
+# The service container exports settings for the live deployment, including the path of its shared key, and client
+# sessions export their own IDs. Tests that need one set it themselves; REDIS_TEST_URL is the opt-in exception.
 AMBIENT_VARIABLES = ('REDIS_URL', 'CLAUDE_PID', 'CLAUDE_PROJECT_DIR', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID')
-for name in [name for name in os.environ if name.startswith('CHANNEL_') or name in AMBIENT_VARIABLES]:
-    del os.environ[name]
-# The default client root is otherwise the real installation under HOME, which installers lock while they run.
-CLIENT_ROOT = tempfile.TemporaryDirectory(prefix='polyagent-channels-tests-')
-os.environ['CHANNEL_ROOT'] = CLIENT_ROOT.name
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(monkeypatch, tmp_path_factory):
+    for name in [name for name in os.environ if name.startswith('CHANNEL_') or name in AMBIENT_VARIABLES]:
+        monkeypatch.delenv(name)
+    # The default client root is otherwise the real installation under HOME, which installers lock while they run.
+    monkeypatch.setenv('CHANNEL_ROOT', str(tmp_path_factory.mktemp('client-root')))
 
 
 @pytest.fixture
 def storage(monkeypatch):
-    from polyagent_channels import persistence
     # Existing transport fixtures use synthetic stream IDs, without wall-clock expiration.
     monkeypatch.setattr(persistence, 'RETENTION_DAYS', 0)
     connection = AsyncMock()
@@ -41,7 +44,6 @@ def server_module(monkeypatch, tmp_path, storage):
 
 @pytest.fixture
 def client(server_module):
-    from polyagent_channels.auth import CredentialAuth
     with TestClient(CredentialAuth(server_module.inner, 'synthetic-admin-key', server_module.MAX_BODY)) as client:
         yield client
 
