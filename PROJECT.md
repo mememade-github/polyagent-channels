@@ -31,7 +31,7 @@ Version `0.1.0` (tag `v0.1.0`).
 
 ## Known limits
 
-- **Large modules**: `setup.py` (1040 lines) and `cli.py` (971 lines) exceed the guide's small-entity aim, and six functions exceed 40 lines: `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.x.
+- **Large modules**: `setup.py` (1040 lines) and `cli.py` (971 lines) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.x.
 - **Remaining guide exceptions**: listed with their limits in [AGENTS.md § Specific guide conflicts](AGENTS.md#specific-guide-conflicts).
 
 ## Distribution

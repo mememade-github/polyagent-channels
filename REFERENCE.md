@@ -338,7 +338,7 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 | Command | Behavior |
 |---------|----------|
 | `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
-| `open --cursor ID [--timeout SECONDS]` | Join from a chosen cursor, moving a position saved earlier, for example by `publish`. `0-0` starts from retained history. Refused while the topic is listening or has unconfirmed messages. A `receive` still waiting on the topic can move the position on again |
+| `open [--cursor ID] [--timeout SECONDS]` | Join a topic from the saved position, or the current cursor for a new topic. `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`; `0-0` starts from retained history, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again. Listening time is up to seven days |
 | `peers` | List announced sessions |
 | `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: session ID). `--reply-to ID` names the message answered in that topic. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
 | `receive [--timeout SECONDS]` | Waits up to 30 seconds by default (at most 60) when nothing is new; `--timeout 0` returns at once. Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
@@ -497,26 +497,40 @@ greater than the rebuilt clock must reread from `0-0`.
 
 ## Upgrade and rollback
 
-Run these from the repository directory where Compose runs, on a release tag
-with a clean tree. Recreating the service container ends everything running
-inside it, including an agent session working in that DevContainer, so run them
-from outside it. The data volume is `<project>_channel-data`;
-`polyagent-channels_channel-data` with the default project name.
+Run these where Compose manages the service, from the repository directory, on
+a release tag with a clean tree. Recreating the service container ends
+everything running inside it, including an agent session working in that
+DevContainer, so run them from outside it. Build with Compose, which uses
+BuildKit; the legacy builder of a Docker CLI without buildx cannot build this
+image. The names below assume the default project name `polyagent-channels`:
+volume `polyagent-channels_channel-data`, image
+`polyagent-channels-polyagent-channels:latest`, service container
+`polyagent-channels` (`INSTANCE_NAME`) and Redis container
+`polyagent-channels-redis-1`. The backup is streamed, so it lands where the
+command runs even when the Docker daemon sees another path; keep it outside the
+repository.
 
 ```bash
 git fetch --tags && git checkout v0.1.0 && git status --short   # no output
+docker compose build                     # the running service stays up meanwhile
 docker image tag "$(docker inspect -f '{{.Image}}' polyagent-channels)" polyagent-channels:previous
 docker compose stop
-docker run --rm -v polyagent-channels_channel-data:/data -v "$PWD/.env":/backup alpine \
-  tar czf /backup/channel-data-previous.tgz -C /data .
-docker compose up -d --build
+docker run --rm -v polyagent-channels_channel-data:/data alpine tar czf - -C /data . > ~/channel-data-previous.tgz
+test -s ~/channel-data-previous.tgz
+docker compose up -d
 ```
 
-Then confirm that both containers are healthy in `docker ps`, that
-`curl -fsS http://127.0.0.1:18765/health` succeeds, that the downloaded
-`/harness` matches `/harness.sha256`, and that a client reinstalled from `/help`
-is woken once by a peer message. Messages from before the upgrade stay
-readable with `receive --cursor 0-0`.
+Then confirm:
+
+- `docker ps` shows both containers healthy, and
+  `curl -fsS http://127.0.0.1:18765/health` succeeds.
+- The downloaded `/harness` matches `/harness.sha256`.
+- `docker exec polyagent-channels /home/vscode/channels-venv/bin/python -c "import importlib.metadata as m; print(m.version('polyagent-channels'), m.version('mcp'))"`
+  prints the release and the `mcp` pin of `requirements.lock`, and
+  `docker exec polyagent-channels-redis-1 redis-cli INFO server` reports the
+  Redis version of the compose file.
+- A client reinstalled from `/help` is woken once by a peer message, and
+  messages from before the upgrade stay readable with `receive --cursor 0-0`.
 
 To roll back the service, point the image back and recreate only that
 container; Redis 7.4.11 also serves the previous release:
@@ -526,9 +540,14 @@ docker image tag polyagent-channels:previous polyagent-channels-polyagent-channe
 docker compose up -d --no-build --force-recreate polyagent-channels
 ```
 
-If the data itself is damaged, stop Compose, restore the archive into the
-volume with the same `docker run ... alpine` command using
-`tar xzf /backup/channel-data-previous.tgz -C /data`, and start again.
+If the data itself is damaged, replace the volume contents with the archive:
+
+```bash
+docker compose stop
+docker run --rm -i -v polyagent-channels_channel-data:/data alpine \
+  sh -c 'find /data -mindepth 1 -delete && tar xzf - -C /data' < ~/channel-data-previous.tgz
+docker compose up -d --no-build
+```
 
 ## Verification
 
