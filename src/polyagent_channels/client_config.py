@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
-DEFAULT_ROOT = Path(os.environ.get('CHANNEL_ROOT') or Path.home() / '.local/share/polyagent-channels').expanduser().absolute()
+def default_root():
+    """The client root, read when a command runs: CHANNEL_ROOT, else ~/.local/share/polyagent-channels."""
+    return Path(os.environ.get('CHANNEL_ROOT') or Path.home() / '.local/share/polyagent-channels').expanduser().absolute()
 
 
 class ConfigError(ValueError):
@@ -61,7 +63,7 @@ def read_config(path):
 
 
 def apply_config(options, arguments):
-    root = Path(options.config).expanduser().absolute().parent if options.config else DEFAULT_ROOT
+    root = Path(options.config).expanduser().absolute().parent if options.config else default_root()
     if options.config:
         url = read_config(options.config)
         if not any(item == '--url' or item.startswith('--url=') for item in arguments):

@@ -412,8 +412,8 @@ def receive_cursor(options, key):
 
 
 def installation_root(options):
-    from polyagent_channels.client_config import DEFAULT_ROOT
-    return Path(options.config).expanduser().absolute().parent if options.config else DEFAULT_ROOT
+    from polyagent_channels.client_config import default_root
+    return Path(options.config).expanduser().absolute().parent if options.config else default_root()
 
 
 def binding_diagnostics(options):
@@ -933,8 +933,8 @@ def main():
                 sys.exit(status)
             return
         from polyagent_channels.setup import lifecycle_lock
-        from polyagent_channels.client_config import DEFAULT_ROOT
-        root = DEFAULT_ROOT
+        from polyagent_channels.client_config import default_root
+        root = default_root()
         if options.state_dir:
             root = Path(options.state_dir).expanduser().absolute().parent
         if options.config:

@@ -258,6 +258,11 @@ def test_publish_reads_unicode_file(tmp_path):
     assert cli.publish_payload(options)['text'] == 'hello🙂'
 
 
+def test_client_root_follows_channel_root_set_after_import(monkeypatch, tmp_path):
+    monkeypatch.setenv('CHANNEL_ROOT', str(tmp_path / 'root'))
+    assert options('--session-id', 'reader', 'receive').state_dir == str(tmp_path / 'root/state')
+
+
 def test_listener_follows_until_stopped_by_default():
     assert options('--session-id', 'reader', 'listen').timeout == 0
 

@@ -15,7 +15,7 @@ import re
 import zipfile
 from pathlib import Path
 
-from polyagent_channels.client_config import ConfigError, DEFAULT_ROOT, read_config, service_url
+from polyagent_channels.client_config import ConfigError, default_root, read_config, service_url
 from polyagent_channels.exchange import RECEPTION_TIMEOUT
 
 try:
@@ -347,7 +347,7 @@ def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('plan', 'install', 'uninstall'))
     parser.add_argument('--url')
-    parser.add_argument('--target', type=Path, default=DEFAULT_ROOT)
+    parser.add_argument('--target', type=Path, default=default_root())
     parser.add_argument('--client', choices=('claude', 'codex'))
     parser.add_argument('--project', type=Path, default=Path.cwd())
     parser.add_argument('--key-file', type=Path)
