@@ -309,29 +309,67 @@ def drop_idle(path):
         path.unlink()
 
 
-def open_exchange(directory, session_id, state, reuse=False):
+def topic_directory(directory, session_id, state):
+    """Check STATE against this session and create the session directory."""
     validate_state(state)
     if state['session_id'] != session_id:
         raise ExchangeMismatch()
-    path = session_directory(directory, session_id) / topic_name(state)
-    if Path(directory).is_symlink() or path.parent.is_symlink():
+    folder = session_directory(directory, session_id)
+    if Path(directory).is_symlink() or folder.is_symlink():
         raise ValueError('Exchange directory must not be a symlink')
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with locked_state(path.parent / 'exchange.json'):
-        existing_path = owned_state(directory, session_id, state)
-        if existing_path is None:
-            make_room(directory, session_id)
-        if existing_path is not None:
-            path = existing_path
-        with (contextlib.nullcontext() if path.name == 'exchange.json' else locked_state(path)):
-            if path.exists() or path.is_symlink():
-                existing = read_state(path)
-                if existing['deadline'] > time.time() and not reuse:
-                    raise ExchangeAlreadyOpen('session_topic_already_live')
-                state = {**state, 'cursor': existing['cursor'], 'notified': existing['notified'], 'delivered': existing['delivered'],
-                         'pending': existing['pending'], 'deadline': max(state['deadline'], existing['deadline'])}
-            write_state(path, state)
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return folder
+
+
+def topic_file(directory, session_id, state):
+    """The file of STATE's topic: the one already saved, or a new one once there is room for it."""
+    existing_path = owned_state(directory, session_id, state)
+    if existing_path is None:
+        make_room(directory, session_id)
+    return existing_path or session_directory(directory, session_id) / topic_name(state)
+
+
+@contextlib.contextmanager
+def topic_slot(directory, session_id, state):
+    """Hold the session lock and then the topic's own lock, and yield the topic file."""
+    folder = topic_directory(directory, session_id, state)
+    with contextlib.ExitStack() as locks:
+        locks.enter_context(locked_state(folder / 'exchange.json'))
+        path = topic_file(directory, session_id, state)
+        # The legacy single-topic file is guarded by the session lock already held.
+        locks.enter_context(contextlib.nullcontext() if path.name == 'exchange.json' else locked_state(path))
+        yield path
+
+
+def saved_state(path):
+    return read_state(path) if path.exists() or path.is_symlink() else None
+
+
+def refuse_live(existing):
+    if existing and existing['deadline'] > time.time():
+        raise ExchangeAlreadyOpen('session_topic_already_live')
+    return existing
+
+
+def save_opened(path, state, existing):
+    """Write STATE, keeping an existing topic's position, deliveries and later deadline."""
+    if existing:
+        state = {**state, 'cursor': existing['cursor'], 'notified': existing['notified'], 'delivered': existing['delivered'],
+                 'pending': existing['pending'], 'deadline': max(state['deadline'], existing['deadline'])}
+    write_state(path, state)
     return state
+
+
+def open_exchange(directory, session_id, state):
+    """Open a topic for listening; one that is already listening is refused."""
+    with topic_slot(directory, session_id, state) as path:
+        return save_opened(path, state, refuse_live(saved_state(path)))
+
+
+def reuse_exchange(directory, session_id, state):
+    """Open a topic or keep listening on it; rejoining keeps the saved position."""
+    with topic_slot(directory, session_id, state) as path:
+        return save_opened(path, state, saved_state(path))
 
 
 def close_exchange(directory, session_id, target):
@@ -367,7 +405,7 @@ def remember_position(directory, session_id, target, cursor):
     """Keep where a send-only session stood so a later connect cannot miss the reply; opens no reception."""
     if owned_state(directory, session_id, target) is None:
         expired = {**new_state(session_id, {**target, 'cursor': cursor}, 1), 'deadline': time.time()}
-        open_exchange(directory, session_id, expired, reuse=True)
+        reuse_exchange(directory, session_id, expired)
 
 
 def cursor_order(cursor):

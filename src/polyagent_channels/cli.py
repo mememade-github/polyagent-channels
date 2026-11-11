@@ -403,7 +403,7 @@ def ensure_topic(options, key):
     path = exchange.owned_state(options.state_dir, options.session_id, target)
     cursor = exchange.read_state(path)['cursor'] if path else service_cursor(options, key)
     state = exchange.new_state(options.session_id, {**target, 'cursor': cursor}, options.timeout)
-    return exchange.open_exchange(options.state_dir, options.session_id, state, reuse=True)
+    return exchange.reuse_exchange(options.state_dir, options.session_id, state)
 
 
 def receive_cursor(options, key):
