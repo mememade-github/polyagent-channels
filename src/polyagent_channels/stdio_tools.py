@@ -2,6 +2,7 @@
 import atexit
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -23,8 +24,12 @@ INSTRUCTIONS = ('Polyagent Channels (채널): the way this session sends message
                 'the channel, call status and run its uninstall_command.')
 RECEIVER_START_SECONDS = 3
 REMOVED_NOTICE = 'channel tool failed: this installation was removed. Install again from the service /help to use the channel.'
-TOPIC = {'channel': {'type': 'string', 'description': 'Channel name; defaults to general.'},
-         'conversation_id': {'type': 'string', 'description': 'Conversation inside the channel; defaults to main.'}}
+# Identifiers and message IDs go on the CLI command line, so their published patterns are enforced before it runs;
+# a leading '-' would make the CLI read a value as an option.
+IDENTIFIER = {'type': 'string', 'pattern': '^(?!-)' + exchange.IDENTIFIER_PATTERN + '$'}
+MESSAGE_ID = {'type': 'string', 'pattern': '^' + exchange.CURSOR_PATTERN + '$'}
+TOPIC = {'channel': {**IDENTIFIER, 'description': 'Channel name; defaults to general.'},
+         'conversation_id': {**IDENTIFIER, 'description': 'Conversation inside the channel; defaults to main.'}}
 
 
 def schema(required=(), **properties):
@@ -34,15 +39,15 @@ def schema(required=(), **properties):
 TOOLS = [
     {'name': 'publish', 'description': 'Send a text message to other agent sessions on the channel. Does not wait for a reply.',
      'inputSchema': schema(['text'], text={'type': 'string'}, **TOPIC,
-                           reply_to={'type': 'string', 'description': 'ID of the message being answered.'})},
+                           reply_to={**MESSAGE_ID, 'description': 'ID of the message being answered.'})},
     {'name': 'receive', 'description': 'Read peer messages not confirmed yet, up to 100 per call; when more is true, call '
                                        'again. Each is shown again until a reply to it or an ack of it confirms it, and '
                                        'newer messages can wait behind it until then. Pass cursor 0-0 to read retained '
                                        'history instead.',
-     'inputSchema': schema(**TOPIC, cursor={'type': 'string'})},
+     'inputSchema': schema(**TOPIC, cursor=MESSAGE_ID)},
     {'name': 'ack', 'description': 'Confirm one delivered message that asks for nothing. Decide this for each message: '
                                    'an ack never replaces an answer. A publish with reply_to already confirms what it answers.',
-     'inputSchema': schema(['message_id'], message_id={'type': 'string'}, **TOPIC)},
+     'inputSchema': schema(['message_id'], message_id=MESSAGE_ID, **TOPIC)},
     {'name': 'peers', 'description': 'List sessions announced as reachable. An announcement does not prove a peer is online.',
      'inputSchema': schema()},
     {'name': 'connect', 'description': 'Join a channel or conversation so its peer messages wake this session.',
@@ -80,7 +85,7 @@ def cli_arguments(name, values):
         history = ['--cursor', values['cursor']] if values.get('cursor') else []
         return ['receive', *topic, '--timeout', '0', *history], None
     if name == 'connect':
-        return ['connect', *topic, *(['--name', values['name']] if values.get('name') else [])], None
+        return ['connect', *topic, *(['--name=' + values['name']] if values.get('name') else [])], None
     if name in ('peers', 'status'):
         return [name], None
     if name == 'ack':
@@ -143,6 +148,9 @@ def argument_problem(tool, values):
             return 'unknown argument ' + name
         if not isinstance(value, str):
             return name + ' must be a string'
+        pattern = schema['properties'][name].get('pattern')
+        if value and pattern and not re.fullmatch(pattern, value):
+            return name + ' must match ' + pattern
     return None
 
 

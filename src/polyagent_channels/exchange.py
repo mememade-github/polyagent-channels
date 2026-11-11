@@ -35,13 +35,17 @@ class ExchangeMismatch(ValueError):
     """The requested exchange does not match the authenticated local owner/target."""
 
 
+IDENTIFIER_PATTERN = '[A-Za-z0-9_-]{1,128}'
+CURSOR_PATTERN = '[0-9]{1,20}-[0-9]{1,20}'
+
+
 def validate_identifier(value):
-    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', value):
+    if not isinstance(value, str) or not re.fullmatch(IDENTIFIER_PATTERN, value):
         raise ValueError('Invalid exchange identifier')
 
 
 def validate_cursor(value):
-    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{1,20}-[0-9]{1,20}', value):
+    if not isinstance(value, str) or not re.fullmatch(CURSOR_PATTERN, value):
         raise ValueError('Invalid exchange cursor')
     if any(int(part) > 2**64 - 1 for part in value.split('-')):
         raise ValueError('Invalid exchange cursor')

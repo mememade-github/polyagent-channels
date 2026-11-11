@@ -79,6 +79,12 @@ def test_message_text_travels_through_stdin_only(tmp_path, monkeypatch, executed
             and command[-2:] == ['--reply-to', '1-0'] and settings['env']['PYTHONUTF8'] == '1')
 
 
+def test_display_name_cannot_become_an_option(tmp_path, monkeypatch, executed):
+    monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'session')
+    stdio_tools.call(adapter_options(tmp_path, 'claude'), {'name': 'connect', 'arguments': {'name': '--client=codex'}}, None)
+    assert executed[0][0][-1] == '--name=--client=codex'
+
+
 def test_ack_runs_the_confirmation_command_for_the_chosen_topic(tmp_path, monkeypatch, executed):
     monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'session')
     stdio_tools.call(adapter_options(tmp_path, 'claude'), {'name': 'ack', 'arguments': {
@@ -91,6 +97,12 @@ def test_ack_runs_the_confirmation_command_for_the_chosen_topic(tmp_path, monkey
     ('publish', {}, 'text is required'),
     ('publish', {'text': 'hi', 'session_id': 'forged'}, 'unknown argument session_id'),
     ('ack', {'message_id': None}, 'message_id must be a string'),
+    ('publish', {'text': 'hi', 'channel': '--sender=operator'}, 'channel must match'),
+    ('receive', {'conversation_id': '--all-conversations'}, 'conversation_id must match'),
+    ('close', {'channel': '--url'}, 'channel must match'),
+    ('receive', {'cursor': '--timeout=60'}, 'cursor must match'),
+    ('publish', {'text': 'hi', 'reply_to': '-1'}, 'reply_to must match'),
+    ('ack', {'message_id': '5-0\n'}, 'message_id must match'),
     ('receive', ['general'], 'arguments must be an object'),
     ('missing_tool', {}, 'unknown tool')])
 def test_bad_arguments_come_back_as_tool_errors_and_run_nothing(tmp_path, monkeypatch, executed, name, arguments, problem):

@@ -357,7 +357,7 @@ do not verify identity or guarantee a live receiver.
 | Field | Limit |
 |-------|-------|
 | `session_id` | 1 to 256 ASCII letters, digits or `._:-` |
-| `channel`, `conversation_id` | 1 to 128 ASCII letters, digits or `_-` |
+| `channel`, `conversation_id` | 1 to 128 ASCII letters, digits or `_-`. Agent tools refuse a leading `-`, which the CLI would read as an option |
 | `sender` | Non-whitespace text, up to 256 UTF-8 bytes |
 | `client`, `name` | Nonblank, up to 64 and 256 UTF-8 bytes |
 | `text` | Nonempty, up to 8 MiB UTF-8 |
