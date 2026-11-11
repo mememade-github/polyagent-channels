@@ -208,6 +208,9 @@ program files, unknown files and native folder trust stay.
   after its current receive or notice attempt ends and it rechecks the
   installation, which can exceed a minute while a notice is retried. The
   session's tools then report the removal.
+- **Failed installation.** Installation records what it owns before changing
+  client settings, so an uninstall after a failed install removes what it
+  left, including the `channels` registration.
 - **Shared root.** Shared files stay while another project or client uses the
   root. After the last project the root is removed, except a saved key.
 - **Saved key.** It stays until `--purge-key`, and the output lists the command

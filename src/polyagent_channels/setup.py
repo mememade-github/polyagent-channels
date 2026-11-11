@@ -571,6 +571,7 @@ def install(options, root, project):
         binding_bytes, previous, created = claude_settings(binding, command, options.replace)
     if options.client == 'codex':
         binding_bytes, created = codex_config(binding, wrapper)
+        legacy_hooks_update(project, root)
     content = wrapper_content(Path(os.path.abspath(sys.executable)), root)
     if wrapper.exists() and wrapper.read_bytes() != content and managed_wrapper_root(wrapper) is None:
         raise SetupError('Unrelated wrapper; preserving it')
@@ -601,35 +602,62 @@ def install(options, root, project):
     for name, body in files.items():
         atomic_write(root / name, body, 0o700 if name == 'bin/channels' else 0o600)
         manifest['files'][name] = digest(body)
-    if options.client == 'claude':
-        register_claude_tools(project, wrapper)
+    earlier = recorded_bindings(manifest, project, options.client)
+    previously_created = earlier[0].get('created', []) if earlier else []
+    record = binding_record(root, project, options.client)
+    # Ownership is recorded before the client changes, so uninstall can undo a run that fails part way. What this run
+    # creates joins the record only once it exists, so a failed run never claims a settings file it did not write.
+    record_ownership(root, manifest, {**record, 'created': previously_created})
     if options.client == 'codex':
         remove_legacy_codex_hook(project, root)
         if not binding.parent.exists():
             created.append('directory')
+    if options.client == 'claude':
+        register_claude_tools(project, wrapper)
     binding.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(binding, binding_bytes)
-    earlier = recorded_bindings(manifest, project, options.client)
-    previously_created = earlier[0].get('created', []) if earlier else []
-    record = {**binding_record(root, project, options.client), 'created': sorted({*previously_created, *created})}
-    manifest['hooks'] = [item for item in manifest['hooks'] if item not in earlier] + [record]
+    record_ownership(root, manifest, {**record, 'created': sorted({*previously_created, *created})})
+
+
+def record_ownership(root, manifest, record):
+    """Write the manifest with RECORD as the only binding record for its project and client."""
+    others = [item for item in manifest['hooks'] if (item['project'], item['client']) != (record['project'], record['client'])]
+    manifest['hooks'] = others + [record]
     atomic_write(root / 'install-manifest.json', (json.dumps(manifest, indent=2) + '\n').encode(), 0o600)
 
 
-def remove_legacy_codex_hook(project, root):
-    """Earlier releases waited in a Codex Stop hook; it would hold the turn open if it stayed."""
+def legacy_hooks_update(project, root):
+    """Return the legacy hooks document without this root's old callback, or None when it holds none.
+
+    Install computes it before writing anything, so a file it cannot read stops it with nothing left."""
     path = project / LEGACY_CODEX_HOOKS
-    if not path.is_file():
-        return False
+    try:
+        return legacy_hooks_without_callback(path, root) if path.is_file() else None
+    except SetupError:
+        raise
+    except (ValueError, OSError, AttributeError, TypeError, KeyError):
+        raise SetupError(f'{path} is not a hooks file this installer can read; fix or remove it') from None
+
+
+def legacy_hooks_without_callback(path, root):
     data = settings_document(path)
     before = json.dumps(data)
     update_hook_event(data, 'Stop', shlex.join([str(root / 'bin/channels'), '--client', 'codex', 'hook']), remove=True)
     if json.dumps(data) == before:
-        return False
+        return None
     if not data['hooks']['Stop']:
         del data['hooks']['Stop']
     if not data['hooks']:
         del data['hooks']
+    return data
+
+
+def remove_legacy_codex_hook(project, root):
+    """Earlier releases waited in a Codex Stop hook; it would hold the turn open if it stayed."""
+    data = legacy_hooks_update(project, root)
+    if data is None:
+        return False
+    path = project / LEGACY_CODEX_HOOKS
     if data:
         atomic_write(path, json_bytes(data))
         return True

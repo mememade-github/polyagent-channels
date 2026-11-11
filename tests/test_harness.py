@@ -139,6 +139,59 @@ def test_uninstall_removes_exactly_what_install_added_to_an_empty_project(artifa
             output['kept'], len(output['bindings_removed'])) == (0, [], [], False, [], 1)
 
 
+def failed_claude_install(artifact, tmp_path):
+    """Install for Claude into a project whose .claude directory cannot be written, then make it writable again."""
+    if os.geteuid() == 0:
+        pytest.skip('root writes regardless of directory modes')
+    project = project_directory(tmp_path / 'project')
+    (project / '.claude').mkdir(mode=0o500)
+    failed = invoke(artifact, 'install', *args(tmp_path, 'claude', project), cwd=tmp_path)
+    (project / '.claude').chmod(0o700)
+    return project, failed
+
+
+def uninstall_project(artifact, tmp_path, project):
+    return invoke(artifact, 'uninstall', '--target', tmp_path / 'root', '--project', project, cwd=tmp_path)
+
+
+def test_failed_install_reports_failure(artifact, tmp_path):
+    assert failed_claude_install(artifact, tmp_path)[1].returncode == 1
+
+
+def test_uninstall_after_failed_install_removes_the_tool_registration(artifact, tmp_path, synthetic_claude):
+    project, _ = failed_claude_install(artifact, tmp_path)
+    uninstall_project(artifact, tmp_path, project)
+    assert registered(synthetic_claude) == []
+
+
+def test_uninstall_after_failed_install_removes_the_installation(artifact, tmp_path):
+    project, _ = failed_claude_install(artifact, tmp_path)
+    uninstall_project(artifact, tmp_path, project)
+    assert not (tmp_path / 'root').exists()
+
+
+def test_uninstall_after_failed_install_keeps_settings_the_user_wrote_later(artifact, tmp_path):
+    project, _ = failed_claude_install(artifact, tmp_path)
+    settings = project / '.claude/settings.local.json'
+    settings.write_text(json.dumps({'permissions': {'allow': [CLAUDE_TOOL_RULE]}}))
+    uninstall_project(artifact, tmp_path, project)
+    assert json.loads(settings.read_text())['permissions']['allow'] == [CLAUDE_TOOL_RULE]
+
+
+def test_install_after_a_failed_install_succeeds(artifact, tmp_path):
+    project, _ = failed_claude_install(artifact, tmp_path)
+    assert invoke(artifact, 'install', *args(tmp_path, 'claude', project), cwd=tmp_path).returncode == 0
+
+
+@pytest.mark.parametrize('content', ['{not json', '[]', '{"hooks": []}', '{"hooks": {"Stop": "x"}}', '{"hooks": {"Stop": [1]}}'])
+def test_codex_install_with_broken_legacy_hooks_writes_nothing(artifact, tmp_path, content):
+    project = project_directory(tmp_path / 'project')
+    (project / '.codex').mkdir()
+    (project / '.codex/hooks.json').write_text(content)
+    invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path)
+    assert list((tmp_path / 'root').rglob('*')) == []
+
+
 def test_uninstall_restores_existing_settings_content_and_keeps_user_rule(artifact, tmp_path):
     settings = tmp_path / '.claude/settings.local.json'
     settings.parent.mkdir()
