@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import io
 import json
 import shlex
@@ -281,6 +282,39 @@ def test_publish_posts_the_message(monkeypatch):
     assert captured[0].method == 'POST'
 
 
+async def listen_behind_a_redirect(received):
+    """The configured address answers 302 with another port; that port records every request it gets."""
+    async def other_origin(reader, writer):
+        received.append(await reader.read(65536))
+        writer.close()
+
+    async def configured(reader, writer):
+        await reader.read(65536)
+        writer.write(f'HTTP/1.1 302 Found\r\nLocation: ws://127.0.0.1:{other_port}/subscribe\r\n'
+                     'Content-Length: 0\r\n\r\n'.encode())
+        await writer.drain()
+        writer.close()
+
+    other = await asyncio.start_server(other_origin, '127.0.0.1', 0)
+    other_port = other.sockets[0].getsockname()[1]
+    first = await asyncio.start_server(configured, '127.0.0.1', 0)
+    async with other, first:
+        await cli.listen(f'http://127.0.0.1:{first.sockets[0].getsockname()[1]}/channels/general',
+                         {'Authorization': 'Bearer synthetic-key'}, '0-0')
+
+
+def test_listener_refuses_a_redirect():
+    with pytest.raises(ValueError, match='HTTP redirect refused'):
+        asyncio.run(listen_behind_a_redirect([]))
+
+
+def test_listener_sends_nothing_to_a_redirect_target():
+    received = []
+    with contextlib.suppress(Exception):
+        asyncio.run(listen_behind_a_redirect(received))
+    assert received == []
+
+
 @pytest.mark.parametrize('event', [{'id': '1-0', 'text': 'hello'}, {'type': 'heartbeat', 'cursor': '0-0'}, {'error': 'Redis unavailable'}])
 def test_websocket_client_handles_message_heartbeat_and_error(monkeypatch, capsys, event):
     class SyntheticSocket:
@@ -295,7 +329,7 @@ def test_websocket_client_handles_message_heartbeat_and_error(monkeypatch, capsy
                 yield json.dumps(event)
             return events()
 
-    monkeypatch.setattr(cli, 'connect', lambda *parameters, **settings: SyntheticSocket())
+    monkeypatch.setattr(cli, 'DirectConnect', lambda *parameters, **settings: SyntheticSocket())
     if 'error' in event:
         with pytest.raises(ValueError, match='Redis unavailable'):
             asyncio.run(cli.listen('http://localhost/channels/general', {}, '0-0'))

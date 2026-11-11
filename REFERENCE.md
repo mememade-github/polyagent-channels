@@ -66,6 +66,12 @@ Plaintext HTTP exposes the Bearer header. On a network you do not trust,
 save `CHANNEL_BIND=127.0.0.1` before the first start, or use HTTPS through a
 proxy or a VPN.
 
+Clients send the key only to the configured address: HTTP requests do not
+follow redirects, and `listen` refuses a WebSocket redirect with
+`HTTP redirect refused`. Clients do use the standard proxy variables
+(`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`); over plaintext HTTP
+such a proxy can read the key.
+
 After a change, run `docker compose up -d` and confirm the published address
 with `docker compose ps`. On Docker Desktop the previous host port can stay
 unavailable briefly; retry, or choose another `CHANNEL_PORT`.

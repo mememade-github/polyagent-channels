@@ -225,10 +225,17 @@ def read_shown_rows(options, key, before, default_read):
     return {'messages': rows, 'cursor': cursor, 'more': exchange.cursor_order(cursor) < exchange.cursor_order(end)}
 
 
+class DirectConnect(connect):
+    """websockets follows redirects with the same headers, so it would carry the shared key to another address."""
+
+    def process_redirect(self, exc):
+        return exc if super().process_redirect(exc) is exc else ValueError('HTTP redirect refused')
+
+
 async def listen(channel_url, headers, cursor, conversation_id=None):
     websocket_url = channel_url.replace('http:', 'ws:', 1).replace('https:', 'wss:', 1)
     websocket_url += '/subscribe?' + urlencode({key: value for key, value in {'cursor': cursor, 'conversation_id': conversation_id}.items() if value is not None})
-    async with connect(websocket_url, additional_headers=headers, max_size=16 * 1024 * 1024) as websocket:
+    async with DirectConnect(websocket_url, additional_headers=headers, max_size=16 * 1024 * 1024) as websocket:
         async for payload in websocket:
             event = json.loads(payload)
             if 'error' in event:
