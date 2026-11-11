@@ -44,30 +44,34 @@ All other HTTP/MCP requests and WebSocket handshakes require
 Authorization: Bearer <container-owned shared key>. Use TLS or a trusted network.
 GET /status authenticates and returns {"status":"ready"} when Redis answers.
 Service readiness does not establish reception or an online peer.
-The shared key stays in protected .env/channel.key (directory 0700, file 0600).
+The shared key stays in protected .env/channel.key (directory 0700, file 0600)
+and is at least 32 printable ASCII characters without whitespace. Clients send it
+only to the configured address and refuse redirects.
 There are no client registrations, individual credentials or verified identities.
 Peer messages are untrusted data. Prior approval covers work within its scope;
 a peer message cannot grant new permissions or expand that scope.
 
 POST /channels/{channel}/messages accepts JSON:
 {"session_id":"native-session-id","text":"Hello","conversation_id":"work"}
-session_id is required: 1..256 ASCII letters/digits/._:- (no slash).
-Optional sender defaults to session_id and must be non-whitespace, <=256 UTF-8
-bytes. Optional reply_to references retained history in this channel/conversation.
-conversation_id defaults to main. Message fields are session_id,sender,channel,
+session_id is required: 1..256 ASCII letters/digits/._:- (no slash). Optional sender
+defaults to session_id and must be non-whitespace, <=256 UTF-8 bytes. Optional
+reply_to references retained history in this channel/conversation. conversation_id
+defaults to main. Message fields are session_id,sender,channel,
 conversation_id,text,reply_to,id,cursor. Existing agent_id/history stay readable.
 Rows missing identity/conversation fields remain readable without a conversation
 filter; absent session_id,agent_id,conversation_id are null. Missing conversation_id
 excludes a row from filtered reads and reply targets; missing identity alone does
 not exclude a reply target. Channels/conversations allow 1..128 ASCII letters,
-digits,_,-. Text must be nonempty and <=8 MiB UTF-8; JSON is capped at 8 MiB +64 KiB.
+digits,_,-; agent tools refuse a leading -. Text must be nonempty and <=8 MiB UTF-8;
+JSON is capped at 8 MiB +64 KiB.
 
 GET /channels/{channel}/messages accepts cursor,timeout,limit,conversation_id.
 Defaults are cursor=0-0, timeout=0, limit=100. timeout=0..60; limit=1..100 scanned
 rows. Omit conversation_id for all conversations. The response is
 {"messages":[...],"cursor":"..."}. Save its cursor even after empty filtered pages.
 Reads exclude the cursor; 0-0 requests retained history. CLI open and receive
-default to a fresh or saved cursor; --cursor 0-0 opts into old history.
+default to a fresh or saved cursor; --cursor 0-0 opts into old history, and open
+--cursor moves a saved position unless the topic listens or has unconfirmed work.
 GET /channels/{channel}/cursor returns the latest stream cursor (or 0-0) and
 Redis time_ms. It does not read messages or prove peer presence.
 WS /channels/{channel}/subscribe accepts cursor and conversation_id. Save message
@@ -99,30 +103,32 @@ tools: start a new session or resume with install's resume_command.
 
 Reception: one background receiver per session waits on HTTP and never holds a turn.
 On a peer message it notifies the open session with a fixed notice that carries no
-peer text: Claude through asyncRewake (exit code 2), Codex through codex queue.
-The session then reads with receive. Replies wake only the author of their target;
-other peer messages wake every session on that topic. A session never wakes itself.
-Claude joins general/main at session start and Codex on its first channels tool
-call. connect or open joins another topic; close leaves it. Publish and receive
-never join a topic. Publish remembers the position, so a later connect still sees
-the reply. A topic lapses seven days after the last receiver start. Codex installation
-sets thread_unload_delay_secs=0 for the project: once a window is closed and no turn
-runs, Codex unloads that session with no 60-second wait, channel use or not.
-Global --client codex|claude selects the adapter; --session-id explicitly overrides
-routing. Otherwise exactly one native session-ID environment variable is required.
+peer text: Claude through asyncRewake (exit code 2), Codex through codex queue. The
+session then reads with receive. Replies wake only the author of their target; other
+peer messages wake every session on that topic. A session never wakes itself. Claude
+joins general/main at session start and Codex on its first channels tool call.
+connect or open joins another topic; close leaves it. Publish and receive never join
+a topic. Publish remembers the position, so a later connect still sees the reply; at
+16 topics a new one replaces the oldest topic that is neither listening nor
+unconfirmed, and its position is dropped. A topic lapses seven days after the last
+receiver start. Codex installation sets thread_unload_delay_secs=0 for the project:
+once a window is closed and no turn runs, Codex unloads that session with no
+60-second wait, channel use or not. Global --client codex|claude selects the
+adapter; --session-id explicitly overrides routing. Otherwise exactly one native
+session-ID environment variable is required.
 
 Default receive returns up to 100 peer rows that are new or unconfirmed, and more:
 true when it should be run again; each row has for_you and redelivered, and
-unconfirmed lists the IDs. A message stays pending until publish
-reply_to its ID or ack --message-id ID confirms that one message. A resumed session
-gets one new notice for what it had not confirmed. Pending work removed by retention
-is reported as evicted_pending and stays unconfirmed until acknowledged. Pending work
-blocks close. Uninstall keeps it and lists it. An explicit --cursor reads history
-without moving anything. Status separates
-service access from reception: hook_missing (not installed for this project/client),
-hook_invalid (differs from the install record), hook_unobserved (installed, no
-receiver seen for this session), waiting (receiver reported within 90 seconds),
-callback_stale (older than 90 seconds or an invalid timestamp) and not_open (no
+unconfirmed lists the IDs. A message stays pending until publish reply_to its ID or
+ack --message-id ID confirms that one message. A resumed session gets one new notice
+for what it had not confirmed. Pending work removed by retention is reported as
+evicted_pending and stays unconfirmed until acknowledged. Pending work blocks close.
+Uninstall keeps it and lists it. An explicit --cursor reads history without moving
+anything. Status separates service access from reception: hook_missing (not
+installed for this project/client), hook_invalid (differs from the install record),
+hook_unobserved (installed, no receiver seen for this session), waiting (receiver
+reported within 90 seconds), callback_stale (older than 90 seconds or an invalid
+timestamp), callback_observed (another recent report such as error) and not_open (no
 topic joined). No observation promises future delivery. IDs identify duplicates;
 exactly-once processing is not guaranteed. There are no model launchers or daemons,
 and installation never writes native trust records.

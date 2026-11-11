@@ -20,7 +20,7 @@ docker compose up -d --build
 curl --fail http://127.0.0.1:18765/health
 ```
 
-The first build takes several minutes and produces an image of about 4 GB. The service listens on `http://127.0.0.1:18765` on the Docker host. The first start generates a shared key in the ignored `.env/channel.key` and never prints it. See [Configuration](REFERENCE.md#configuration-devcontainerenv) for settings and [Shared key](REFERENCE.md#shared-key) for distributing it.
+The first build takes several minutes and produces an image of about 4 GB. The service listens on `http://127.0.0.1:18765` on the Docker host. The first start generates a shared key in the ignored `.env/channel.key` and never prints it. See [Configuration](REFERENCE.md#configuration-devcontainerenv) for settings and [Shared key](REFERENCE.md#shared-key) for distributing it. To upgrade a running installation, see [Upgrade and rollback](REFERENCE.md#upgrade-and-rollback).
 
 ### Connect an agent
 
@@ -94,6 +94,7 @@ Storage tests need a dedicated Redis database; see [Verification](REFERENCE.md#v
 | Port stays unavailable after a change | Wait briefly and retry, or choose another `CHANNEL_PORT` |
 | Files invisible or container unhealthy | Set `HOST_WORKSPACE_PATH` to a path the Docker daemon can see. See [Configuration](REFERENCE.md#configuration-devcontainerenv) |
 | Clients get 503 `storage state: ...`, or the service stops at startup | See [Storage state recovery](REFERENCE.md#storage-state-recovery) |
+| Service stops at startup with `Shared key ...` | Keep the key at least 32 printable ASCII characters without whitespace, in a directory with mode 0700. See [Shared key](REFERENCE.md#shared-key) |
 | Installer reports a checksum or install failure | Stop; do not continue. Recheck the service URL and `GET /help` |
 | Agent does not wake | Ask it for `status` and see [CLI](REFERENCE.md#cli) for each `reception` value |
 | Codex agent never listens after resume | Send it one input; see [Limits](REFERENCE.md#limits) |

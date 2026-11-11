@@ -24,10 +24,15 @@ Version `0.0.0a0` (tag `v0.0.0-alpha.0`).
 ## Environment
 
 - **Configuration**: ignored `.devcontainer/.env` (see [REFERENCE.md § Configuration](REFERENCE.md#configuration-devcontainerenv)); defaults need no file.
-- **Shared key**: ignored `.env/channel.key`, generated on first start (directory 0700, file 0600).
+- **Shared key**: ignored `.env/channel.key`, generated on first start (directory 0700, file 0600); at least 32 printable ASCII characters without whitespace.
 - **Persistent volume**: `channel-data` (Redis AOF).
 - **Default address**: `http://127.0.0.1:18765` on the Docker host (container port 8080).
 - **Client root**: `~/.local/share/polyagent-channels` (installer, wrapper, URL-only config, session state).
+
+## Known limits
+
+- **Large modules**: `setup.py` (1040 lines) and `cli.py` (971 lines) exceed the guide's small-entity aim, and six functions exceed 40 lines: `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.x.
+- **Remaining guide exceptions**: listed with their limits in [AGENTS.md § Specific guide conflicts](AGENTS.md#specific-guide-conflicts).
 
 ## Distribution
 

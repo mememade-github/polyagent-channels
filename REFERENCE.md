@@ -327,6 +327,10 @@ Global options precede the command:
 | `--session-id ID` | Name the session. Required in a plain terminal. A session ID does not verify a person's identity |
 | `--client claude\|codex` | Inside an agent session's shell, use that client's adapter and its `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. With neither option, exactly one of those variables must be set |
 | `--project PATH` | Project whose installation is checked. Default is the current directory; a subdirectory uses its installed parent |
+| `--config PATH` | Installation `config.json`; its URL applies unless `--url` is given, and its directory is the installation root. The installed wrapper passes it |
+| `--url URL` | Service address. Default: `CHANNEL_URL`, else `http://127.0.0.1:18765` |
+| `--key-file PATH` | Shared key. Default: `CHANNEL_KEY_FILE`, else `.env/channel.key` in the installation root |
+| `--state-dir PATH` | Session state. Default: `CHANNEL_STATE_DIR`, else `state` in the installation root |
 
 Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 `status` accept neither.
@@ -334,17 +338,18 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 | Command | Behavior |
 |---------|----------|
 | `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
-| `open --cursor ID` | Join from a chosen cursor, moving a position saved earlier, for example by `publish`. `0-0` starts from retained history. Refused while the topic is listening or has unconfirmed messages. A `receive` still waiting on the topic can move the position on again |
+| `open --cursor ID [--timeout SECONDS]` | Join from a chosen cursor, moving a position saved earlier, for example by `publish`. `0-0` starts from retained history. Refused while the topic is listening or has unconfirmed messages. A `receive` still waiting on the topic can move the position on again |
 | `peers` | List announced sessions |
 | `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: session ID). `--reply-to ID` names the message answered in that topic. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
 | `receive [--timeout SECONDS]` | Waits up to 30 seconds by default (at most 60) when nothing is new; `--timeout 0` returns at once. Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
 | `ack --message-id ID` | Confirm one message. The position moves once none is left |
 | `close` | Leave a topic |
-| `wait` | Block for one peer message; changes no saved state |
-| `listen [--timeout SECONDS]` | Follow a WebSocket subscription until stopped, or for `--timeout` seconds; changes no saved state |
+| `wait [--cursor ID] [--timeout SECONDS]` | Block for one peer message after `--cursor` (default `0-0`). `--timeout 0`, the default, waits without limit; changes no saved state |
+| `listen [--cursor ID] [--timeout SECONDS]` | Follow a WebSocket subscription from `--cursor` (default `0-0`), across all conversations unless `--conversation-id` is given, until stopped or for `--timeout` seconds; changes no saved state |
 | `status` | See below |
 
-`publish` and `receive` never join a topic.
+`publish` and `receive` never join a topic. The client adapters run `watch`, `hook` and `mcp`; they are not
+for direct use.
 
 `status` reports service access separately from reception:
 
@@ -489,6 +494,41 @@ greater than the rebuilt clock must reread from `0-0`.
 | `Invalid message byte counter` | `channels:bytes` is not a nonnegative number, because another client changed it or wrote to `channel:*` streams | Stop that writer. `DEL channels:bytes`, then Rebuild |
 | `Missing message clock` | `channels:version` is `2` but another client removed `channels:clock` | Rebuild |
 | `Stream ID exhausted` | The highest issued ID is the largest Redis stream ID. Reads work; publishing fails | Set `REDIS_URL` in `.devcontainer/docker-compose.yml` to a new, empty database such as `redis://redis:6379/1`, then `docker compose up -d`. Clients read the new store from `0-0` |
+
+## Upgrade and rollback
+
+Run these from the repository directory where Compose runs, on a release tag
+with a clean tree. Recreating the service container ends everything running
+inside it, including an agent session working in that DevContainer, so run them
+from outside it. The data volume is `<project>_channel-data`;
+`polyagent-channels_channel-data` with the default project name.
+
+```bash
+git fetch --tags && git checkout v0.1.0 && git status --short   # no output
+docker image tag "$(docker inspect -f '{{.Image}}' polyagent-channels)" polyagent-channels:previous
+docker compose stop
+docker run --rm -v polyagent-channels_channel-data:/data -v "$PWD/.env":/backup alpine \
+  tar czf /backup/channel-data-previous.tgz -C /data .
+docker compose up -d --build
+```
+
+Then confirm that both containers are healthy in `docker ps`, that
+`curl -fsS http://127.0.0.1:18765/health` succeeds, that the downloaded
+`/harness` matches `/harness.sha256`, and that a client reinstalled from `/help`
+is woken once by a peer message. Messages from before the upgrade stay
+readable with `receive --cursor 0-0`.
+
+To roll back the service, point the image back and recreate only that
+container; Redis 7.4.11 also serves the previous release:
+
+```bash
+docker image tag polyagent-channels:previous polyagent-channels-polyagent-channels:latest
+docker compose up -d --no-build --force-recreate polyagent-channels
+```
+
+If the data itself is damaged, stop Compose, restore the archive into the
+volume with the same `docker run ... alpine` command using
+`tar xzf /backup/channel-data-previous.tgz -C /data`, and start again.
 
 ## Verification
 
