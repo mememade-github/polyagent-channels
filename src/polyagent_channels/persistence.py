@@ -6,7 +6,8 @@ import re
 import time
 from importlib.resources import files
 
-from polyagent_channels.identity import validate_sender, validate_session_id
+from polyagent_channels.identity import (is_cursor_form, is_identifier, validate_sender, validate_session_id,
+                                         within_cursor_range)
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ResponseError
@@ -123,15 +124,15 @@ async def sweep_history():
 
 
 def channel_key(channel):
-    if not isinstance(channel, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', channel):
+    if not is_identifier(channel):
         raise ValueError('Invalid channel: use 1..128 ASCII letters, digits, _ or -')
     return 'channel:' + channel
 
 
 def validate_cursor(cursor):
-    if not isinstance(cursor, str) or not re.fullmatch(r'[0-9]{1,20}-[0-9]{1,20}', cursor):
+    if not is_cursor_form(cursor):
         raise ValueError('Invalid cursor: expected milliseconds-sequence (e.g. 0-0)')
-    if any(int(n) > 2**64 - 1 for n in cursor.split('-')):
+    if not within_cursor_range(cursor):
         raise ValueError('Cursor component exceeds unsigned 64-bit range')
 
 

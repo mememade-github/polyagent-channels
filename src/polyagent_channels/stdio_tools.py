@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from polyagent_channels import exchange
+from polyagent_channels import exchange, identity
 
 INSTRUCTIONS = ('Polyagent Channels (채널): the way this session sends messages to and reads messages from other agent '
                 'sessions. To send to the channel or another agent, use publish. To remove the channel, start with status.\n'
@@ -28,7 +28,7 @@ REMOVED_NOTICE = 'channel tool failed: this installation was removed. Install ag
 # Tool identifiers are exchange identifiers without a leading '-', which the CLI would read as an option; the
 # pattern avoids lookahead so that every client's schema validator accepts it.
 IDENTIFIER = {'type': 'string', 'pattern': '^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$'}
-MESSAGE_ID = {'type': 'string', 'pattern': '^' + exchange.CURSOR_PATTERN + '$'}
+MESSAGE_ID = {'type': 'string', 'pattern': '^' + identity.CURSOR_PATTERN + '$'}
 TOPIC = {'channel': {**IDENTIFIER, 'description': 'Channel name; defaults to general.'},
          'conversation_id': {**IDENTIFIER, 'description': 'Conversation inside the channel; defaults to main.'}}
 

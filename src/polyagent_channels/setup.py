@@ -17,6 +17,7 @@ from pathlib import Path
 
 from polyagent_channels.client_config import ConfigError, default_root, read_config, service_url
 from polyagent_channels.exchange import RECEPTION_TIMEOUT
+from polyagent_channels.identity import is_identifier
 
 try:
     import tomllib
@@ -110,7 +111,7 @@ def managed_binding(command):
             raise ValueError()
         if len(words) != 4 or words[1] not in ('--profile', '--client') or words[3] != 'hook':
             raise ValueError()
-        if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', words[2]):
+        if not is_identifier(words[2]):
             raise ValueError()
         if words[1] == '--client' and words[2] not in ('claude', 'codex'):
             raise ValueError()

@@ -13,6 +13,8 @@ import fcntl
 import time
 from pathlib import Path
 
+from polyagent_channels import identity
+
 if sys.version_info >= (3, 11):
     timeout_context = asyncio.timeout
 else:
@@ -35,19 +37,13 @@ class ExchangeMismatch(ValueError):
     """The requested exchange does not match the authenticated local owner/target."""
 
 
-IDENTIFIER_PATTERN = '[A-Za-z0-9_-]{1,128}'
-CURSOR_PATTERN = '[0-9]{1,20}-[0-9]{1,20}'
-
-
 def validate_identifier(value):
-    if not isinstance(value, str) or not re.fullmatch(IDENTIFIER_PATTERN, value):
+    if not identity.is_identifier(value):
         raise ValueError('Invalid exchange identifier')
 
 
 def validate_cursor(value):
-    if not isinstance(value, str) or not re.fullmatch(CURSOR_PATTERN, value):
-        raise ValueError('Invalid exchange cursor')
-    if any(int(part) > 2**64 - 1 for part in value.split('-')):
+    if not (identity.is_cursor_form(value) and identity.within_cursor_range(value)):
         raise ValueError('Invalid exchange cursor')
 
 
@@ -66,7 +62,7 @@ def positive_seconds(value):
 
 
 def validate_session_id(value):
-    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9._:-]{1,256}', value):
+    if not identity.is_session_id(value):
         raise ValueError('session_invalid')
     return value
 
