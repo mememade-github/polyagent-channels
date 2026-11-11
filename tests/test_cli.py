@@ -267,8 +267,7 @@ def test_listener_bounded_timeout_exits_normally(monkeypatch):
     assert asyncio.run(cli.listen_until_timeout(SimpleNamespace(timeout=1, cursor='0-0', conversation_id=None), 'http://localhost', {})) is None
 
 
-@pytest.mark.parametrize('command', ['publish', 'receive'])
-def test_http_client_uses_expected_transport(monkeypatch, command):
+def test_publish_posts_the_message(monkeypatch):
     captured = []
 
     def respond(request):
@@ -277,9 +276,9 @@ def test_http_client_uses_expected_transport(monkeypatch, command):
 
     original_client = httpx.Client
     monkeypatch.setattr(cli.httpx, 'Client', lambda **settings: original_client(transport=httpx.MockTransport(respond), **settings))
-    options = SimpleNamespace(command=command, cursor='2-0', timeout=5, text='hello', file=None, conversation_id='main', reply_to=None, session_id='test-session', sender=None)
-    cli.request_messages(options, 'http://localhost/channels/general', {})
-    assert captured[0].method == ('POST' if command == 'publish' else 'GET')
+    options = SimpleNamespace(command='publish', cursor='2-0', timeout=5, text='hello', file=None, conversation_id='main', reply_to=None, session_id='test-session', sender=None)
+    cli.post_message(options, 'http://localhost/channels/general', {})
+    assert captured[0].method == 'POST'
 
 
 @pytest.mark.parametrize('event', [{'id': '1-0', 'text': 'hello'}, {'type': 'heartbeat', 'cursor': '0-0'}, {'error': 'Redis unavailable'}])
@@ -343,6 +342,7 @@ def connection_client(tmp_path, monkeypatch, capsys):
     messages = [{'id': '1-0', 'session_id': 'old-peer', 'conversation_id': 'main', 'text': 'old work'}]
     presence = []
     on_snapshot = []
+    on_read = []
     def handler(request):
         requests.append(request)
         assert request.headers['Authorization'] == 'Bearer synthetic-connection-key'
@@ -354,8 +354,8 @@ def connection_client(tmp_path, monkeypatch, capsys):
             return httpx.Response(200, json={'status': 'ready'})
         if request.url.path.endswith('/cursor'):
             cursor = messages[-1]['id'] if messages else '0-0'
-            for action in on_snapshot:
-                action()
+            while on_snapshot:  # each action races with one snapshot only
+                on_snapshot.pop(0)()
             return httpx.Response(200, json={'cursor': cursor, 'time_ms': 1000})
         if request.method == 'POST':
             row = {**json.loads(request.content), 'id': str(len(messages) + 1) + '-0'}
@@ -363,9 +363,13 @@ def connection_client(tmp_path, monkeypatch, capsys):
             return httpx.Response(200, json=row)
         cursor = request.url.params['cursor']
         conversation = request.url.params.get('conversation_id')
-        result = [row for row in messages if int(row['id'].split('-')[0]) > int(cursor.split('-')[0])
-                  and (conversation is None or row['conversation_id'] == conversation)]
-        return httpx.Response(200, json={'messages': result, 'cursor': messages[-1]['id'] if messages else cursor})
+        # Like the service, the limit counts scanned records and the conversation filter applies afterwards.
+        scanned = [row for row in messages
+                   if int(row['id'].split('-')[0]) > int(cursor.split('-')[0])][:int(request.url.params.get('limit', 100))]
+        result = [row for row in scanned if conversation is None or row['conversation_id'] == conversation]
+        if on_read:  # records that arrive while one read is in progress
+            on_read.pop(0)()
+        return httpx.Response(200, json={'messages': result, 'cursor': scanned[-1]['id'] if scanned else cursor})
     original_sync, original_async = httpx.Client, httpx.AsyncClient
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(cli.httpx, 'Client', lambda **settings: original_sync(transport=transport, **settings))
@@ -377,7 +381,8 @@ def connection_client(tmp_path, monkeypatch, capsys):
         cli.run(selected)
         return json.loads(capsys.readouterr().out)
     return SimpleNamespace(invoke=invoke, requests=requests, messages=messages, presence=presence,
-                           directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot, binding=binding, root=tmp_path)
+                           directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot, on_read=on_read,
+                           binding=binding, root=tmp_path)
 
 
 @pytest.mark.parametrize('missing', ['client', 'project', 'binding_file'])
@@ -523,6 +528,100 @@ def test_default_receive_shows_work_again_until_it_is_confirmed(connection_clien
             and [row['redelivered'] for row in resumed['messages']] == [True, True]
             and first['unconfirmed'] == ['2-0', '4-0'] and 'untrusted' in first['notice']
             and confirmed['messages'] == [] and saved['cursor'] == '4-0' and saved['pending'] == [])
+
+
+def add_peer_rows(session, conversation_id, text, count):
+    first = int(session.messages[-1]['id'].split('-')[0]) + 1
+    session.messages.extend({'id': f'{number}-0', 'session_id': 'current-peer', 'conversation_id': conversation_id, 'text': text}
+                            for number in range(first, first + count))
+
+
+def test_receive_reads_past_full_pages_of_other_conversations(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    add_peer_rows(session, 'other', 'elsewhere', 150)
+    add_peer_rows(session, 'main', 'question for this session', 1)
+    received = session.invoke('receive', '--timeout', '0')
+    assert [row['text'] for row in received['messages']] == ['question for this session']
+
+
+def test_unconfirmed_message_does_not_hide_newer_work_beyond_one_scanned_page(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    add_peer_rows(session, 'main', 'first question', 1)
+    session.invoke('receive', '--timeout', '0')
+    add_peer_rows(session, 'other', 'elsewhere', 150)
+    add_peer_rows(session, 'main', 'second question', 1)
+    received = session.invoke('receive', '--timeout', '0')
+    assert [(row['text'], row['redelivered']) for row in received['messages']] == [('first question', True), ('second question', False)]
+
+
+def message_reads(session):
+    return sum(request.method == 'GET' and request.url.path.endswith('/messages') for request in session.requests)
+
+
+def test_receive_stops_at_the_stream_end_it_saw_while_other_conversations_keep_growing(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    add_peer_rows(session, 'main', 'question for this session', 1)
+    # Inflow lasts ten reads, so a read that does not stop at the end it saw fails instead of hanging.
+    session.on_read.extend([lambda: add_peer_rows(session, 'other', 'elsewhere', 100)] * 10)
+    reads_before = message_reads(session)
+    session.invoke('receive', '--timeout', '0')
+    assert message_reads(session) - reads_before == 1
+
+
+def test_receive_returns_one_page_and_records_only_what_it_returned(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    add_peer_rows(session, 'main', 'question', 99)
+    add_peer_rows(session, 'other', 'elsewhere', 1)
+    add_peer_rows(session, 'main', 'question', 100)
+    received = session.invoke('receive', '--timeout', '0')
+    assert received['unconfirmed'] == [f'{number}-0' for number in range(2, 101)] + ['102-0']
+
+
+def test_full_page_at_the_stream_end_reports_no_more(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    add_peer_rows(session, 'main', 'question', 100)
+    assert session.invoke('receive', '--timeout', '0')['more'] is False
+
+
+def pin_cursor_behind_a_long_backlog(session):
+    """An unconfirmed message keeps reads starting before 500 records of another conversation."""
+    session.invoke('connect')
+    add_peer_rows(session, 'main', 'first question', 1)
+    session.invoke('receive', '--timeout', '0')
+    add_peer_rows(session, 'other', 'elsewhere', 500)
+    add_peer_rows(session, 'main', 'second question', 1)
+    return message_reads(session)
+
+
+def test_receive_scans_a_bounded_number_of_pages(connection_client, monkeypatch):
+    monkeypatch.setattr(cli, 'MAX_SCANNED_PAGES', 3)
+    reads_before = pin_cursor_behind_a_long_backlog(connection_client)
+    connection_client.invoke('receive', '--timeout', '0')
+    assert message_reads(connection_client) - reads_before == 3
+
+
+def test_receive_bounded_by_pages_reports_more(connection_client, monkeypatch):
+    monkeypatch.setattr(cli, 'MAX_SCANNED_PAGES', 3)
+    pin_cursor_behind_a_long_backlog(connection_client)
+    assert connection_client.invoke('receive', '--timeout', '0')['more'] is True
+
+
+@pytest.mark.parametrize('status, error', [(401, 'unauthorized401'), (503, 'HTTP 503')])
+def test_receive_reports_service_errors(monkeypatch, status, error):
+    def respond(request):
+        if request.url.path.endswith('/cursor'):
+            return httpx.Response(200, json={'cursor': '5-0', 'time_ms': 1})
+        return httpx.Response(status)
+    original_client = httpx.Client
+    monkeypatch.setattr(cli.httpx, 'Client', lambda **settings: original_client(transport=httpx.MockTransport(respond), **settings))
+    selected = options('--session-id', 'reader', 'receive', 'general', '--cursor', '0-0')
+    with pytest.raises(ValueError, match=error):
+        cli.report_page(selected, 'synthetic-key', False)
 
 
 def test_failure_while_building_the_result_loses_nothing(connection_client, monkeypatch):
@@ -765,7 +864,7 @@ def test_publish_keeps_an_open_topic_untouched(connection_client):
 
 def test_failed_publish_leaves_no_state(connection_client, monkeypatch):
     session = connection_client
-    monkeypatch.setattr(cli, 'request_messages', lambda *args: httpx.Response(503))
+    monkeypatch.setattr(cli, 'post_message', lambda *args: httpx.Response(503))
     with pytest.raises(ValueError, match='HTTP 503'):
         session.invoke('publish', '--text', 'failed request')
     assert exchange.list_states(session.directory, 'native-self') == []

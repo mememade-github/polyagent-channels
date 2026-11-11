@@ -3,6 +3,7 @@ import argparse
 import getpass
 import asyncio
 import contextlib
+import itertools
 import json
 import math
 import os
@@ -38,6 +39,8 @@ OBSERVATION_FRESH_SECONDS = 90
 NOTICE_ATTEMPTS = 3
 LIVE_LEASE_SECONDS = 90
 PAGE_SIZE = 100
+# One read scans at most this many service pages, so a long backlog cannot outlast the tool call timeout.
+MAX_SCANNED_PAGES = 50
 
 
 class HookInputRequired(ValueError):
@@ -153,13 +156,73 @@ def publish_payload(options):
     return {'session_id': options.session_id, 'sender': sender, 'text': text, 'reply_to': options.reply_to, 'conversation_id': options.conversation_id}
 
 
-def request_messages(options, channel_url, headers):
+def channel_address(options):
+    return options.url.rstrip('/') + '/channels/' + options.channel
+
+
+def post_message(options, channel_url, headers):
     with httpx.Client(timeout=70) as client:
-        if options.command == 'publish':
-            return client.post(channel_url + '/messages', headers=headers, json=publish_payload(options))
-        return client.get(channel_url + '/messages', headers=headers,
-                          params={key: value for key, value in {'cursor': options.cursor, 'timeout': options.timeout,
-                                  'conversation_id': options.conversation_id}.items() if value is not None})
+        return client.post(channel_url + '/messages', headers=headers, json=publish_payload(options))
+
+
+def service_error(response):
+    return ValueError('unauthorized401' if response.status_code == 401 else f'HTTP {response.status_code}')
+
+
+def fetch_page(client, query):
+    response = client.get('messages', params={key: value for key, value in query.items() if value is not None})
+    if response.is_error:
+        raise service_error(response)
+    page = response.json()
+    exchange.validate_cursor(page['cursor'])
+    return page
+
+
+def scan_continues(previous, cursor, end):
+    """A scan goes on while the service cursor advances and is short of the stream end seen when the read started."""
+    return previous is None or exchange.cursor_order(previous) < exchange.cursor_order(cursor) < exchange.cursor_order(end)
+
+
+def pages_to_end(client, options, end):
+    query = {'cursor': options.cursor, 'timeout': options.timeout, 'conversation_id': options.conversation_id}
+    previous = None
+    while scan_continues(previous, query['cursor'], end):
+        page = fetch_page(client, query)
+        yield page
+        previous, query = query['cursor'], {**query, 'cursor': page['cursor'], 'timeout': 0}
+
+
+def shown_by_read(options, row, before, default_read):
+    """A default read skips this session's own rows and rows already delivered, except those still unconfirmed."""
+    if default_read and exchange.first_peer([row], options.session_id) is None:
+        return False
+    return (before is None or row['id'] in before['pending']
+            or exchange.cursor_order(row['id']) > exchange.cursor_order(before['delivered']))
+
+
+def collect_shown_rows(pages, options, before, default_read):
+    """Take shown rows up to PAGE_SIZE. A full page ends at its last row, so rows cut from it are read again."""
+    rows, cursor = [], options.cursor
+    while len(rows) < PAGE_SIZE and (page := next(pages, None)) is not None:
+        rows += [row for row in page['messages'] if shown_by_read(options, row, before, default_read)]
+        cursor = page['cursor']
+    if len(rows) >= PAGE_SIZE:
+        cursor = rows[PAGE_SIZE - 1]['id']
+    return rows[:PAGE_SIZE], cursor
+
+
+def read_shown_rows(options, key, before, default_read):
+    """Read on past records this read does not show, and return at most PAGE_SIZE rows.
+
+    The service limit counts scanned records, so a full page can hold nothing to show while later records do.
+    A read scans at most MAX_SCANNED_PAGES pages and stops at the stream end it saw when it started; more is
+    true when the returned cursor is short of that end."""
+    end = service_cursor(options, key)
+    headers = {'Authorization': 'Bearer ' + key}
+    with httpx.Client(base_url=channel_address(options) + '/', timeout=70, headers=headers) as client:
+        pages = itertools.islice(pages_to_end(client, options, end), MAX_SCANNED_PAGES)
+        rows, cursor = collect_shown_rows(pages, options, before, default_read)
+    return {'messages': rows, 'cursor': cursor, 'more': exchange.cursor_order(cursor) < exchange.cursor_order(end)}
 
 
 async def listen(channel_url, headers, cursor, conversation_id=None):
@@ -741,20 +804,15 @@ def report_publication(options, row):
     print(json.dumps({**summary, **brief_reception(options)}, ensure_ascii=False))
 
 
-def report_page(options, key, page, default_read):
+def report_page(options, key, default_read):
     """A default read shows what is new or still unconfirmed; --cursor only reads history and changes nothing."""
-    rows = page['messages']
-    more = len(rows) >= PAGE_SIZE
     tracked = default_read and options.conversation_id is not None
     path = exchange.owned_state(options.state_dir, options.session_id, topic_of(options)) if tracked else None
     before = exchange.read_state(path) if path else None
-    if default_read:
-        rows = [row for row in rows if exchange.first_peer([row], options.session_id)]
-    if before:
-        rows = [row for row in rows if row['id'] in before['pending']
-                or exchange.cursor_order(row['id']) > exchange.cursor_order(before['delivered'])]
+    page = read_shown_rows(options, key, before, default_read)
+    rows = page['messages']
     marked, evicted = asyncio.run(read_details(options, key, rows, before)) if options.session_id else (rows, [])
-    result = {**page, 'messages': marked, 'more': more, 'notice': DELIVERY_NOTE, **brief_reception(options)}
+    result = {**page, 'messages': marked, 'notice': DELIVERY_NOTE, **brief_reception(options)}
     if evicted:
         result['evicted_pending'] = evicted
         result['recovery'] = ('Messages ' + ', '.join(evicted) + ' were removed from retained history before they were confirmed. '
@@ -821,16 +879,16 @@ def run(options):
     if default_read:
         options.cursor = receive_cursor(options, key)
     headers = {'Authorization': 'Bearer ' + key}
-    channel_url = options.url.rstrip('/') + '/channels/' + options.channel
+    channel_url = channel_address(options)
     if options.command == 'listen':
         asyncio.run(listen_until_timeout(options, channel_url, headers))
         return
-    response = request_messages(options, channel_url, headers)
-    if response.is_error:
-        raise ValueError('unauthorized401' if response.status_code == 401 else f'HTTP {response.status_code}')
     if options.command == 'publish':
+        response = post_message(options, channel_url, headers)
+        if response.is_error:
+            raise service_error(response)
         return report_publication(options, response.json())
-    return report_page(options, key, response.json(), default_read)
+    return report_page(options, key, default_read)
 
 
 def run_long_lived(options):

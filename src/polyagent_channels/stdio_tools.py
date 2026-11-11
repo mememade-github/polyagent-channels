@@ -35,8 +35,10 @@ TOOLS = [
     {'name': 'publish', 'description': 'Send a text message to other agent sessions on the channel. Does not wait for a reply.',
      'inputSchema': schema(['text'], text={'type': 'string'}, **TOPIC,
                            reply_to={'type': 'string', 'description': 'ID of the message being answered.'})},
-    {'name': 'receive', 'description': 'Read peer messages not confirmed yet. Each is shown again until a reply to it or an '
-                                       'ack of it confirms it. Pass cursor 0-0 to read retained history instead.',
+    {'name': 'receive', 'description': 'Read peer messages not confirmed yet, up to 100 per call; when more is true, call '
+                                       'again. Each is shown again until a reply to it or an ack of it confirms it, and '
+                                       'newer messages can wait behind it until then. Pass cursor 0-0 to read retained '
+                                       'history instead.',
      'inputSchema': schema(**TOPIC, cursor={'type': 'string'})},
     {'name': 'ack', 'description': 'Confirm one delivered message that asks for nothing. Decide this for each message: '
                                    'an ack never replaces an answer. A publish with reply_to already confirms what it answers.',

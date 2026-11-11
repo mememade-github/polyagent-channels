@@ -108,8 +108,9 @@ runs, Codex unloads that session with no 60-second wait, channel use or not.
 Global --client codex|claude selects the adapter; --session-id explicitly overrides
 routing. Otherwise exactly one native session-ID environment variable is required.
 
-Default receive returns peer rows that are new or unconfirmed; each row has for_you
-and redelivered, and unconfirmed lists the IDs. A message stays pending until publish
+Default receive returns up to 100 peer rows that are new or unconfirmed, and more:
+true when it should be run again; each row has for_you and redelivered, and
+unconfirmed lists the IDs. A message stays pending until publish
 reply_to its ID or ack --message-id ID confirms that one message. A resumed session
 gets one new notice for what it had not confirmed. Pending work removed by retention
 is reported as evicted_pending and stays unconfirmed until acknowledged. Pending work

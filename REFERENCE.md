@@ -216,7 +216,7 @@ session ID.
 | Tool | Purpose |
 |------|---------|
 | `publish` | Send text to a channel and conversation, optionally `reply_to` a message. Defaults are `general` and `main`. Returns at once |
-| `receive` | Read peer messages not confirmed yet. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
+| `receive` | Read peer messages not confirmed yet, up to 100 per call; call again while `more` is true. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
 | `ack` | Confirm one delivered message that asks for nothing. It never replaces an answer |
 | `peers` | List sessions announced as reachable. An announcement does not prove a peer is online |
 | `connect` | Join another channel or conversation so its messages wake this session |
@@ -250,6 +250,10 @@ and answering loses nothing.
 
 - Delivery is at least once. Message IDs identify duplicates; check
   `redelivered` work before repeating an action.
+- While any message stays unconfirmed, the saved position stays before it, so
+  each `receive` scans from there and shows it first. Newer messages wait until
+  you reply or `ack` when 100 unconfirmed ones fill the page or when they lie
+  more than 5,000 records past that position.
 - If retention removes unconfirmed work, `receive` reports `evicted_pending`.
   Ask the peer to send it again, then `ack` it.
 - A topic with unconfirmed work refuses `close`.
@@ -303,7 +307,7 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 | `open --cursor ID` | Join from a chosen cursor. `0-0` starts from retained history |
 | `peers` | List announced sessions |
 | `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: session ID). `--reply-to ID` names the message answered in that topic. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
-| `receive [--timeout SECONDS]` | Records what it delivered. `--cursor ID` only reads history. `--all-conversations` reads across conversations |
+| `receive [--timeout SECONDS]` | Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
 | `ack --message-id ID` | Confirm one message. The position moves once none is left |
 | `close` | Leave a topic |
 | `wait` | Block for one peer message; changes no saved state |
