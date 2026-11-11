@@ -67,6 +67,12 @@ def invoke(artifact, *arguments, cwd, input_text=None):
                           env=environment, input=input_text, text=True, capture_output=True, timeout=30)
 
 
+def project_directory(path):
+    """Installation requires the project directory to exist already."""
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def args(tmp_path, client='claude', project=None):
     return ['--target', tmp_path / 'root', '--client', client, '--project', project or tmp_path,
             '--url', 'http://localhost:18765']
@@ -292,7 +298,7 @@ def test_claude_upgrade_replaces_the_blocking_stop_callback(artifact, tmp_path):
 
 @pytest.mark.parametrize('settings', ['permissions', 'empty_hooks', 'other_root'])
 def test_uninstall_unregistered_project_preserves_settings_bytes(artifact, tmp_path, settings):
-    installed = invoke(artifact, 'install', *args(tmp_path, project=tmp_path / 'registered'), cwd=tmp_path)
+    installed = invoke(artifact, 'install', *args(tmp_path, project=project_directory(tmp_path / 'registered')), cwd=tmp_path)
     assert installed.returncode == 0, installed.stderr
     registered_hook = tmp_path / 'registered/.claude/settings.local.json'
     registered_before = registered_hook.read_bytes()
@@ -315,7 +321,7 @@ def test_uninstall_unregistered_project_preserves_settings_bytes(artifact, tmp_p
 
 
 def test_multiple_projects_and_adapters(artifact, tmp_path):
-    projects = [tmp_path / 'one', tmp_path / 'two']
+    projects = [project_directory(tmp_path / 'one'), project_directory(tmp_path / 'two')]
     for project in projects:
         for client in ['claude', 'codex']:
             result = invoke(artifact, 'install', *args(tmp_path, client, project), cwd=tmp_path)
@@ -328,7 +334,7 @@ def test_multiple_projects_and_adapters(artifact, tmp_path):
 
 
 def test_uninstall_of_one_client_creates_nothing_for_the_other(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, 'claude', project), cwd=tmp_path).returncode == 0
     assert invoke(artifact, 'uninstall', '--target', tmp_path / 'root', '--project', project, cwd=tmp_path).returncode == 0
     assert list(project.iterdir()) == []
@@ -353,7 +359,7 @@ def test_shared_wrapper_does_not_imply_another_project_or_client_is_installed(ar
 
 
 def test_installed_project_finds_the_deepest_containing_installation(artifact, tmp_path):
-    outer, inner = tmp_path / 'outer', tmp_path / 'outer/inner'
+    outer, inner = project_directory(tmp_path / 'outer'), project_directory(tmp_path / 'outer/inner')
     for project in (outer, inner):
         assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
@@ -363,7 +369,7 @@ def test_installed_project_finds_the_deepest_containing_installation(artifact, t
 
 @pytest.mark.parametrize('client', ['claude', 'codex'])
 def test_install_and_reinstall_emit_current_native_resume_command(artifact, tmp_path, monkeypatch, client):
-    project = tmp_path / "project 'quoted' $(false)"
+    project = project_directory(tmp_path / "project 'quoted' $(false)")
     monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'native-claude')
     monkeypatch.setenv('CODEX_THREAD_ID', 'native-codex')
     first = invoke(artifact, 'install', *args(tmp_path, client, project), cwd=tmp_path)
@@ -409,7 +415,7 @@ def test_files_named_like_old_locks_are_preserved_unless_empty(artifact, tmp_pat
 
 
 def test_install_leaves_no_lock_file_anywhere(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     assert not [path for path in tmp_path.rglob('*.lock')] and not list(project.glob('.channels*'))
 
@@ -581,7 +587,7 @@ def test_final_uninstall_leaves_only_the_key_and_unknown_files(artifact, tmp_pat
 
 
 def test_purge_shared_key_refused_before_callback_changes(artifact, tmp_path):
-    projects = [tmp_path / 'one', tmp_path / 'two']
+    projects = [project_directory(tmp_path / 'one'), project_directory(tmp_path / 'two')]
     for project in projects:
         result = invoke(artifact, 'install', *args(tmp_path, project=project), cwd=tmp_path)
         assert result.returncode == 0
@@ -599,7 +605,7 @@ def pending_session(root, session, topic='work', message='3-0'):
 
 
 def test_uninstall_preserves_unconfirmed_work_and_says_where_it_is(artifact, tmp_path, synthetic_claude):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, project=project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
     (root / '.env').mkdir(exist_ok=True)
@@ -613,7 +619,7 @@ def test_uninstall_preserves_unconfirmed_work_and_says_where_it_is(artifact, tmp
 
 
 def test_discard_command_removes_the_preserved_state(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
     pending_session(root, 'stopped-session')
@@ -624,7 +630,7 @@ def test_discard_command_removes_the_preserved_state(artifact, tmp_path):
 
 
 def test_discard_command_removes_only_files_the_product_wrote(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
     path = pending_session(root, 'stopped-session')
@@ -643,7 +649,7 @@ def test_discard_command_removes_only_files_the_product_wrote(artifact, tmp_path
 
 
 def test_uninstall_removes_only_lock_files_the_product_could_have_made(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
     directory = exchange.session_directory(root / 'state', 'closed-session')
@@ -658,7 +664,7 @@ def test_uninstall_removes_only_lock_files_the_product_could_have_made(artifact,
 
 def legacy_hook_project(tmp_path, document=None):
     """A project as d71c677 left it: only its Stop hook in hooks.json, plus its empty lock file."""
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     wrapper = tmp_path / 'root/bin/channels'
     hooks = project / '.codex/hooks.json'
     hooks.parent.mkdir(parents=True)
@@ -701,7 +707,7 @@ def test_upgrade_keeps_a_hook_file_that_has_user_content(artifact, tmp_path, doc
 
 
 def test_hook_file_the_product_never_touched_stays_even_if_empty(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     hooks = project / '.codex/hooks.json'
     hooks.parent.mkdir(parents=True)
     hooks.write_text('{"hooks": {}}')
@@ -711,7 +717,7 @@ def test_hook_file_the_product_never_touched_stays_even_if_empty(artifact, tmp_p
 
 
 def test_discard_command_keeps_the_state_directory_for_another_session(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
     path = pending_session(root, 'stopped-session')
@@ -724,7 +730,7 @@ def test_discard_command_keeps_the_state_directory_for_another_session(artifact,
 
 
 def test_unconfirmed_work_of_another_project_does_not_block_removal(artifact, tmp_path):
-    one, two = tmp_path / 'one', tmp_path / 'two'
+    one, two = project_directory(tmp_path / 'one'), project_directory(tmp_path / 'two')
     for project in (one, two):
         assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
@@ -734,7 +740,7 @@ def test_unconfirmed_work_of_another_project_does_not_block_removal(artifact, tm
 
 
 def test_reinstall_keeps_preserved_work_for_the_session_that_comes_back(artifact, tmp_path):
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     assert invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path).returncode == 0
     root = tmp_path / 'root'
     path = pending_session(root, 'stopped-session')
@@ -830,6 +836,23 @@ def test_busy_closed_session_lock_refuses_uninstall(artifact, tmp_path):
                 (root / 'harness.pyz').exists()) == (1, inode, True)
 
 
+@pytest.mark.parametrize('action', ['plan', 'install'])
+def test_install_refuses_a_missing_project(artifact, tmp_path, action):
+    result = invoke(artifact, action, *args(tmp_path, project=tmp_path / 'does/not/exist'), cwd=tmp_path)
+    assert 'does not exist or is not a directory' in result.stderr
+
+
+def test_install_refuses_a_file_as_project(artifact, tmp_path):
+    (tmp_path / 'notes.txt').write_text('synthetic')
+    result = invoke(artifact, 'install', *args(tmp_path, project=tmp_path / 'notes.txt'), cwd=tmp_path)
+    assert 'is not a directory' in result.stderr
+
+
+def test_refused_install_creates_no_project_directory(artifact, tmp_path):
+    invoke(artifact, 'install', *args(tmp_path, project=tmp_path / 'does/not/exist'), cwd=tmp_path)
+    assert not (tmp_path / 'does').exists()
+
+
 def test_running_command_reuses_installation_and_refuses_changes(artifact, tmp_path):
     key = tmp_path / 'private/key'
     key.parent.mkdir(mode=0o700)
@@ -853,7 +876,7 @@ def test_running_command_reuses_installation_and_refuses_changes(artifact, tmp_p
         changes = [(other_archive, 'install', arguments),
                    (artifact, 'install', arguments + ['--url', 'http://localhost:18766']),
                    (artifact, 'install', arguments + ['--key-file', other_key]),
-                   (artifact, 'install', arguments + ['--project', tmp_path / 'new-project']),
+                   (artifact, 'install', arguments + ['--project', project_directory(tmp_path / 'new-project')]),
                    (artifact, 'uninstall', ['--target', root, '--project', tmp_path])]
         for candidate, action, changed in changes:
             result = invoke(candidate, action, *changed, cwd=tmp_path)
@@ -925,7 +948,7 @@ def test_uninstall_preflights_both_clients_before_any_write(artifact, tmp_path, 
 @pytest.mark.parametrize('event', ['Stop', 'SessionStart'])
 def test_other_root_conflict_and_uninstall_preservation(artifact, tmp_path, event):
     other = tmp_path / 'other'
-    project = tmp_path / 'project'
+    project = project_directory(tmp_path / 'project')
     installed = invoke(artifact, 'install', '--target', other, '--client', 'claude',
                        '--project', project, '--url', 'http://localhost:18765', cwd=tmp_path)
     assert installed.returncode == 0, installed.stderr

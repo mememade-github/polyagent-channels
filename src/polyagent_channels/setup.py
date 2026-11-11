@@ -463,12 +463,14 @@ def execute(options):
     root = canonical_path(options.target)
     project = canonical_path(options.project)
     clients = [options.client] if options.client else ['claude', 'codex']
+    # A mistyped --project must not become a new directory tree. Uninstall creates nothing, so it skips this check.
+    if options.action != 'uninstall' and not project.is_dir():
+        raise SetupError(f'Project directory {project} does not exist or is not a directory; pass an existing --project')
     if options.action == 'plan':
         return install(options, root, project)
     with ExitStack() as stack:
         if options.action == 'install':
             root.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            project.mkdir(parents=True, exist_ok=True)
         # Installers wait for one another on these directories; the same directory is locked only once.
         for directory in sorted({root.parent, project}):
             if directory.is_dir():
