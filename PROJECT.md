@@ -31,7 +31,9 @@ Version `0.1.0` (tag `v0.1.0`).
 
 ## Known limits
 
-- **Large modules**: `setup.py` (1040 lines) and `cli.py` (971 lines) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.x.
+- **Large modules**: `setup.py` (1040 lines) and `cli.py` (971 lines) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.2.
+- **Redis advisory**: Redis 7.4.11 carries CVE-2025-46686 (disputed): an authenticated client can make Redis allocate memory with a multi-bulk command of many arguments; 8.0.4 fixes it. Redis publishes no host port and only the service reaches it, with fixed commands, so the risk is accepted. Moving to Redis 8, with its AOF and license changes, is evaluated for 0.2.0.
+- **Unverified in a real environment**: a real Codex session being woken by a peer message. The upgrade checks in [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) cover it after deployment.
 - **Remaining guide exceptions**: listed with their limits in [AGENTS.md § Specific guide conflicts](AGENTS.md#specific-guide-conflicts).
 
 ## Distribution
