@@ -25,10 +25,11 @@ def test_admin_key_is_preserved(monkeypatch, tmp_path):
     assert load_key() == 'synthetic-admin-key-0123456789abcdef'
 
 
-@pytest.mark.parametrize('content', ['synthetic two words in a key of length\n', 'synthetic-short-key\n'])
-def test_key_no_client_accepts_fails_startup(monkeypatch, tmp_path, content):
+@pytest.mark.parametrize('content', ['synthetic two words in a key of length\n', 'synthetic-short-key\n',
+                                     'é' * 40 + '\n', 'a' * 40 + '\u200b\n', 'a' * 40 + '\x01\n'])
+def test_key_no_client_can_send_fails_startup(monkeypatch, tmp_path, content):
     monkeypatch.setenv('CHANNEL_KEY_FILE', str(private_key_file(tmp_path, content)))
-    with pytest.raises(RuntimeError, match='at least 32 characters with no whitespace'):
+    with pytest.raises(RuntimeError, match='at least 32 printable ASCII characters with no whitespace'):
         load_key()
 
 

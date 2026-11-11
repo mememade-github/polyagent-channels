@@ -1,6 +1,7 @@
 """Shared-key file handling and transport authentication."""
 import hmac
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from starlette.responses import JSONResponse
 ERRORS = {400: 'invalid Content-Length', 401: 'Unauthorized', 411: 'Content-Length required',
           413: 'request exceeds size limit', 503: 'Redis unavailable'}
 KEY_MIN_LENGTH = 32
+KEY_CHARACTERS = '[!-~]+'  # printable ASCII without space: clients send the key in an HTTP header
 
 
 def prepare_key_directory(directory):
@@ -21,11 +23,11 @@ def prepare_key_directory(directory):
 
 
 def checked_key(key):
-    """Clients refuse a key with whitespace, so the service refuses one too rather than start with it."""
+    """Refuse a key no client can send, rather than start with it."""
     if not key:
         raise RuntimeError('Shared key file is empty')
-    if len(key) < KEY_MIN_LENGTH or any(character.isspace() for character in key):
-        raise RuntimeError(f'Shared key must be at least {KEY_MIN_LENGTH} characters with no whitespace')
+    if len(key) < KEY_MIN_LENGTH or not re.fullmatch(KEY_CHARACTERS, key):
+        raise RuntimeError(f'Shared key must be at least {KEY_MIN_LENGTH} printable ASCII characters with no whitespace')
     return key
 
 
