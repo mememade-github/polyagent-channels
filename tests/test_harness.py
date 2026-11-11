@@ -228,16 +228,30 @@ def test_codex_block_is_appended_and_removed_byte_exactly(artifact, tmp_path, or
             and config.read_text() == original and config.stat().st_mode & 0o777 == 0o644)
 
 
-@pytest.mark.parametrize('foreign', ['[mcp_servers.channels]\ncommand = "other"\n', '[mcp_servers."channels".tools.publish]\nx = 1\n',
-                                     "[mcp_servers.'channels']\ncommand = 'other'\n", '[ mcp_servers . channels ]\ncommand = "other"\n',
-                                     'mcp_servers.channels.command = "other"\n', 'mcp_servers = { channels = { command = "other" } }\n'])
-def test_foreign_codex_server_is_refused_and_preserved(artifact, tmp_path, foreign):
+FOREIGN_CODEX_SERVERS = ['[mcp_servers.channels]\ncommand = "other"\n', '[mcp_servers."channels".tools.publish]\nx = 1\n',
+                         "[mcp_servers.'channels']\ncommand = 'other'\n", '[ mcp_servers . channels ]\ncommand = "other"\n',
+                         'mcp_servers.channels.command = "other"\n', 'mcp_servers = { channels = { command = "other" } }\n']
+
+
+def refused_foreign_codex_install(artifact, tmp_path, foreign):
+    """Install for Codex into a project whose configuration already names another channels server."""
     config = tmp_path / '.codex/config.toml'
     config.parent.mkdir()
     config.write_text(foreign)
-    refused = invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+    return config, invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+
+
+@pytest.mark.parametrize('foreign', FOREIGN_CODEX_SERVERS)
+def test_foreign_codex_server_is_refused_and_preserved(artifact, tmp_path, foreign):
+    config, refused = refused_foreign_codex_install(artifact, tmp_path, foreign)
+    assert (refused.returncode, 'Another Codex channels server' in refused.stderr, config.read_text()) == (1, True, foreign)
+
+
+@pytest.mark.parametrize('foreign', FOREIGN_CODEX_SERVERS)
+def test_uninstall_after_a_refused_install_keeps_the_foreign_server(artifact, tmp_path, foreign):
+    config, _ = refused_foreign_codex_install(artifact, tmp_path, foreign)
     removed = invoke(artifact, 'uninstall', '--target', tmp_path / 'root', '--project', tmp_path, '--client', 'codex', cwd=tmp_path)
-    assert (refused.returncode, 'Another Codex channels server' in refused.stderr, config.read_text(), removed.returncode) == (1, True, foreign, 0)
+    assert (removed.returncode, config.read_text()) == (0, foreign)
 
 
 def test_other_servers_in_an_inline_table_stop_the_install_before_it_breaks_them(artifact, tmp_path):
