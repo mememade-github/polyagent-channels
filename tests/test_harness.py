@@ -283,15 +283,24 @@ def test_existing_unload_setting_is_kept_at_zero_and_refused_otherwise(artifact,
     assert config.read_text() == original
 
 
-def test_older_install_without_the_unload_setting_is_upgraded(artifact, tmp_path):
+def install_without_the_unload_setting(artifact, tmp_path):
+    """An earlier Codex install whose project configuration lacks the unload setting."""
     assert invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path).returncode == 0
     config = tmp_path / '.codex/config.toml'
-    root = tmp_path / 'root'
-    config.write_text(codex_block(root / 'bin/channels'))
-    stale = hook_binding_status(root, tmp_path, 'codex')
+    config.write_text(codex_block(tmp_path / 'root/bin/channels'))
+    return config
+
+
+def test_install_without_the_unload_setting_is_reported(artifact, tmp_path):
+    install_without_the_unload_setting(artifact, tmp_path)
+    assert hook_binding_status(tmp_path / 'root', tmp_path, 'codex')['reason'] == 'unload_setting_mismatch'
+
+
+def test_older_install_without_the_unload_setting_is_upgraded(artifact, tmp_path):
+    config = install_without_the_unload_setting(artifact, tmp_path)
     upgraded = invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
-    assert (stale['reason'], upgraded.returncode, config.read_text().startswith(CODEX_SETTING),
-            hook_binding_status(root, tmp_path, 'codex')['status']) == ('unload_setting_mismatch', 0, True, 'installed')
+    assert (upgraded.returncode, config.read_text().startswith(CODEX_SETTING),
+            hook_binding_status(tmp_path / 'root', tmp_path, 'codex')['status']) == (0, True, 'installed')
 
 
 def test_python310_client_refuses_the_same_foreign_table(artifact, tmp_path):
@@ -337,16 +346,25 @@ def test_codex_upgrade_removes_only_its_legacy_stop_wait(artifact, tmp_path):
     assert upgraded.returncode == 0 and commands(hooks) == [unrelated]
 
 
-def test_claude_upgrade_replaces_the_blocking_stop_callback(artifact, tmp_path):
+def install_with_a_blocking_stop_callback(artifact, tmp_path):
+    """An earlier Claude install whose settings hold the old blocking Stop callback."""
     assert invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path).returncode == 0
     settings = tmp_path / '.claude/settings.local.json'
-    document = json.loads(settings.read_text())
-    command = document['hooks']['Stop'][0]['hooks'][0]['command']
+    command = json.loads(settings.read_text())['hooks']['Stop'][0]['hooks'][0]['command']
     settings.write_text(json.dumps({'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': command, 'timeout': 660}]}]}}))
-    status = hook_binding_status(tmp_path / 'root', tmp_path, 'claude')
+    return settings
+
+
+def test_blocking_stop_callback_is_reported_invalid(artifact, tmp_path):
+    install_with_a_blocking_stop_callback(artifact, tmp_path)
+    assert hook_binding_status(tmp_path / 'root', tmp_path, 'claude')['status'] == 'hook_invalid'
+
+
+def test_claude_upgrade_replaces_the_blocking_stop_callback(artifact, tmp_path):
+    settings = install_with_a_blocking_stop_callback(artifact, tmp_path)
     upgraded = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
-    assert (status['status'], upgraded.returncode, commands(settings)[0]['asyncRewake'],
-            hook_binding_status(tmp_path / 'root', tmp_path, 'claude')['status']) == ('hook_invalid', 0, True, 'installed')
+    assert (upgraded.returncode, commands(settings)[0]['asyncRewake'],
+            hook_binding_status(tmp_path / 'root', tmp_path, 'claude')['status']) == (0, True, 'installed')
 
 
 @pytest.mark.parametrize('settings', ['permissions', 'empty_hooks', 'other_root'])
@@ -735,12 +753,23 @@ def old_wrapper(artifact, tmp_path):
     (root / 'harness.pyz').write_bytes(artifact.read_bytes())
 
 
-def test_upgrade_deletes_a_hook_file_holding_only_the_product_entry(artifact, tmp_path):
+def upgrade_over_a_legacy_hook(artifact, tmp_path):
+    """Install over an old release whose Codex hook file holds only the product entry."""
     project, hooks = legacy_hook_project(tmp_path)
     old_wrapper(artifact, tmp_path)
     upgraded = invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path)
+    return project, hooks, upgraded
+
+
+def test_upgrade_deletes_a_hook_file_holding_only_the_product_entry(artifact, tmp_path):
+    _, hooks, upgraded = upgrade_over_a_legacy_hook(artifact, tmp_path)
+    assert (upgraded.returncode, hooks.exists()) == (0, False)
+
+
+def test_uninstall_after_upgrading_a_legacy_hook_leaves_an_empty_project(artifact, tmp_path):
+    project, _, _ = upgrade_over_a_legacy_hook(artifact, tmp_path)
     removed = invoke(artifact, 'uninstall', '--target', tmp_path / 'root', '--project', project, cwd=tmp_path)
-    assert (upgraded.returncode, hooks.exists(), removed.returncode, list(project.iterdir())) == (0, False, 0, [])
+    assert (removed.returncode, list(project.iterdir())) == (0, [])
 
 
 def test_uninstall_of_an_old_install_deletes_a_hook_file_holding_only_the_product_entry(artifact, tmp_path):
