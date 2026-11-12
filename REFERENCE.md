@@ -57,7 +57,7 @@ replace the image the other runs and rolls back to.
 |----------|---------|---------|
 | `CHANNEL_BIND` | `0.0.0.0` | Host address the port is published on. `127.0.0.1` for single-PC use |
 | `CHANNEL_PORT` | `18765` | Host port (container port 8080) |
-| `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the `channel-data` volume. Keep it for an existing instance, since another name starts with an empty volume |
+| `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the `channel-data` volume. Keep it for an existing instance, since another name starts with an empty volume. A second instance changes it together with `CONTAINER_NAME`, `IMAGE_NAME` and `CHANNEL_PORT` |
 | `CONTAINER_NAME` | `polyagent-channels` | Service container name |
 | `IMAGE_NAME` | `polyagent-channels-polyagent-channels` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
 | `IMAGE_TAG` | `latest` | Service image tag |
