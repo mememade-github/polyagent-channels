@@ -51,6 +51,8 @@ docker compose up -d --build
 | `CHANNEL_PORT` | `18765` | Host port (container port 8080) |
 | `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the `channel-data` volume. Keep it for an existing instance, since another name starts with an empty volume |
 | `CONTAINER_NAME` | `polyagent-channels` | Service container name |
+| `IMAGE_NAME` | `polyagent-channels-polyagent-channels` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
+| `IMAGE_TAG` | `latest` | Service image tag |
 | `HOST_WORKSPACE_PATH` | this repository | Repository path as the Docker daemon sees it; set only when that differs |
 | `CHANNEL_RETENTION_DAYS` | `7` | Nonnegative integer; `0` disables age expiration only |
 | `CHANNEL_MAX_STORAGE_BYTES` | `1073741824` | Retained message field bytes across all channels (1 GiB); positive integer up to 9007199254740991 |

@@ -10,6 +10,7 @@ x-channel-logging: &channel-logging
 services:
   polyagent-channels:
     container_name: ${CONTAINER_NAME:-polyagent-channels}
+    image: ${IMAGE_NAME:-polyagent-channels-polyagent-channels}:${IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
