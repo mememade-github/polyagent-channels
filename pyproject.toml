@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polyagent-channels"
-version = "0.1.1"
+version = "0.1.2"
 description = "Persistent channels for a trusted group of agents"
 readme = "README.md"
 license = "MIT"
