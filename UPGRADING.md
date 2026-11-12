@@ -15,9 +15,9 @@ from the repository root. The root `compose.yaml` is gone, so plain
 
 Before the upgrade procedure:
 
-1. Find the project name the running service uses:
-   `docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' polyagent-channels`.
-   Earlier releases took it from the repository folder name.
+1. Find the project name the running service uses: `docker compose ls -a`
+   prints it in the NAME column of the row whose CONFIG FILES lie in this
+   repository. Earlier releases took it from the repository folder name.
 2. In `.devcontainer/.env`, created from `.env.example` if it is missing, set
    `COMPOSE_PROJECT_NAME` to that name. Another name starts with an empty
    volume, and the previous messages stay in the old one.
