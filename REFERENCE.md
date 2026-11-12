@@ -29,7 +29,11 @@ The service image keeps the inherited Polyagent DevContainer shape:
 - The service process can write to the repository mounted at `/workspaces`.
   `setup-env.sh` sets `core.filemode false` in that repository's git config
   at each start.
-- No host agent credentials or Docker socket are mounted.
+- No host agent credentials or Docker socket are mounted. Named volumes keep
+  what the agent CLIs store inside the container (`~/.claude`, `~/.codex`,
+  `~/.gemini`, `~/.config/antigravity`) and the shell history
+  (`/commandhistory`), so a login made there outlives the container. Every
+  process in the container can read them.
 - The container log starts with the inherited setup banner, such as a Codex
   config warning and `Start: claude`, before the service output.
 
@@ -57,7 +61,7 @@ replace the image the other runs and rolls back to.
 |----------|---------|---------|
 | `CHANNEL_BIND` | `0.0.0.0` | Host address the port is published on. `127.0.0.1` for single-PC use |
 | `CHANNEL_PORT` | `18765` | Host port (container port 8080) |
-| `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the `channel-data` volume. Keep it for an existing instance, since another name starts with an empty volume. A second instance changes it together with `CONTAINER_NAME`, `IMAGE_NAME` and `CHANNEL_PORT` |
+| `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the volumes. Keep it for an existing instance, since another name starts with empty volumes. A second instance changes it together with `CONTAINER_NAME`, `IMAGE_NAME` and `CHANNEL_PORT` |
 | `CONTAINER_NAME` | `polyagent-channels` | Service container name |
 | `IMAGE_NAME` | `polyagent-channels-polyagent-channels` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
 | `IMAGE_TAG` | `latest` | Service image tag |
@@ -470,12 +474,14 @@ leave room for rewrites, container layers and backups.
 | Redis AOF files in the volume | Automatic rewrite recycles old history. Thresholds are triggers, not size limits, and a rewrite needs extra free space | Service; operator leaves disk room |
 | `dump.rdb` in the volume | May remain; turning snapshots off does not delete it | Operator, with backups |
 | Service logs | Docker `local` rotation with compression, per the settings above | Docker |
-| Container writable layers, including tool caches and shell history | No product bound; recreating the container recycles them | Operator |
+| Container writable layers, including tool caches | No product bound; recreating the container recycles them | Operator |
+| Agent volumes `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` | Logins, session records and shell history of agents run in the service container. No product bound; they stay until the volume is removed | Operator |
 | `.devcontainer/.env`, `.env/channel.key` | Persist on the host | Operator |
 | Virtual environments, test caches, build outputs, smoke-test messages | Developer files; smoke-test messages age out with retention | Developer |
 | Docker images and build cache | Persist until pruned | Operator |
 
-Removing the volume removes messages and session announcements.
+Removing the `channel-data` volume removes messages and session announcements.
+`down -v` removes every volume of the project, the agent volumes included.
 
 ## Storage state recovery
 
@@ -518,11 +524,15 @@ project `polyagent-channels`, service container `polyagent-channels`
 volume `polyagent-channels_channel-data`.
 
 Recreating the service container ends everything running inside it and
-discards its home directory and `/tmp`: an agent session working in that
-DevContainer, its Claude and Codex logins (`~/.claude`, `~/.codex`) and
-anything under `~/.config`. The repository at `/workspaces`, including `.env/`
-and `.devcontainer/.env`, and the data volume stay. Copy out anything else you
-need first, and sign the clients in again afterwards.
+discards `/tmp` and its home directory apart from the agent volumes. An agent
+session working in that DevContainer stops. The volumes keep only the folders
+they are mounted on: `~/.claude`, `~/.codex`, `~/.gemini`,
+`~/.config/antigravity` and `/commandhistory`. `~/.claude.json` is outside
+them: save its contents before every recreation and put them back before
+starting Claude Code. A copy in `~/.claude/backups/` is a fallback that can be
+older. The repository at `/workspaces`, including `.env/` and
+`.devcontainer/.env`, and the data volume stay. Copy out anything else you
+need first.
 
 Run the procedure once. Before running it again, rename the
 `polyagent-channels:previous` tag and the archive, or they are replaced. The

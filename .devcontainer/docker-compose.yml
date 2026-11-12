@@ -32,6 +32,12 @@ services:
       - type: bind
         source: ${HOST_WORKSPACE_PATH:-..}
         target: /workspaces
+      # Agent logins, sessions and shell history outlive the container, as in the upstream DevContainer.
+      - claude-config:/home/vscode/.claude
+      - codex-config:/home/vscode/.codex
+      - gemini-config:/home/vscode/.gemini
+      - antigravity-secrets:/home/vscode/.config/antigravity
+      - command-history:/commandhistory
     depends_on:
       redis:
         condition: service_healthy
@@ -59,3 +65,8 @@ services:
       retries: 20
 volumes:
   channel-data:
+  claude-config:
+  codex-config:
+  gemini-config:
+  antigravity-secrets:
+  command-history:

@@ -151,7 +151,7 @@ RUN curl -LsSf https://astral.sh/uv/0.6.0/install.sh | sh
 # =============================================================================
 # Volume mount points must exist in the image so new named volumes are
 # created vscode-owned (a missing mount point yields a root-owned volume).
-RUN mkdir -p ${HOME}/.claude ${HOME}/.config/nano ${HOME}/.gemini ${HOME}/.config/antigravity
+RUN mkdir -p ${HOME}/.claude ${HOME}/.codex ${HOME}/.config/nano ${HOME}/.gemini ${HOME}/.config/antigravity
 
 # .bashrc
 RUN echo 'export LANG=en_US.UTF-8' >> ${HOME}/.bashrc \

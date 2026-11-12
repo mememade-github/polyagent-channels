@@ -28,3 +28,13 @@ Before the upgrade procedure:
 
 The VS Code DevContainer now names `.devcontainer/docker-compose.yml` directly
 and reads the same `.devcontainer/.env`.
+
+The service container now mounts named volumes over the agent CLIs' folders
+(`~/.claude`, `~/.codex`, `~/.gemini`, `~/.config/antigravity`) and
+`/commandhistory`. They start empty, so this upgrade still discards the logins
+and sessions of the old container, as every recreation did before. To keep
+them, close the agent sessions, archive those folders and `~/.claude.json`
+into the ignored `.env/` folder before the upgrade and unpack the archive in
+the new container. From this release on the five volumes keep those folders
+across a recreated container; `~/.claude.json` stays outside them, as
+[REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) says.
