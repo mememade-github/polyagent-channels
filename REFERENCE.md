@@ -35,15 +35,23 @@ The service image keeps the inherited Polyagent DevContainer shape:
 
 ## Configuration (`.devcontainer/.env`)
 
-Defaults need no file. Root Compose and the VS Code DevContainer load the
-same ignored file; shell variables take precedence.
+Every Compose command runs from the repository root and selects this ignored
+file with `--env-file`, as in the upstream Polyagent DevContainer, so create it
+first. Commented settings keep their defaults. The VS Code DevContainer reads
+the same file; shell variables take precedence.
 
 ```bash
 cp .devcontainer/.env.example .devcontainer/.env
 chmod 600 .devcontainer/.env
 # Edit the file, then recreate the services:
-docker compose up -d --build
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --build
 ```
+
+Another instance on the same Docker host uses a separate env file, such as
+`.devcontainer/.env.instance-b`, with its own `COMPOSE_PROJECT_NAME`,
+`CONTAINER_NAME`, `IMAGE_NAME` and `CHANNEL_PORT`, and every Compose command
+for it selects that file. A shared `IMAGE_NAME` lets one instance's build
+replace the image the other runs and rolls back to.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -81,8 +89,8 @@ plaintext HTTP a proxy can read the key:
   `HTTP_PROXY`, and honors `NO_PROXY`. It ignores `ALL_PROXY`.
 - SOCKS proxies are not supported; a SOCKS setting makes the client fail.
 
-After a change, run `docker compose up -d` and confirm the published address
-with `docker compose ps`. On Docker Desktop the previous host port can stay
+After a change, run `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d` and confirm the published address
+with `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps`. On Docker Desktop the previous host port can stay
 unavailable briefly; retry, or choose another `CHANNEL_PORT`.
 
 **Linux.** Docker-published ports bypass ufw-style host firewall rules. Use
@@ -479,9 +487,9 @@ failed call changes no data. Any other Redis error reaches clients as
 service.
 
 Run Redis commands from the repository root as
-`docker compose exec redis redis-cli <command>`.
+`docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml exec redis redis-cli <command>`.
 
-**Restart:** `docker compose restart polyagent-channels`.
+**Restart:** `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml restart polyagent-channels`.
 
 **Rebuild:** run `DEL channels:version`, then restart. Startup rebuilds the byte
 counter, heads and clock from the surviving `channel:*` streams in one atomic
@@ -491,13 +499,13 @@ greater than the rebuilt clock must reread from `0-0`.
 
 | Error | Cause | Action |
 |-------|-------|--------|
-| `Invalid message lifecycle arguments` | The running code and its bundled `lifecycle.lua` do not match, as after a partial or modified install | No Redis repair. `docker compose up -d --build` from one unmodified release |
+| `Invalid message lifecycle arguments` | The running code and its bundled `lifecycle.lua` do not match, as after a partial or modified install | No Redis repair. `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --build` from one unmodified release |
 | `Unexpected storage key type` | Another client wrote a foreign type under a service name. `channels:heads` must be a sorted set, `channels:bytes` and `channels:version` strings, `channels:clock` and every `channel:*` key streams | Find it with `TYPE` and `SCAN`. Move it aside with `RENAMENX` to a name outside `channels:*` and `channel:*`, then Rebuild. A foreign `channel:*` key shows only as `Redis unavailable` during eviction, so check those too |
 | `Unsupported message storage version` | `channels:version` holds a value other than `2` | Run a release that supports it. Only if no release wrote it, Rebuild |
 | `Message clock must be empty` | Another client wrote to `channels:clock` | `XTRIM channels:clock MAXLEN 0`, which keeps the last-generated ID, then Restart |
 | `Invalid message byte counter` | `channels:bytes` is not a nonnegative number, because another client changed it or wrote to `channel:*` streams | Stop that writer. `DEL channels:bytes`, then Rebuild |
 | `Missing message clock` | `channels:version` is `2` but another client removed `channels:clock` | Rebuild |
-| `Stream ID exhausted` | The highest issued ID is the largest Redis stream ID. Reads work; publishing fails | Set `REDIS_URL` in `.devcontainer/docker-compose.yml` to a new, empty database such as `redis://redis:6379/1`, then `docker compose up -d`. Clients read the new store from `0-0` |
+| `Stream ID exhausted` | The highest issued ID is the largest Redis stream ID. Reads work; publishing fails | Set `REDIS_URL` in `.devcontainer/docker-compose.yml` to a new, empty database such as `redis://redis:6379/1`, then `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d`. Clients read the new store from `0-0` |
 
 ## Upgrade and rollback
 
@@ -599,7 +607,7 @@ To check HTTP, WebSocket and MCP against a dedicated service, set `CHANNEL_URL`
 and `CHANNEL_KEY_FILE`, then run `PYTHONPATH=src .venv/bin/python tests/smoke.py`.
 It leaves synthetic messages for retention or operator cleanup.
 
-To check durability, publish, run `docker compose restart` and read from `0-0`.
+To check durability, publish, run `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml restart` and read from `0-0`.
 
 To check real agent cooperation, use two permitted clients with separate session
 IDs. Install from `/help` with each and leave both idle. Ask one in plain words to

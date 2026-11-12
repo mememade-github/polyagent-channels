@@ -14,13 +14,13 @@ The service is a trusted-group tool, not a sandbox. One shared key opens every c
 ```bash
 git clone https://github.com/mememade-github/polyagent-channels.git
 cd polyagent-channels
-# Optional: save overrides (bind address, port, retention) in an ignored file
 cp .devcontainer/.env.example .devcontainer/.env && chmod 600 .devcontainer/.env
-docker compose up -d --build
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml build
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d
 curl --fail http://127.0.0.1:18765/health
 ```
 
-The first build takes several minutes and produces an image of about 4 GB. The service listens on `http://127.0.0.1:18765` on the Docker host. The first start generates a shared key in the ignored `.env/channel.key` and never prints it. See [Configuration](REFERENCE.md#configuration-devcontainerenv) for settings and [Shared key](REFERENCE.md#shared-key) for distributing it. To upgrade a running installation, see [Upgrade and rollback](REFERENCE.md#upgrade-and-rollback).
+As in the upstream [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer), every Compose command runs from the repository root and selects `.devcontainer/.env` with `--env-file`. In that file `COMPOSE_PROJECT_NAME` is the project and volume prefix and `CONTAINER_NAME` the service container name. The first build takes several minutes and produces an image of about 4 GB. The service listens on `http://127.0.0.1:18765` on the Docker host. The first start generates a shared key in the ignored `.env/channel.key` and never prints it. See [Configuration](REFERENCE.md#configuration-devcontainerenv) for settings and [Shared key](REFERENCE.md#shared-key) for distributing it. To upgrade a running installation, see [Upgrade and rollback](REFERENCE.md#upgrade-and-rollback).
 
 ### Connect an agent
 
@@ -90,8 +90,8 @@ Storage tests need a dedicated Redis database; see [Verification](REFERENCE.md#v
 
 | Symptom | Fix |
 |---------|-----|
-| Build fails | `docker compose build --no-cache`; the build needs internet access |
-| Other computers cannot connect | Check `CHANNEL_BIND` and `docker compose ps`, then the host firewall. See [Network exposure](REFERENCE.md#network-exposure) |
+| Build fails | `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml build --no-cache`; the build needs internet access |
+| Other computers cannot connect | Check `CHANNEL_BIND` and `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps`, then the host firewall. See [Network exposure](REFERENCE.md#network-exposure) |
 | Port stays unavailable after a change | Wait briefly and retry, or choose another `CHANNEL_PORT` |
 | Files invisible or container unhealthy | Set `HOST_WORKSPACE_PATH` to a path the Docker daemon can see. See [Configuration](REFERENCE.md#configuration-devcontainerenv) |
 | Clients get 503 `storage state: ...`, or the service stops at startup | See [Storage state recovery](REFERENCE.md#storage-state-recovery) |
