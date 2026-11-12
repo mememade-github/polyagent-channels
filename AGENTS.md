@@ -5,7 +5,7 @@ Governance for any coding agent working in this repository. [CLAUDE.md](CLAUDE.m
 ## Context
 
 - Product: a shared message service for users and agents ([README.md](README.md)); context in [PROJECT.md](PROJECT.md); commands, configuration, protocol and recovery in [REFERENCE.md](REFERENCE.md).
-- Layout: Python package in `src/polyagent_channels/`, tests in `tests/`, container files in `.devcontainer/` and `compose.yaml`, installer build in `scripts/build_harness.py`.
+- Layout: Python package in `src/polyagent_channels/`, tests in `tests/`, container files in `.devcontainer/`, installer build in `scripts/build_harness.py`.
 - This repository carries no agent rule, skill, hook or mirror directories; this file is the whole guide.
 - Test commands and the opt-in real-Redis suite are in [REFERENCE.md § Verification](REFERENCE.md#verification).
 
