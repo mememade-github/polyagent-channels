@@ -23,7 +23,7 @@ Version `0.1.1` (tag `v0.1.1`).
 
 ## Environment
 
-- **Configuration**: ignored `.devcontainer/.env` (see [REFERENCE.md § Configuration](REFERENCE.md#configuration-devcontainerenv)); defaults need no file.
+- **Configuration**: ignored `.devcontainer/.env`, copied from `.devcontainer/.env.example`; every Compose command selects it with `--env-file` (see [REFERENCE.md § Configuration](REFERENCE.md#configuration-devcontainerenv)).
 - **Shared key**: ignored `.env/channel.key`, generated on first start (directory 0700, file 0600); at least 32 printable ASCII characters without whitespace.
 - **Persistent volume**: `channel-data` (Redis AOF).
 - **Default address**: `http://127.0.0.1:18765` on the Docker host (container port 8080).
@@ -44,4 +44,4 @@ Version `0.1.1` (tag `v0.1.1`).
 
 ---
 
-*Last updated: 2026-11-11*
+*Last updated: 2026-11-12*
