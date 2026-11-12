@@ -49,6 +49,7 @@ docker compose up -d --build
 |----------|---------|---------|
 | `CHANNEL_BIND` | `0.0.0.0` | Host address the port is published on. `127.0.0.1` for single-PC use |
 | `CHANNEL_PORT` | `18765` | Host port (container port 8080) |
+| `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the `channel-data` volume. Keep it for an existing instance, since another name starts with an empty volume |
 | `INSTANCE_NAME` | `polyagent-channels` | Service container name |
 | `HOST_WORKSPACE_PATH` | this repository | Repository path as the Docker daemon sees it; set only when that differs |
 | `CHANNEL_RETENTION_DAYS` | `7` | Nonnegative integer; `0` disables age expiration only |

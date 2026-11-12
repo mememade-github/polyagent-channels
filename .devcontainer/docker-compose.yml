@@ -1,3 +1,5 @@
+name: polyagent-channels
+
 x-channel-logging: &channel-logging
   driver: local
   options:
