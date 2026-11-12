@@ -580,8 +580,14 @@ docker run --rm -v "${HOME}:/backup" alpine sh -c 'tar tzf /backup/channel-data-
 docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d
 ```
 
-If a line fails after `stop`, start the previous service again with
-`docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build`.
+If a line fails after `stop`, start the previous service again. The build has
+already moved the image tag to the new image, so point it back first (with
+other `IMAGE_NAME` or `IMAGE_TAG` values, retag to those):
+
+```bash
+docker image tag polyagent-channels:previous polyagent-channels-polyagent-channels:latest
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build
+```
 
 Then confirm (in Windows PowerShell, use `curl.exe` for `curl`):
 
