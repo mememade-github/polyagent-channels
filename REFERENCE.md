@@ -509,13 +509,13 @@ greater than the rebuilt clock must reread from `0-0`.
 
 ## Upgrade and rollback
 
-Run these where Compose manages the service, from the repository directory, on
-a release tag with a clean tree, and from outside the service container. The
-names below assume the default project name `polyagent-channels`: volume
-`polyagent-channels_channel-data`, image
-`polyagent-channels-polyagent-channels:latest`, service container
-`polyagent-channels` (`CONTAINER_NAME`) and Redis container
-`polyagent-channels-redis-1`.
+Run each line from the repository root, outside the service container, in
+PowerShell or bash, and stop at the first error. The commands use the
+identifiers in `.devcontainer/.env`; the names below are their defaults:
+project `polyagent-channels`, service container `polyagent-channels`
+(`CONTAINER_NAME`), image `polyagent-channels-polyagent-channels:latest`
+(`IMAGE_NAME`, `IMAGE_TAG`), Redis container `polyagent-channels-redis-1` and
+volume `polyagent-channels_channel-data`.
 
 Recreating the service container ends everything running inside it and
 discards its home directory and `/tmp`: an agent session working in that
@@ -527,35 +527,44 @@ need first, and sign the clients in again afterwards.
 Run the procedure once. Before running it again, rename the
 `polyagent-channels:previous` tag and the archive, or they are replaced. The
 archive holds every retained message: keep it private and outside the
-repository. It is streamed, so it lands where the command runs even when the
-Docker daemon sees another path.
+repository. It is written to your home directory through a bind mount, so run
+the procedure where the Docker daemon can bind that directory, such as Docker
+Desktop on the same computer. On a Linux host the archive belongs to root.
 
-Save the block as a script and run it with `bash`; pasted into an interactive
-shell, `set -e` would close that shell on the first failure. If it stops after
-`docker compose stop`, start the previous service again with
-`docker compose up -d --no-build`.
+Check out the release and confirm what Compose will use:
 
 ```bash
-set -e
 git fetch --tags
 git checkout <release tag>
-test -z "$(git status --short)"
-docker image tag "$(docker inspect -f '{{.Image}}' polyagent-channels)" polyagent-channels:previous
-docker image inspect polyagent-channels:previous > /dev/null
-docker compose build                     # the running service stays up meanwhile
-docker pull alpine
-docker compose stop
-docker run --rm -v polyagent-channels_channel-data:/data alpine tar czf - -C /data . > ~/channel-data-previous.tgz
-test -s ~/channel-data-previous.tgz && chmod 600 ~/channel-data-previous.tgz
-tar tzf ~/channel-data-previous.tgz > /dev/null
-docker compose up -d
+git status --short                        # must print nothing
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml config
 ```
 
-Then confirm:
+Stop unless `name`, `container_name`, `image`, the bind `source`, `published`
+and the `channel-data` volume match the running service
+(`docker inspect polyagent-channels`).
 
-- `docker ps` shows both containers healthy, and
+Keep the running image for rollback, build, then stop, back up and start:
+
+```bash
+docker image tag $(docker inspect -f '{{.Image}}' polyagent-channels) polyagent-channels:previous
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml build    # the running service stays up meanwhile
+docker pull alpine
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml stop
+docker run --rm -v polyagent-channels_channel-data:/data -v "${HOME}:/backup" alpine tar czf /backup/channel-data-previous.tgz -C /data .
+docker run --rm -v "${HOME}:/backup" alpine sh -c 'tar tzf /backup/channel-data-previous.tgz > /dev/null && chmod 600 /backup/channel-data-previous.tgz && echo backup ok'
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d
+```
+
+If a line fails after `stop`, start the previous service again with
+`docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build`.
+
+Then confirm (in Windows PowerShell, use `curl.exe` for `curl`):
+
+- `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps` shows both containers healthy, and
   `curl -fsS http://127.0.0.1:18765/health` succeeds.
-- The downloaded `/harness` matches `/harness.sha256`.
+- `docker exec polyagent-channels sh -c 'curl -fsS http://127.0.0.1:8080/harness | sha256sum; curl -fsS http://127.0.0.1:8080/harness.sha256'`
+  prints the same hash twice.
 - `docker exec polyagent-channels /home/vscode/channels-venv/bin/python -c "import importlib.metadata as m; print(m.version('polyagent-channels'), m.version('mcp'))"`
   prints the release and the `mcp` pin of `requirements.lock`, and
   `docker exec polyagent-channels-redis-1 redis-cli INFO server` reports the
@@ -564,20 +573,20 @@ Then confirm:
   messages from before the upgrade stay readable with `receive --cursor 0-0`.
 
 To roll back the service, point the image back and recreate only that
-container; Redis 7.4.11 also serves the previous release:
+container; Redis 7.4.11 also serves the previous release. With other
+`IMAGE_NAME` or `IMAGE_TAG` values, retag to those:
 
 ```bash
 docker image tag polyagent-channels:previous polyagent-channels-polyagent-channels:latest
-docker compose up -d --no-build --force-recreate polyagent-channels
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build --force-recreate polyagent-channels
 ```
 
 If the data itself is damaged, replace the volume contents with the archive:
 
 ```bash
-docker compose stop
-docker run --rm -i -v polyagent-channels_channel-data:/data alpine \
-  sh -c 'find /data -mindepth 1 -delete && tar xzf - -C /data' < ~/channel-data-previous.tgz
-docker compose up -d --no-build
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml stop
+docker run --rm -v polyagent-channels_channel-data:/data -v "${HOME}:/backup" alpine sh -c 'find /data -mindepth 1 -delete && tar xzf /backup/channel-data-previous.tgz -C /data'
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build
 ```
 
 ## Verification
