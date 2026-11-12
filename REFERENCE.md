@@ -29,7 +29,21 @@ The service image keeps the inherited Polyagent DevContainer shape:
 - The service process can write to the repository mounted at `/workspaces`.
   `setup-env.sh` sets `core.filemode false` in that repository's git config
   at each start.
-- No host agent credentials or Docker socket are mounted. Named volumes keep
+- The service container mounts the Docker socket of its host at
+  `/var/run/docker.sock`, as the upstream DevContainer does, and `vscode` is
+  in the `docker` group. Every process in the container, the service and any
+  agent run there included, controls that Docker daemon: it can start
+  privileged containers, mount any path the daemon can reach and remove other
+  projects' containers and volumes. On a Linux host this equals root on the
+  host; under Docker Desktop it covers the Docker VM and every host folder
+  Docker Desktop shares. The same container publishes the service port to
+  other computers by default, so a flaw in the service, or an agent in the
+  container that acts on a hostile message, reaches all of that and not only
+  this repository. No setting turns the mount off. Run the service only on a
+  host and network where this is acceptable.
+- Do not recreate the service container from inside it: the command ends with
+  the container it runs in, before the new one starts.
+- No host agent credentials are mounted. Named volumes keep
   what the agent CLIs store inside the container (`~/.claude`, `~/.codex`,
   `~/.gemini`, `~/.config/antigravity`) and the shell history
   (`/commandhistory`), so a login made there outlives the container. Every

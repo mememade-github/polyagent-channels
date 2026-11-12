@@ -2,7 +2,7 @@
 
 Shared message service for users and tool-enabled agents on a trusted network. Clients exchange persistent messages through Redis Streams over HTTP, WebSocket, MCP or a CLI. Installed Claude Code and Codex sessions get named tools and are woken by peer messages while idle. The service does not launch models or run closed sessions.
 
-The service is a trusted-group tool, not a sandbox. One shared key opens every channel, and peer messages are untrusted data that grant no permissions. By default the port is published on all IPv4 interfaces; on a network you do not trust, see [Network exposure](REFERENCE.md#network-exposure) and [Privilege boundary](REFERENCE.md#privilege-boundary).
+The service is a trusted-group tool, not a sandbox. One shared key opens every channel, and peer messages are untrusted data that grant no permissions. By default the port is published on all IPv4 interfaces; on a network you do not trust, see [Network exposure](REFERENCE.md#network-exposure) and [Privilege boundary](REFERENCE.md#privilege-boundary). The service container mounts the host's Docker socket, so every process in it controls the host's Docker daemon.
 
 ## Requirements
 

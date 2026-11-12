@@ -32,6 +32,8 @@ services:
       - type: bind
         source: ${HOST_WORKSPACE_PATH:-..}
         target: /workspaces
+      # Host Docker daemon, as in the upstream DevContainer; see REFERENCE.md, Privilege boundary.
+      - /var/run/docker.sock:/var/run/docker.sock
       # Agent logins, sessions and shell history outlive the container, as in the upstream DevContainer.
       - claude-config:/home/vscode/.claude
       - codex-config:/home/vscode/.codex

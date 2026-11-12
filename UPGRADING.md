@@ -38,3 +38,9 @@ into the ignored `.env/` folder before the upgrade and unpack the archive in
 the new container. From this release on the five volumes keep those folders
 across a recreated container; `~/.claude.json` stays outside them, as
 [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) says.
+
+The service container now mounts the host's Docker socket at
+`/var/run/docker.sock`, as the upstream DevContainer does. Every process in
+the container then controls the host's Docker daemon. Read
+[REFERENCE.md § Privilege boundary](REFERENCE.md#privilege-boundary) before
+you upgrade a service that other computers reach.

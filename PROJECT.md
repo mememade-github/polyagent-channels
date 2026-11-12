@@ -26,6 +26,7 @@ Version `0.1.1` (tag `v0.1.1`).
 - **Configuration**: ignored `.devcontainer/.env`, copied from `.devcontainer/.env.example`; every Compose command selects it with `--env-file` (see [REFERENCE.md § Configuration](REFERENCE.md#configuration-devcontainerenv)).
 - **Shared key**: ignored `.env/channel.key`, generated on first start (directory 0700, file 0600); at least 32 printable ASCII characters without whitespace.
 - **Persistent volumes**: `channel-data` (Redis AOF); `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` (logins, sessions and shell history of agents run in the service container).
+- **Docker socket**: the host's `/var/run/docker.sock`, mounted in the service container ([REFERENCE.md § Privilege boundary](REFERENCE.md#privilege-boundary)).
 - **Default address**: `http://127.0.0.1:18765` on the Docker host (container port 8080).
 - **Client root**: `~/.local/share/polyagent-channels` (installer, wrapper, URL-only config, session state).
 
