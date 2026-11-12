@@ -4,6 +4,7 @@
 .venv
 **/__pycache__
 .devcontainer/.env
+.devcontainer/.env.*
 .pytest_cache
 .coverage
 htmlcov

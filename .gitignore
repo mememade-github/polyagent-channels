@@ -1,6 +1,8 @@
 .env/
 .channels/
 .devcontainer/.env
+.devcontainer/.env.*
+!.devcontainer/.env.example
 .venv/
 __pycache__/
 *.pyc
