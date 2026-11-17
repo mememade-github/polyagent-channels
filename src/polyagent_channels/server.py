@@ -126,10 +126,12 @@ evicted_pending and stays unconfirmed until acknowledged. Pending work blocks cl
 Uninstall keeps it and lists it. An explicit --cursor reads history without moving
 anything. Status separates service access from reception: hook_missing (not
 installed for this project/client), hook_invalid (differs from the install record),
-hook_unobserved (installed, no receiver seen for this session), waiting (receiver
-reported within 90 seconds), callback_stale (older than 90 seconds or an invalid
-timestamp), callback_observed (another recent report such as error) and not_open (no
-topic joined). No observation promises future delivery. IDs identify duplicates;
+hook_unobserved (installed, no receiver seen for this session), notified (a notice was
+handed to this session within the last 600 seconds; the receiver restarts when the
+turn ends), waiting (receiver reported within 90 seconds), callback_stale (older
+than 90 seconds (600 for notified) or an invalid timestamp), callback_observed
+(another recent report such as error) and not_open (no topic joined).
+No observation promises future delivery. IDs identify duplicates;
 exactly-once processing is not guaranteed. There are no model launchers or daemons,
 and installation never writes native trust records.
 
