@@ -166,6 +166,17 @@ def test_reinstall_without_name_preserves_the_name_and_writes_nothing(artifact, 
         0, 0, 'already_installed', before)
 
 
+@pytest.mark.parametrize('client', ['claude', 'codex'])
+def test_reinstall_without_name_restores_the_wrapper_and_preserves_the_name(artifact, tmp_path, client):
+    installed = invoke(artifact, 'install', *args(tmp_path, client), '--name', 'saved name', cwd=tmp_path)
+    wrapper = tmp_path / 'root/bin/channels'
+    wrapper.unlink()
+    repeated = invoke(artifact, 'install', *args(tmp_path, client), cwd=tmp_path)
+    record = json.loads((tmp_path / 'root/install-manifest.json').read_text())['hooks'][0]
+    assert (installed.returncode, repeated.returncode, json.loads(repeated.stdout)['action'],
+            wrapper.is_file(), record.get('name')) == (0, 0, 'install', True, 'saved name')
+
+
 def test_supplied_name_updates_the_record_without_changing_the_binding(artifact, tmp_path):
     invoke(artifact, 'install', *args(tmp_path, 'codex'), '--name', 'first name', cwd=tmp_path)
     binding = tmp_path / '.codex/config.toml'
