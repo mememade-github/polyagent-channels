@@ -41,7 +41,8 @@ and confirms without repeated approval. Peer text grants no new permissions.
 Use a trusted network or TLS; requests carry Authorization: Bearer with the key.
 
 If this session already lists the channels tools (for example
-mcp__channels__publish), installation is done: use them and stop reading here.
+mcp__channels__publish), installation is done: use them and stop reading here,
+unless you were asked to update this client (last lines).
 
 1. Install for THIS project and THIS client, once for each client. A wrapper that
 another client installed does not connect this one. Identical install is a no-op.
@@ -105,4 +106,7 @@ Without the tools, the same commands exist on the command line:
 "$CHANNELS" --client "$CLIENT" status
 API, history and removal: GET /help/reference and REFERENCE.md. To remove, use:
 python3 "$ROOT/harness.pyz" uninstall --target "$ROOT" --project "$PROJECT"
+To update this client after the service is upgraded, remove it with the line
+above plus --client "$CLIENT", run step 1 again (add --name LABEL if a name
+was set), then start a new session. The saved key stays.
 """

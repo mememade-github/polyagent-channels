@@ -1006,6 +1006,21 @@ def test_help_states_how_to_run_claude_headless_in_an_installed_project(monkeypa
     assert '--settings \'{"disableAllHooks": true}\' for headless runs' in harness.setup_help('http://localhost:18765')
 
 
+@pytest.mark.parametrize('phrase', [
+    'installation is done: use them and stop reading here, '
+    'unless you were asked to update this client (last lines).',
+    'python3 "$ROOT/harness.pyz" uninstall --target "$ROOT" --project "$PROJECT" '
+    'To update this client after the service is upgraded, remove it with the line '
+    'above plus --client "$CLIENT", run step 1 again (add --name LABEL if a name '
+    'was set), then start a new session. The saved key stays.',
+])
+def test_help_guides_an_installed_client_through_an_update(monkeypatch, phrase):
+    from polyagent_channels import harness
+
+    monkeypatch.setattr(harness, 'artifact_bytes', lambda: b'synthetic-artifact')
+    assert phrase in ' '.join(harness.setup_help().split())
+
+
 def test_help_commands_install_and_save_a_key_in_a_custom_root(artifact, tmp_path, monkeypatch):
     from polyagent_channels import harness
 
