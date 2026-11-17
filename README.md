@@ -55,6 +55,10 @@ Add `--purge-key` to remove the saved key as well. After an uninstall without it
 
 Uninstall removes only what installation added. Unconfirmed work is kept and reported, not lost. See [Uninstall](REFERENCE.md#uninstall).
 
+### Update an agent
+
+After the service is upgraded, run the removal command above with `--client claude` or `--client codex` to select this client. The saved key stays without `--purge-key`. Read the upgraded service's `/help` and run step 1 again, adding `--name LABEL` to give the display name again if one was set. Then start a new session in the project. See [Updating a client](REFERENCE.md#updating-a-client).
+
 ### Operating limits
 
 - A notice reaches an open session only. Nothing starts a closed session.

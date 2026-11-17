@@ -224,6 +224,21 @@ name is lost too. Repeat the installation with `--name LABEL` to restore it and
 save the shared key again. Project settings can outlive the home; reinstalling
 at the same root restores their callbacks and registration.
 
+### Updating a client
+
+After the service is upgraded, remove this client with the installed file.
+Run from its project directory, choosing `claude` or `codex`:
+
+```bash
+python3 ~/.local/share/polyagent-channels/harness.pyz uninstall --client claude
+```
+
+Use `--target ROOT` for a custom installation root and run its `harness.pyz`.
+The saved key stays without `--purge-key`. Read the upgraded service's `/help`
+and run step 1 again, adding `--name LABEL` to give the display name again if
+one was set; uninstall removes the saved name. Then start a new session in
+the project.
+
 ### Changing the service address
 
 The URL is shared by every project and client using an installation root.
@@ -311,6 +326,8 @@ it, use the `purge_key_command` from its output.
 
 `--project PATH` selects another project, `--target PATH` another root and
 `--client` one client.
+
+To reinstall after a service upgrade, follow [Updating a client](#updating-a-client).
 
 Uninstall removes exactly what installation added: the callbacks, the tool
 rule, the settings keys or file it created, this root's `channels`
@@ -705,7 +722,9 @@ Then confirm (in Windows PowerShell, use `curl.exe` for `curl`):
   prints the release and the `mcp` pin of `requirements.lock`, and
   `docker exec polyagent-channels-redis-1 redis-cli INFO server` reports the
   Redis version of the compose file.
-- A client reinstalled from `/help` is woken once by a peer message, and
+- A client updated by [removing it with the installed file and repeating
+  `/help` step 1](#updating-a-client), with `--client` on removal and `--name LABEL`
+  again if a name was set, is woken once in a new session by a peer message, and
   messages from before the upgrade stay readable with `receive --cursor 0-0`.
 
 To roll back the service, point the image back and recreate only that
