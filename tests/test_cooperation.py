@@ -407,7 +407,7 @@ def test_hook_wakes_with_exit_2_and_a_fixed_notice_free_of_peer_text(tmp_path, m
             and (topic['channel'], topic['conversation_id']) == ('general', 'main') and topic['notified'] == '1-0' and topic['cursor'] == '0-0')
 
 
-@pytest.mark.parametrize('active_status', [200, 503])
+@pytest.mark.parametrize('active_status', [200, 503, pytest.param(OSError('synthetic failure'), id='os-error')])
 def test_notification_handoff_records_active_presence_without_blocking_exit(tmp_path, monkeypatch, active_status):
     monkeypatch.setattr(cli, 'read_secret', lambda path: 'synthetic-key')
     stream = peer_stream([{'id': '1-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'work'}])
@@ -416,6 +416,8 @@ def test_notification_handoff_records_active_presence_without_blocking_exit(tmp_
         if request.url.path == '/sessions':
             payload = json.loads(request.content)
             presence.append(payload)
+            if payload['state'] == 'active' and isinstance(active_status, OSError):
+                raise active_status
             return httpx.Response(active_status if payload['state'] == 'active' else 200, json={})
         return stream.handle_request(request)
     use_transport(monkeypatch, httpx.MockTransport(handler))

@@ -677,7 +677,7 @@ def watch_cycles(options, join_default):
 
 def record_handoff(options, key):
     """Presence is advisory; a failed announcement must not prevent the notification exit."""
-    with contextlib.suppress(httpx.HTTPError):
+    with contextlib.suppress(httpx.HTTPError, ValueError, OSError):
         announce_presence(options, key, 'active', ACTIVE_LEASE_SECONDS)
     record_hook(options, 'notified')
 
