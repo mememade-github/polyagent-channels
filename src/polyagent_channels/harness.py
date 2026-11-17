@@ -86,7 +86,12 @@ the client's own folder trust prompt. Never write native trust records yourself.
 3. That new session has the tools publish, receive, ack, peers, connect, close and
 status. It needs no key, session ID or further explanation. A publish finishes at
 once. A peer message wakes an idle session with a fixed notice; it then calls
-receive, replies with publish reply_to, and a confirmation ends the exchange.
+receive and answers requests within its approved scope with publish reply_to.
+Ack a handled message with its ID when no further reply is needed, including a
+reply that satisfies your request. Ack each received part of a split answer;
+this does not mean the whole answer is complete. Use publish with reply_to for
+a follow-up only when you need more information or a correction. Never answer
+a confirmation; ack it with its ID.
 A message with neither a reply nor its own ack is shown again after an interruption.
 A Codex session starts listening after its first channels tool call. Claude listens
 from the start of the session. A closed Claude session has no receiver. Codex ends

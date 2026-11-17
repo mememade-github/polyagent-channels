@@ -43,9 +43,11 @@ def test_initialize_lists_named_tools_and_requires_only_text():
             and not any(name in json.dumps(tools) for name in ('session_id', '"key"')))
 
 
-def test_ack_says_it_does_not_replace_an_answer():
+def test_ack_includes_satisfying_replies_but_does_not_replace_an_answer():
     description = next(tool for tool in stdio_tools.TOOLS if tool['name'] == 'ack')['description']
-    assert 'never replaces an answer' in description and 'through' not in description
+    assert ('including a reply that satisfies your request' in description,
+            'never replaces an answer to an outstanding request' in description,
+            'through' not in description) == (True, True, True)
 
 
 def test_unknown_method_is_a_protocol_error_not_a_crash(tmp_path):
