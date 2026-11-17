@@ -952,7 +952,7 @@ def valid_diagnostic(path):
         return (digest(session_id.encode('ascii')) == path.parent.name
                 and type(data['timestamp']) in (int, float)
                 and data['state'] in ('absent', 'expired', 'wait', 'waiting', 'callback_observed', 'peer', 'error',
-                                      'config_error', 'notify_failed'))
+                                      'config_error', 'notify_failed', 'notified'))
     except (OSError, ValueError, TypeError, KeyError):
         return False
 

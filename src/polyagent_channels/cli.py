@@ -39,6 +39,7 @@ ERROR_RETRY_SECONDS = 15
 OBSERVATION_FRESH_SECONDS = 90
 NOTICE_ATTEMPTS = 3
 LIVE_LEASE_SECONDS = 90
+ACTIVE_LEASE_SECONDS = 600
 PAGE_SIZE = 100
 # One read scans at most this many service pages, so a long backlog cannot outlast the tool call timeout.
 MAX_SCANNED_PAGES = 50
@@ -501,6 +502,10 @@ def reception_status(options):
     if callback is None:
         result.update(reception='hook_unobserved', next_action=unobserved_action(result))
         return result
+    if callback.get('state') == 'notified' and age is not None and 0 <= age <= ACTIVE_LEASE_SECONDS:
+        result.update(reception='notified', next_action='A notification was handed to this session. '
+                      'The background receiver restarts when the turn ends.')
+        return result
     if not fresh:
         result.update(callback_observation='callback_stale', reception='callback_stale',
                       next_action='The background receiver last reported more than 90 seconds ago. It runs between turns '
@@ -640,8 +645,16 @@ def watch_cycles(options, join_default):
         if not listening:
             return 0
         if notices and notify(options, notices):
+            record_handoff(options, key)
             return 2
     return 0
+
+
+def record_handoff(options, key):
+    """Presence is advisory; a failed announcement must not prevent the notification exit."""
+    with contextlib.suppress(httpx.HTTPError):
+        announce_presence(options, key, 'active', ACTIVE_LEASE_SECONDS)
+    record_hook(options, 'notified')
 
 
 def run_receiver(options, join_default=False, redeliver=False):

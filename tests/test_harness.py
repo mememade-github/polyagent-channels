@@ -715,6 +715,17 @@ def test_final_uninstall_leaves_only_the_key_and_unknown_files(artifact, tmp_pat
             'synthetic-protected-key' in result.stdout) == (0, 0, False, False, ['.env', 'manual-venv'], True, True, False)
 
 
+def test_uninstall_removes_a_notification_handoff_diagnostic(artifact, tmp_path):
+    invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+    root = tmp_path / 'root'
+    directory = exchange.session_directory(root / 'state', 'notified-session')
+    directory.mkdir(parents=True)
+    exchange.write_state(directory / 'last-hook.json',
+                         {'timestamp': time.time(), 'state': 'notified', 'session_id': 'notified-session'})
+    removed = invoke(artifact, 'uninstall', '--target', root, '--project', tmp_path, cwd=tmp_path)
+    assert (removed.returncode, root.exists()) == (0, False)
+
+
 def test_purge_shared_key_refused_before_callback_changes(artifact, tmp_path):
     projects = [project_directory(tmp_path / 'one'), project_directory(tmp_path / 'two')]
     for project in projects:

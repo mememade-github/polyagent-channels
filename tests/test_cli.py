@@ -977,6 +977,26 @@ def test_stale_observation_is_distinct_from_listening(connection_client):
             and listening['reception'] == 'waiting' and listening['last_callback']['state'] == 'waiting')
 
 
+@pytest.mark.parametrize('arguments', [('status',), ('publish', '--text', 'working'), ('receive', '--timeout', '0')])
+@pytest.mark.parametrize('age, expected', [(120, 'notified'), (601, 'callback_stale')])
+def test_notification_handoff_has_a_longer_observation_window(connection_client, monkeypatch, arguments, age, expected):
+    session = connection_client
+    monkeypatch.setattr(cli.time, 'time', lambda: 1000)
+    session.invoke('connect')
+    path = exchange.session_directory(session.directory, 'native-self') / 'last-hook.json'
+    path.write_text(json.dumps({'timestamp': 1000 - age, 'state': 'notified', 'session_id': 'native-self'}))
+    assert session.invoke(*arguments)['reception'] == expected
+
+
+def test_notification_handoff_is_current_at_600_seconds(connection_client, monkeypatch):
+    session = connection_client
+    monkeypatch.setattr(cli.time, 'time', lambda: 1000)
+    session.invoke('connect')
+    path = exchange.session_directory(session.directory, 'native-self') / 'last-hook.json'
+    path.write_text(json.dumps({'timestamp': 400, 'state': 'notified', 'session_id': 'native-self'}))
+    assert session.invoke('status')['reception'] == 'notified'
+
+
 def test_status_reports_the_configured_url(connection_client):
     assert connection_client.invoke('status')['url'] == 'http://synthetic-service'
 

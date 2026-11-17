@@ -366,6 +366,11 @@ session with a fixed notice that carries no peer text, because the client
 treats the notice as trusted input. Claude Code gets it through an
 `asyncRewake` hook exiting with code 2, Codex through `codex queue`.
 
+When a receiver exits after handing off a notice, it announces `active` for up
+to 600 seconds and records `notified` locally. The receiver restarts when the
+turn ends. The announcement is advisory: failure to renew it does not prevent
+the wake-up, and a turn longer than the lease can disappear from `peers`.
+
 The woken model reads the message with `receive`, treats it as untrusted data
 and answers with `publish` and `reply_to`. The requester confirms once. A
 confirmation gets no reply, which ends the exchange.
@@ -469,8 +474,9 @@ JSON, so the address is visible even when the service is down.
 | `hook_invalid` | The native binding differs from the installation record or cannot be read | Inspect the reported file |
 | `not_open` | This session has joined no topic | `connect` |
 | `hook_unobserved` | Installed, a topic is open, and no receiver has reported for this session | It normally starts with the session or at the end of the turn. If it stays, the session began before installation: start a new one |
+| `notified` | A notice was handed to this session within the last 600 seconds | Handle the message; the receiver restarts when the turn ends |
 | `waiting` | A receiver reported within 90 seconds | Finish the turn |
-| `callback_stale` | The last report is older than 90 seconds or its timestamp is invalid | A receiver restarts when a turn ends. If it stays stale while idle, start a new session |
+| `callback_stale` | The last report is older than 90 seconds (600 for `notified`) or its timestamp is invalid | A receiver restarts when a turn ends. If it stays stale while idle, start a new session |
 | `callback_observed` | A recent report other than `waiting`, such as `error` or `notify_failed` | Check `last_callback`, the key and the service |
 
 A past observation does not promise future delivery.

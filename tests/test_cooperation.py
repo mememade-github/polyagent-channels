@@ -407,6 +407,26 @@ def test_hook_wakes_with_exit_2_and_a_fixed_notice_free_of_peer_text(tmp_path, m
             and (topic['channel'], topic['conversation_id']) == ('general', 'main') and topic['notified'] == '1-0' and topic['cursor'] == '0-0')
 
 
+@pytest.mark.parametrize('active_status', [200, 503])
+def test_notification_handoff_records_active_presence_without_blocking_exit(tmp_path, monkeypatch, active_status):
+    monkeypatch.setattr(cli, 'read_secret', lambda path: 'synthetic-key')
+    stream = peer_stream([{'id': '1-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'work'}])
+    presence = []
+    def handler(request):
+        if request.url.path == '/sessions':
+            payload = json.loads(request.content)
+            presence.append(payload)
+            return httpx.Response(active_status if payload['state'] == 'active' else 200, json={})
+        return stream.handle_request(request)
+    use_transport(monkeypatch, httpx.MockTransport(handler))
+    monkeypatch.setattr('sys.stdin', io.StringIO(json.dumps({'session_id': 'idle-session',
+                         'hook_event_name': 'SessionStart', 'source': 'startup'})))
+    status = cli.run_hook(hook_options(tmp_path, '--client', 'claude'))
+    diagnostic = json.loads((exchange.session_directory(tmp_path, 'idle-session') / 'last-hook.json').read_text())
+    assert (status, presence[-1], diagnostic['state']) == (
+        2, {'session_id': 'idle-session', 'client': 'claude', 'state': 'active', 'ttl_seconds': 600}, 'notified')
+
+
 def test_turn_end_renews_an_open_topic_and_leaves_a_lapsed_one(tmp_path, monkeypatch):
     live = exchange.new_state('native-a', {**TARGET, 'conversation_id': 'live'}, 60)
     lapsed = {**exchange.new_state('native-a', {**TARGET, 'conversation_id': 'lapsed'}, 60), 'deadline': time.time() - 1}
