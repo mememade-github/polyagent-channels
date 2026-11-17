@@ -521,9 +521,13 @@ def reception_status(options):
     if callback:
         result['callback_age_seconds'] = round(age, 3) if age is not None else None
         result['callback_observation'] = 'callback_observed'
-    fresh = callback is not None and age is not None and 0 <= age <= OBSERVATION_FRESH_SECONDS
     if not result['reception_open']:
         return result
+    return callback_reception(result, callback, age)
+
+
+def callback_reception(result, callback, age):
+    fresh = callback is not None and age is not None and 0 <= age <= OBSERVATION_FRESH_SECONDS
     if callback is None:
         result.update(reception='hook_unobserved', next_action=unobserved_action(result))
         return result
