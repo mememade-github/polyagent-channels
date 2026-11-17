@@ -211,16 +211,18 @@ Add `--name LABEL` to the install command to set a display name for this project
 and client. It must be nonblank and at most 256 UTF-8 bytes. The name is used in
 session announcements and as the default message sender; it is an asserted
 label, not a verified identity. Reinstalling without `--name` keeps the saved
-name, and an otherwise identical install remains a no-op. Supply `--name` again
-to change it. Installations without a name keep the session ID as sender.
+name while the installation record remains, and an otherwise identical install
+remains a no-op. Supply `--name` again to change it. Installations without a name
+keep the session ID as sender.
 
 A running client does not load new tools. Start a new session in the project,
 or resume with the `resume_command` from the installation output. Accept the
 client's folder trust prompt; installation never writes native trust records.
 
-If the client home is lost, as when its container is recreated, repeat the
-installation and save the shared key again. Project settings can outlive the
-home; reinstalling at the same root restores their callbacks and registration.
+If the client home is lost, as when its container is recreated, the saved display
+name is lost too. Repeat the installation with `--name LABEL` to restore it and
+save the shared key again. Project settings can outlive the home; reinstalling
+at the same root restores their callbacks and registration.
 
 ### Changing the service address
 
@@ -229,11 +231,13 @@ Uninstall every one of them with `harness.pyz uninstall --project PATH
 --client CLIENT` (and `--target ROOT` for a custom root). Keep the saved key by
 omitting `--purge-key`. Removing only one of several installations leaves the
 shared URL in place and a new URL is refused.
+Uninstalling also removes each saved display name.
 
 After the last uninstall, download the installer from the new service's
-`/help` and install each project and client with the new `--url`. Restart their
-sessions: a receiver keeps the address it read when it started. If the new
-service also uses a different key, save it with `channels key --replace-key`.
+`/help` and install each project and client with the new `--url` and `--name LABEL`
+again to restore its display name. Restart their sessions: a receiver keeps the
+address it read when it started. If the new service also uses a different key,
+save it with `channels key --replace-key`.
 
 ### Shared key
 
