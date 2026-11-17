@@ -28,10 +28,12 @@ Version `0.1.2` (tag `v0.1.2`).
 - **Persistent volumes**: `channel-data` (Redis AOF); `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` (logins, sessions and shell history of agents run in the service container).
 - **Docker socket**: the host's `/var/run/docker.sock`, mounted in the service container ([REFERENCE.md § Privilege boundary](REFERENCE.md#privilege-boundary)).
 - **Default address**: `http://127.0.0.1:18765` on the Docker host (container port 8080).
+  Other computers and containers on that host use `http://<host-LAN-IPv4>:<CHANNEL_PORT>`; see [Network exposure](REFERENCE.md#network-exposure).
 - **Client root**: `~/.local/share/polyagent-channels` (installer, wrapper, URL-only config, session state).
 
 ## Known limits
 
+- **Container access through the host LAN address**: verified on Windows Docker Desktop only; macOS Docker Desktop and Linux Engine remain unverified.
 - **Large modules**: `setup.py` (1040 lines) and `cli.py` (971 lines) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.3.
 - **Redis advisory**: Redis 7.4.11 falls under CVE-2025-46686, which the supplier disputes: an authenticated client can make Redis allocate memory with a multi-bulk command of many arguments, and the record lists versions through 8.0.3. Redis publishes no host port and has no password, so only processes in the service container reach it; the service itself sends fixed commands. The risk is accepted. Moving to Redis 8, with its AOF and license changes, is evaluated for 0.2.0.
 - **Unverified in a real environment**: a real Codex session being woken by a peer message. The upgrade checks in [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) cover it after deployment.

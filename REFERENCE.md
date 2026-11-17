@@ -73,7 +73,7 @@ replace the image the other runs and rolls back to.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CHANNEL_BIND` | `0.0.0.0` | Host address the port is published on. `127.0.0.1` for single-PC use |
+| `CHANNEL_BIND` | `0.0.0.0` | Host address the port is published on. `127.0.0.1` allows only the Docker host itself, excluding other containers on that host |
 | `CHANNEL_PORT` | `18765` | Host port (container port 8080) |
 | `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the volumes. Keep it for an existing instance, since another name starts with empty volumes. A second instance changes it together with `CONTAINER_NAME`, `IMAGE_NAME` and `CHANNEL_PORT` |
 | `CONTAINER_NAME` | `polyagent-channels` | Service container name |
@@ -89,12 +89,17 @@ replace the image the other runs and rolls back to.
 
 ### Network exposure
 
-By default the port is published on all IPv4 interfaces. Other computers
-connect to `http://<host-LAN-IPv4>:<CHANNEL_PORT>`; `0.0.0.0` is a bind
-setting, not a client address. Redis has no published host port.
+By default the port is published on all IPv4 interfaces. Other computers and
+other containers on the same Docker host all connect to
+`http://<host-LAN-IPv4>:<CHANNEL_PORT>`; `0.0.0.0` is a bind setting, not a client
+address. `host.docker.internal` and container names depend on each container's
+DNS and network settings and are not supported client addresses. In particular,
+an explicit container `dns:` setting can prevent `host.docker.internal` from
+resolving. Redis has no published host port.
 
 Plaintext HTTP exposes the Bearer header. On a network you do not trust,
-save `CHANNEL_BIND=127.0.0.1` before the first start, or use HTTPS through a
+save `CHANNEL_BIND=127.0.0.1` before the first start to allow only the Docker
+host itself, excluding other containers on that host, or use HTTPS through a
 proxy or a VPN.
 
 Clients send the key only to the configured address: HTTP requests do not
@@ -107,26 +112,76 @@ plaintext HTTP a proxy can read the key:
   `HTTP_PROXY`, and honors `NO_PROXY`. It ignores `ALL_PROXY`.
 - SOCKS proxies are not supported; a SOCKS setting makes the client fail.
 
-After a change, run `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d` and confirm the published address
-with `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps`. On Docker Desktop the previous host port can stay
-unavailable briefly; retry, or choose another `CHANNEL_PORT`.
+**Find and check the address.** After a change, run
+`docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d`.
+Confirm publication with:
 
-**Linux.** Docker-published ports bypass ufw-style host firewall rules. Use
-`CHANNEL_BIND=127.0.0.1` or Docker-aware firewall rules on untrusted networks.
+```bash
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps
+```
 
-**Windows with Docker Desktop.** Docker publication and the Windows firewall
-are separate boundaries. In administrator PowerShell, find the active
-adapter's LAN IPv4 and allow only the chosen port from the local subnet:
+The port should show `0.0.0.0:<CHANNEL_PORT>->8080/tcp`. On Docker Desktop the
+previous host port can stay unavailable briefly; retry, or choose another
+`CHANNEL_PORT`. Find the LAN IPv4 on the Docker host's own operating system,
+not inside a container or WSL:
+
+**Windows with Docker Desktop.** In PowerShell:
 
 ```powershell
-Get-NetIPConfiguration
+Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | ForEach-Object { $_.IPv4Address.IPAddress }
+```
+
+Docker publication and the Windows firewall are separate boundaries. To allow
+the chosen port from the local subnet, run in administrator PowerShell:
+
+```powershell
 $ChannelPort = 18765 # Match CHANNEL_PORT
 New-NetFirewallRule -DisplayName "Polyagent Channels TCP $ChannelPort" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $ChannelPort -RemoteAddress LocalSubnet -Profile Private,Domain
 ```
 
-Use the host's LAN IPv4, not the container or WSL address. The rule excludes
-Public-profile networks. This project does not apply firewall rules for you.
-Test `/health` from another computer afterwards.
+The rule excludes Public-profile networks. This project does not apply firewall
+rules for you.
+
+**macOS with Docker Desktop.** In the host's shell:
+
+```bash
+ipconfig getifaddr "$(route -n get default | awk '/interface:/{print $2}')"
+```
+
+Allow Docker's incoming connections in System Settings → Network → Firewall.
+Changing networks can change the address.
+
+**Linux.** In the Docker host's shell:
+
+```bash
+ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}'
+```
+
+Docker-published ports bypass ufw-style host firewall rules. On untrusted
+networks, use `CHANNEL_BIND=127.0.0.1` for access only from the Docker host
+itself (other containers on that host also lose access), or use Docker-aware
+firewall rules.
+
+From each client computer or container, check the address you found:
+
+```bash
+curl --fail http://<host-LAN-IPv4>:<CHANNEL_PORT>/health
+```
+
+If it fails, check publication and the host firewall guidance above.
+
+**Keep the address stable.** Reserve the host's LAN IPv4 in DHCP using its
+network adapter's MAC address, or arrange a static IP with the network
+administrator. Find the adapter's MAC address on the host:
+
+| Host | Command |
+|------|---------|
+| Windows PowerShell | `Get-NetAdapter \| Where-Object Status -eq 'Up' \| Select-Object Name, MacAddress` |
+| macOS | `ifconfig <interface> \| awk '/ether/{print $2}'` (use the interface from `route -n get default`) |
+| Linux | `ip -br link` |
+
+If the address changes, follow [Changing the service address](#changing-the-service-address)
+for every installed project and client.
 
 ## Client installation
 

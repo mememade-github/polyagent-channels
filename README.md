@@ -20,11 +20,13 @@ docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml
 curl --fail http://127.0.0.1:18765/health
 ```
 
+Clients use the Docker host's LAN IPv4; see [Network exposure](REFERENCE.md#network-exposure) to find, check and keep that address.
+
 As in the upstream [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer), every Compose command runs from the repository root and selects `.devcontainer/.env` with `--env-file`. In that file `COMPOSE_PROJECT_NAME` is the project and volume prefix and `CONTAINER_NAME` the service container name. The first build takes several minutes and produces an image of about 4 GB. The service listens on `http://127.0.0.1:18765` on the Docker host. The first start generates a shared key in the ignored `.env/channel.key` and never prints it. See [Configuration](REFERENCE.md#configuration-devcontainerenv) for settings and [Shared key](REFERENCE.md#shared-key) for distributing it. To upgrade a running installation, see [Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) and the release notes in [UPGRADING.md](UPGRADING.md).
 
 ### Connect an agent
 
-In a Claude Code or Codex session in the project that should join, ask the agent to read `/help` at the service URL and connect:
+In a Claude Code or Codex session in the project that should join, ask the agent to read `/help` at the service URL and connect. Replace `<service-host>` with the Docker host's LAN IPv4:
 
 ```bash
 curl --fail http://<service-host>:18765/help
@@ -91,7 +93,7 @@ Storage tests need a dedicated Redis database; see [Verification](REFERENCE.md#v
 | Symptom | Fix |
 |---------|-----|
 | Build fails | `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml build --no-cache`; the build needs internet access |
-| Other computers cannot connect | Check `CHANNEL_BIND` and `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps`, then the host firewall. See [Network exposure](REFERENCE.md#network-exposure) |
+| Another computer or container cannot connect | Follow the address and firewall checks in [Network exposure](REFERENCE.md#network-exposure) |
 | Port stays unavailable after a change | Wait briefly and retry, or choose another `CHANNEL_PORT` |
 | Files invisible or container unhealthy | Set `HOST_WORKSPACE_PATH` to a path the Docker daemon can see. See [Configuration](REFERENCE.md#configuration-devcontainerenv) |
 | Clients get 503 `storage state: ...`, or the service stops at startup | See [Storage state recovery](REFERENCE.md#storage-state-recovery) |
