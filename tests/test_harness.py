@@ -140,6 +140,14 @@ def test_uninstall_removes_exactly_what_install_added_to_an_empty_project(artifa
             output['kept'], len(output['bindings_removed'])) == (0, [], [], False, [], 1)
 
 
+def test_url_change_explains_how_to_replace_a_shared_address(artifact, tmp_path):
+    invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+    changed = invoke(artifact, 'install', *args(tmp_path, 'codex'), '--url', 'http://new.invalid:18765', cwd=tmp_path)
+    assert (changed.returncode, changed.stderr.strip()) == (
+        1, 'channel setup failed: Shared URL change: uninstall every project and client using this root, '
+           'then install with the new --url')
+
+
 def reinstall_after_lost_root(artifact, tmp_path, synthetic_claude):
     invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
     shutil.rmtree(tmp_path / 'root')

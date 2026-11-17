@@ -160,6 +160,19 @@ If the client home is lost, as when its container is recreated, repeat the
 installation and save the shared key again. Project settings can outlive the
 home; reinstalling at the same root restores their callbacks and registration.
 
+### Changing the service address
+
+The URL is shared by every project and client using an installation root.
+Uninstall every one of them with `harness.pyz uninstall --project PATH
+--client CLIENT` (and `--target ROOT` for a custom root). Keep the saved key by
+omitting `--purge-key`. Removing only one of several installations leaves the
+shared URL in place and a new URL is refused.
+
+After the last uninstall, download the installer from the new service's
+`/help` and install each project and client with the new `--url`. Restart their
+sessions: a receiver keeps the address it read when it started. If the new
+service also uses a different key, save it with `channels key --replace-key`.
+
 ### Shared key
 
 The container generates one key in ignored `.env/channel.key` at first start

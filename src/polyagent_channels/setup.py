@@ -602,7 +602,7 @@ def install(options, root, project):
     key = canonical_path(root / '.env/channel.key')
     url = service_url(options.url)
     if config.exists() and read_config(config) != url:
-        raise SetupError('Shared URL change requires manual configuration')
+        raise SetupError('Shared URL change: uninstall every project and client using this root, then install with the new --url')
     binding = native_binding(project, options.client)
     command = binding_command(root, options.client)
     previous, binding_bytes, created = [], b'', []
