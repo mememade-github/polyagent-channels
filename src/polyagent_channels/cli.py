@@ -789,7 +789,7 @@ def client_status(options, key):
     session_status = 'selected' if options.session_id else 'session_missing'
     if options.session_id is None and options.client is None and all(os.environ.get(name) for name in ('CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID')):
         session_status = 'session_ambiguous'
-    result = {'status': 'ready', 'session_id': options.session_id,
+    result = {'status': 'ready', 'url': options.url, 'session_id': options.session_id,
               'service': 'ready',
               'session': session_status,
               'key_path': options.key_file, 'exchange': 'absent', 'last_callback': None}
@@ -955,7 +955,7 @@ def main():
         print('channel client failed: ' + ('unauthorized401' if error.response.status_code == 401 else 'HTTP ' + str(error.response.status_code)), file=sys.stderr)
         sys.exit(1)
     except httpx.TransportError:
-        print('channel client failed: service_unreachable', file=sys.stderr)
+        print('channel client failed: service_unreachable url=' + options.url, file=sys.stderr)
         sys.exit(1)
     except ValueError as error:
         safe = str(error)

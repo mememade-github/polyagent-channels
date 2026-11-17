@@ -224,6 +224,20 @@ def test_main_redacts_errors(monkeypatch, capsys, failure, expected):
     assert expected in output and 'secret must never escape' not in output
 
 
+def test_unreachable_error_reports_the_configured_url(tmp_path, monkeypatch, capsys):
+    config = tmp_path / 'config.json'
+    config.write_text('{"url":"http://synthetic-service:18765"}')
+    monkeypatch.setattr('sys.argv', ['channels', '--config', str(config), 'status'])
+    def fail(selected):
+        raise httpx.ConnectError('secret must never escape')
+    monkeypatch.setattr(cli, 'run', fail)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    captured = capsys.readouterr()
+    assert (stopped.value.code, captured.out, captured.err) == (
+        1, '', 'channel client failed: service_unreachable url=http://synthetic-service:18765\n')
+
+
 def test_main_unauthorized_is_explicit_and_redacted(monkeypatch, capsys):
     request = httpx.Request('GET', 'http://synthetic/status', headers={'Authorization': 'Bearer synthetic-secret'})
     response = httpx.Response(401, request=request)
@@ -961,6 +975,10 @@ def test_stale_observation_is_distinct_from_listening(connection_client):
     listening = session.invoke('status')
     assert (stale['reception'] == 'callback_stale' and stale['callback_age_seconds'] >= 120
             and listening['reception'] == 'waiting' and listening['last_callback']['state'] == 'waiting')
+
+
+def test_status_reports_the_configured_url(connection_client):
+    assert connection_client.invoke('status')['url'] == 'http://synthetic-service'
 
 
 def test_status_and_publish_do_not_announce_presence(connection_client):

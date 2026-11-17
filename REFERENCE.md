@@ -403,7 +403,10 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 `publish` and `receive` never join a topic. The client adapters run `watch`, `hook` and `mcp`; they are not
 for direct use.
 
-`status` reports service access separately from reception:
+`status` reports service access separately from reception. Its `url` field shows
+the configured service address. If the service cannot be reached, the command
+prints `service_unreachable url=<address>` to stderr instead of returning status
+JSON, so the address is visible even when the service is down.
 
 | `reception` | Meaning | Action |
 |-------------|---------|--------|
