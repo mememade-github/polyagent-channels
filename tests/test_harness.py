@@ -140,6 +140,41 @@ def test_uninstall_removes_exactly_what_install_added_to_an_empty_project(artifa
             output['kept'], len(output['bindings_removed'])) == (0, [], [], False, [], 1)
 
 
+@pytest.mark.parametrize('client', ['claude', 'codex'])
+@pytest.mark.parametrize('name', ['검사 agent', 'é' * 128])
+def test_install_records_a_display_name_for_the_project_and_client(artifact, tmp_path, client, name):
+    installed = invoke(artifact, 'install', *args(tmp_path, client), '--name', name, cwd=tmp_path)
+    record = json.loads((tmp_path / 'root/install-manifest.json').read_text())['hooks'][0]
+    assert (installed.returncode, record['project'], record['client'], record['name']) == (0, str(tmp_path), client, name)
+
+
+@pytest.mark.parametrize('name', ['', ' \t', 'é' * 129])
+def test_install_refuses_a_blank_or_oversized_display_name(artifact, tmp_path, name):
+    installed = invoke(artifact, 'install', *args(tmp_path, 'codex'), '--name', name, cwd=tmp_path)
+    assert (installed.returncode, 'name must be nonblank and <=256 UTF-8 bytes' in installed.stderr,
+            (tmp_path / 'root').exists()) == (2, True, False)
+
+
+@pytest.mark.parametrize('client', ['claude', 'codex'])
+def test_reinstall_without_name_preserves_the_name_and_writes_nothing(artifact, tmp_path, client):
+    installed = invoke(artifact, 'install', *args(tmp_path, client), '--name', 'saved name', cwd=tmp_path)
+    paths = [path for path in tmp_path.rglob('*') if path.is_file()]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+    repeated = invoke(artifact, 'install', *args(tmp_path, client), cwd=tmp_path)
+    after = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+    assert (installed.returncode, repeated.returncode, json.loads(repeated.stdout)['status'], after) == (
+        0, 0, 'already_installed', before)
+
+
+def test_supplied_name_updates_the_record_without_changing_the_binding(artifact, tmp_path):
+    invoke(artifact, 'install', *args(tmp_path, 'codex'), '--name', 'first name', cwd=tmp_path)
+    binding = tmp_path / '.codex/config.toml'
+    before = binding.read_bytes()
+    updated = invoke(artifact, 'install', *args(tmp_path, 'codex'), '--name', 'second name', cwd=tmp_path)
+    record = json.loads((tmp_path / 'root/install-manifest.json').read_text())['hooks'][0]
+    assert (updated.returncode, record['name'], binding.read_bytes()) == (0, 'second name', before)
+
+
 def test_url_change_explains_how_to_replace_a_shared_address(artifact, tmp_path):
     invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
     changed = invoke(artifact, 'install', *args(tmp_path, 'codex'), '--url', 'http://new.invalid:18765', cwd=tmp_path)

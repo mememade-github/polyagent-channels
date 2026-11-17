@@ -268,8 +268,8 @@ def test_parser_accepts_bounded_read():
 def test_publish_reads_unicode_file(tmp_path):
     message_file = tmp_path / 'message.txt'
     message_file.write_text('hello🙂', encoding='utf-8')
-    options = SimpleNamespace(text=None, file=str(message_file), conversation_id='main', reply_to=None, session_id='test-session', sender=None)
-    assert cli.publish_payload(options)['text'] == 'hello🙂'
+    selected = options('--session-id', 'test-session', 'publish', '--file', str(message_file))
+    assert cli.publish_payload(selected)['text'] == 'hello🙂'
 
 
 def test_client_root_follows_channel_root_set_after_import(monkeypatch, tmp_path):
@@ -304,8 +304,8 @@ def test_publish_posts_the_message(monkeypatch):
 
     original_client = httpx.Client
     monkeypatch.setattr(cli.httpx, 'Client', lambda **settings: original_client(transport=httpx.MockTransport(respond), **settings))
-    options = SimpleNamespace(command='publish', cursor='2-0', timeout=5, text='hello', file=None, conversation_id='main', reply_to=None, session_id='test-session', sender=None)
-    cli.post_message(options, 'http://localhost/channels/general', {})
+    selected = options('--session-id', 'test-session', 'publish', '--text', 'hello')
+    cli.post_message(selected, 'http://localhost/channels/general', {})
     assert captured[0].method == 'POST'
 
 
@@ -450,6 +450,56 @@ def connection_client(tmp_path, monkeypatch, capsys):
     return SimpleNamespace(invoke=invoke, requests=requests, messages=messages, presence=presence,
                            directory=tmp_path / 'state', key=key, on_snapshot=on_snapshot, on_read=on_read,
                            binding=binding, root=tmp_path)
+
+
+@pytest.fixture
+def named_connection_client(connection_client):
+    path = connection_client.root / 'install-manifest.json'
+    manifest = json.loads(path.read_text())
+    manifest['hooks'][0]['name'] = '검사 agent'
+    path.write_text(json.dumps(manifest))
+    return connection_client
+
+
+@pytest.mark.parametrize('state', ['connected', 'waiting', 'active'])
+def test_announcements_use_the_installed_name(named_connection_client, state):
+    session = named_connection_client
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex',
+                       '--session-id', 'native-self', 'connect')
+    cli.announce_presence(selected, 'synthetic-connection-key', state, 600)
+    assert session.presence[-1] == {'session_id': 'native-self', 'client': 'codex', 'state': state,
+                                    'ttl_seconds': 600, 'name': '검사 agent'}
+
+
+@pytest.mark.parametrize('arguments, sender', [((), '검사 agent'), (('--sender', 'explicit sender'), 'explicit sender')])
+def test_publish_defaults_to_installed_name_with_an_explicit_override(named_connection_client, arguments, sender):
+    session = named_connection_client
+    session.invoke('publish', '--text', 'hello', *arguments)
+    assert (session.messages[-1]['sender'], session.messages[-1]['session_id']) == (sender, 'native-self')
+
+
+def test_connect_name_overrides_the_installed_name(named_connection_client):
+    session = named_connection_client
+    session.invoke('connect', '--name', 'explicit name')
+    assert session.presence[-1]['name'] == 'explicit name'
+
+
+@pytest.mark.parametrize('client, location', [('claude', 'installed'), ('codex', 'elsewhere')])
+def test_installed_name_is_scoped_to_its_project_and_client(named_connection_client, client, location):
+    session = named_connection_client
+    projects = {'installed': session.root, 'elsewhere': session.root.parent / 'uninstalled'}
+    selected = options('--config', str(session.root / 'config.json'), '--client', client,
+                       '--project', str(projects[location]), '--session-id', 'native-self', 'connect')
+    assert 'name' not in cli.presence_payload(selected)
+
+
+def test_installed_name_applies_inside_a_project_subdirectory(named_connection_client):
+    session = named_connection_client
+    subdirectory = session.root / 'subdirectory'
+    subdirectory.mkdir()
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex',
+                       '--project', str(subdirectory), '--session-id', 'native-self', 'connect')
+    assert cli.presence_payload(selected)['name'] == '검사 agent'
 
 
 @pytest.mark.parametrize('missing', ['client', 'project', 'binding_file'])

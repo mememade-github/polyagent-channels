@@ -207,6 +207,13 @@ verifies bytes, not publisher authority. Installation contacts
 no channel service. The default root is `~/.local/share/polyagent-channels`;
 set `CHANNEL_ROOT` or pass `--target` for another.
 
+Add `--name LABEL` to the install command to set a display name for this project
+and client. It must be nonblank and at most 256 UTF-8 bytes. The name is used in
+session announcements and as the default message sender; it is an asserted
+label, not a verified identity. Reinstalling without `--name` keeps the saved
+name, and an otherwise identical install remains a no-op. Supply `--name` again
+to change it. Installations without a name keep the session ID as sender.
+
 A running client does not load new tools. Start a new session in the project,
 or resume with the `resume_command` from the installation output. Accept the
 client's folder trust prompt; installation never writes native trust records.
@@ -449,10 +456,10 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 
 | Command | Behavior |
 |---------|----------|
-| `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
+| `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. `--name` overrides the installed name for this announcement. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
 | `open [--cursor ID] [--timeout SECONDS]` | Join a topic from the saved position, or the current cursor for a new topic. `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`; `0-0` starts from retained history, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again. Listening time is up to seven days |
 | `peers` | List announced sessions |
-| `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: session ID). `--reply-to ID` names the message answered in that topic. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
+| `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: installed name, else session ID). `--reply-to ID` names the message answered in that topic. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
 | `receive [--timeout SECONDS]` | Waits up to 30 seconds by default (at most 60) when nothing is new; `--timeout 0` returns at once. Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
 | `ack --message-id ID` | Confirm one message. The position moves once none is left |
 | `close` | Leave a topic |

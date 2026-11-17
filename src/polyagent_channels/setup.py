@@ -382,6 +382,12 @@ def lifecycle_lock(root, exclusive=False):
         raise SetupError('Installation in use; finish running channel commands before changing the installation') from None
 
 
+def installation_name(value):
+    if not value.strip() or len(value.encode('utf-8')) > 256:
+        raise argparse.ArgumentTypeError('name must be nonblank and <=256 UTF-8 bytes')
+    return value
+
+
 def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('plan', 'install', 'uninstall'))
@@ -390,6 +396,7 @@ def main(arguments=None):
     parser.add_argument('--client', choices=('claude', 'codex'))
     parser.add_argument('--project', type=Path, default=Path.cwd())
     parser.add_argument('--key-file', type=Path)
+    parser.add_argument('--name', type=installation_name, help='Display name for this project and client')
     parser.add_argument('--purge-key', action='store_true')
     parser.add_argument('--replace', action='store_true')
     options = parser.parse_args(arguments)
@@ -581,7 +588,10 @@ def installation_matches(options, root, project):
             return False
         if options.client == 'claude' and claude_tool_registration(project, wrapper) != 'owned':
             return False
-        if manifest_data(root)['files'] != {name: digest(body) for name, (body, _) in files.items()}:
+        manifest = manifest_data(root)
+        if manifest['files'] != {name: digest(body) for name, (body, _) in files.items()}:
+            return False
+        if options.name is not None and recorded_bindings(manifest, project, options.client)[0].get('name') != options.name:
             return False
         key = canonical_path(root / '.env/channel.key')
         if stat.S_IMODE(key.parent.stat().st_mode) != 0o700:
@@ -645,6 +655,11 @@ def install(options, root, project):
     earlier = recorded_bindings(manifest, project, options.client)
     previously_created = earlier[0].get('created', []) if earlier else []
     record = binding_record(root, project, options.client)
+    name = options.name
+    if name is None and earlier:
+        name = earlier[0].get('name')
+    if name is not None:
+        record['name'] = name
     # Ownership is recorded before the client changes, so uninstall can undo a run that fails part way. What this run
     # creates joins the record only once it exists, so a failed run never claims a settings file it did not write.
     record_ownership(root, manifest, {**record, 'created': previously_created})

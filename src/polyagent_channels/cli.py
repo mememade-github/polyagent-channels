@@ -154,7 +154,9 @@ def publish_payload(options):
         text = sys.stdin.read()
     if options.file and options.file != '-':
         text = Path(options.file).read_text(encoding='utf-8')
-    sender = options.sender if options.sender is not None else options.session_id
+    sender = options.sender
+    if sender is None:
+        sender = session_name(options) or options.session_id
     if not sender.strip() or len(sender.encode('utf-8')) > 256:
         raise ValueError('sender_invalid')
     return {'session_id': options.session_id, 'sender': sender, 'text': text, 'reply_to': options.reply_to, 'conversation_id': options.conversation_id}
@@ -366,11 +368,28 @@ def selected_adapter(options):
     return adapter
 
 
+def session_name(options):
+    """Use the explicit name or the name of this client's deepest installed project."""
+    from polyagent_channels.setup import canonical_path, installed_project, manifest_data, recorded_bindings
+    name = getattr(options, 'name', None)
+    if name is not None:
+        return name
+    adapter = selected_adapter(options)
+    if adapter == 'cli':
+        return None
+    root = canonical_path(installation_root(options))
+    project = installed_project(root, canonical_path(options.project), adapter)
+    if project is None:
+        return None
+    return recorded_bindings(manifest_data(root), project, adapter)[0].get('name')
+
+
 def presence_payload(options, state='connected', ttl_seconds=600):
     adapter = selected_adapter(options)
     payload = {'session_id': options.session_id, 'client': adapter, 'state': state, 'ttl_seconds': ttl_seconds}
-    if getattr(options, 'name', None) is not None:
-        payload['name'] = options.name
+    name = session_name(options)
+    if name is not None:
+        payload['name'] = name
     return payload
 
 

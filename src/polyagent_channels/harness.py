@@ -45,6 +45,9 @@ mcp__channels__publish), installation is done: use them and stop reading here.
 
 1. Install for THIS project and THIS client, once for each client. A wrapper that
 another client installed does not connect this one. Identical install is a no-op.
+Optionally add --name LABEL to the install command to set this project/client's
+display name and default message sender. It must be nonblank and at most 256
+UTF-8 bytes. Omitting --name keeps any saved name.
 SERVICE=""" + shlex.quote(origin) + """
 case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
   codex:) CLIENT=codex ;;
