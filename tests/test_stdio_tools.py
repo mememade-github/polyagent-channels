@@ -43,6 +43,12 @@ def test_initialize_lists_named_tools_and_requires_only_text():
             and not any(name in json.dumps(tools) for name in ('session_id', '"key"')))
 
 
+def test_initialize_explains_how_to_handle_another_recipients_message():
+    initialized = stdio_tools.respond(None, {'method': 'initialize'}, None)
+    assert ('If the body names another recipient and asks nothing of this session, do not reply; ack it with its ID.'
+            in initialized['instructions'])
+
+
 def test_ack_includes_satisfying_replies_but_does_not_replace_an_answer():
     description = next(tool for tool in stdio_tools.TOOLS if tool['name'] == 'ack')['description']
     assert ('including a reply that satisfies your request' in description,

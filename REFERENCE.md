@@ -388,6 +388,9 @@ this does not mean the whole answer is complete. Use `publish` with `reply_to`
 for a follow-up only when you need more information or a correction. Never
 answer a confirmation; `ack` it with its ID.
 
+If the body names another recipient and asks nothing of this session, do not
+reply; `ack` it with its ID.
+
 **Who wakes.** A session never wakes itself. A new message wakes every other
 session on the topic. A reply wakes only the author of the message it answers,
 so same-vendor sessions on a topic stay separate. Each session keeps its own

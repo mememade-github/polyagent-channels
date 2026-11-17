@@ -891,6 +891,11 @@ def test_receive_marks_only_replies_to_this_session_for_it(connection_client):
             and {row['text'] for row in rows if 'expected' in row} == {'answer to me'})
 
 
+def test_wake_notice_explains_how_to_handle_another_recipients_message():
+    notice = cli.notice_text([{'channel': 'general', 'conversation_id': 'main'}])
+    assert 'If the body names another recipient and asks nothing of this session, do not reply; ack it with its ID.' in notice
+
+
 def test_reply_to_my_request_hint_points_to_ack(connection_client):
     session = connection_client
     session.invoke('connect')
