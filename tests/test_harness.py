@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import runpy
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -137,6 +138,41 @@ def test_uninstall_removes_exactly_what_install_added_to_an_empty_project(artifa
     output = json.loads(removed.stdout)
     assert (removed.returncode, list(project.iterdir()), registered(synthetic_claude), (tmp_path / 'root').exists(),
             output['kept'], len(output['bindings_removed'])) == (0, [], [], False, [], 1)
+
+
+def reinstall_after_lost_root(artifact, tmp_path, synthetic_claude):
+    invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
+    shutil.rmtree(tmp_path / 'root')
+    shutil.rmtree(synthetic_claude)
+    return invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
+
+
+def test_install_adopts_identical_callbacks_after_lost_root(artifact, tmp_path, synthetic_claude):
+    installed = reinstall_after_lost_root(artifact, tmp_path, synthetic_claude)
+    settings = tmp_path / '.claude/settings.local.json'
+    expected = {'type': 'command', 'command': shlex.join([str(tmp_path / 'root/bin/channels'), '--client', 'claude', 'hook']),
+                'asyncRewake': True, 'timeout': exchange.RECEPTION_TIMEOUT}
+    assert (installed.returncode, commands(settings, 'SessionStart'), commands(settings),
+            len(registered(synthetic_claude))) == (0, [expected], [expected], 1)
+
+
+def test_uninstall_after_adoption_keeps_settings_with_lost_ownership(artifact, tmp_path, synthetic_claude):
+    reinstall_after_lost_root(artifact, tmp_path, synthetic_claude)
+    removed = invoke(artifact, 'uninstall', '--target', tmp_path / 'root', '--project', tmp_path, cwd=tmp_path)
+    settings = json.loads((tmp_path / '.claude/settings.local.json').read_text())
+    assert (removed.returncode, settings, registered(synthetic_claude), (tmp_path / 'root').exists()) == (
+        0, {'permissions': {'allow': [CLAUDE_TOOL_RULE]}, 'hooks': {'SessionStart': [], 'Stop': []}}, [], False)
+
+
+def test_install_refuses_missing_wrapper_from_another_root(artifact, tmp_path):
+    settings = tmp_path / '.claude/settings.local.json'
+    settings.parent.mkdir()
+    command = shlex.join([str(tmp_path / 'other-root/bin/channels'), '--client', 'claude', 'hook'])
+    original = json.dumps({'hooks': {'SessionStart': [{'hooks': [{'type': 'command', 'command': command}]}]}})
+    settings.write_text(original)
+    installed = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
+    assert (installed.returncode, installed.stderr.strip(), settings.read_text()) == (
+        1, 'channel setup failed: Ambiguous receiver at SessionStart[0].hooks[0]; inspect manually', original)
 
 
 def failed_claude_install(artifact, tmp_path):

@@ -156,6 +156,10 @@ A running client does not load new tools. Start a new session in the project,
 or resume with the `resume_command` from the installation output. Accept the
 client's folder trust prompt; installation never writes native trust records.
 
+If the client home is lost, as when its container is recreated, repeat the
+installation and save the shared key again. Project settings can outlive the
+home; reinstalling at the same root restores their callbacks and registration.
+
 ### Shared key
 
 The container generates one key in ignored `.env/channel.key` at first start
@@ -242,6 +246,11 @@ program files, unknown files and native folder trust stay.
 - **Failed installation.** Installation records what it owns before changing
   client settings, so an uninstall after a failed install removes what it
   left, including the `channels` registration.
+- **Lost client home.** Uninstall alone cannot remove callbacks whose root and
+  ownership record were lost. Reinstall at the same root, then uninstall.
+  This removes the callbacks and registration, but leaves tool rules, empty
+  settings keys and files whose original ownership is unknown. Remove those
+  remnants manually after inspecting them.
 - **Shared root.** Shared files stay while another project or client uses the
   root. After the last project the root is removed, except a saved key.
 - **Saved key.** It stays until `--purge-key`, and the output lists the command

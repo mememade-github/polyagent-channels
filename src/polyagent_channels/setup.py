@@ -134,17 +134,19 @@ LEGACY_CALLBACK_KIND = '--profile'
 REPLACEABLE_WITH_FLAG = (LEGACY_CALLBACK_KIND,)
 
 
-def hook_owner(hook, position):
+def hook_owner(hook, position, command=None):
     """The managed binding a hook's command names, or None for an unrelated hook."""
+    if command and command == hook.get('command') and not Path(shlex.split(command)[0]).exists():
+        return callback_binding(command)
     try:
         return managed_binding(hook.get('command', ''))
     except ValueError:
         raise SetupError(f'Ambiguous receiver at {position}; inspect manually') from None
 
 
-def owned_hooks(data, event):
+def owned_hooks(data, event, command=None):
     """Each entry of EVENT with its hooks paired with their owners; every hook is checked before anything changes."""
-    return [(entry, [(hook, hook_owner(hook, f'{event}[{entry_index}].hooks[{hook_index}]'))
+    return [(entry, [(hook, hook_owner(hook, f'{event}[{entry_index}].hooks[{hook_index}]', command))
                      for hook_index, hook in enumerate(entry.get('hooks', []))])
             for entry_index, entry in enumerate(data.get('hooks', {}).get(event) or [])]
 
@@ -193,7 +195,7 @@ def add_hook_event(data, event, command, replaceable):
     REPLACEABLE names the legacy callback kinds that may be replaced; any other managed callback of this client
     stops installation."""
     client = shlex.split(command)[2]
-    classified = owned_hooks(data, event)
+    classified = owned_hooks(data, event, command)
     ours = [(hook, owner) for _, hooks in classified for hook, owner in hooks if owned_by_client(owner, client)]
     problems = [problem for hook, owner in ours if (problem := replacement_problem(hook, owner, command, replaceable))]
     if problems:
