@@ -4,6 +4,25 @@ The procedure, backup and rollback are in
 [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback). This
 file lists only what a release needs beyond that procedure.
 
+## 0.1.5
+
+### Upgrading from 0.1.4 or earlier — join topics again and name each client
+
+A project now remembers the topics it joined, and its sessions join and leave
+them together. Topics joined with an earlier client are not remembered: after
+[updating a client](REFERENCE.md#updating-a-client), its project belongs to
+`general/main` only, and a resumed session stops listening on its other topics
+unless they hold unconfirmed work. Run `connect` once for each other topic.
+
+`/help` step 1 needs a display name for each project and client; set `NAME`
+before running it.
+
+`channels connect` prints `topics`, a list of the topics that call joined,
+where earlier releases printed `topic`.
+
+A client from an earlier release keeps working with this service until it is
+updated. It ignores `to` and wakes for every new message.
+
 ## 0.1.2
 
 ### Upgrading from 0.1.1 or earlier — container rebuild required
