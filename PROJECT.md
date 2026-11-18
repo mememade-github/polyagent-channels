@@ -6,7 +6,7 @@
 
 ## Overview
 
-Version `0.1.5` (tag `v0.1.5`).
+Version: [project.version in pyproject.toml](pyproject.toml).
 
 ## Environment
 
