@@ -2,6 +2,17 @@
 
 Governance for any coding agent working in this repository. [CLAUDE.md](CLAUDE.md) imports this file, so Claude Code, Codex and other agents read the same guide.
 
+## Core principles
+
+[핵심 지침]
+- 사용되는 지식 :: 문서·설정·메모에는 읽는 쪽이 실제로 쓰는 것만 둔다. 이력 등은 사용되는 지식이 아니다.
+- 동작기반 실증 :: 실제 동작을 돌려 관찰한 것만 사실로 주장한다.
+- 형식증명 금지 :: 항목 세기, 체크리스트, 게이트, 반복 감사로 준수를 증명하지 않는다.
+- 지식 SoT-DAG :: 사실은 한 곳에만 적고 다른 곳은 그곳을 가리킨다. 서로를 근거로 삼는 순환을 만들지 않는다.
+- 오컴의 면도날 :: 필요를 채우는 가장 적은 장치만 쓴다.
+- 동시성 처리 :: 여러 세션·프로세스가 동시에 바꾸는 상태가 올바르게 유지됨을 함께 돌려서 보인다.
+- 동시처리량 확보 :: 변경 후에도 많은 세션을 동시에 처리할 수 있어야 한다.
+
 ## Context
 
 - Product: a shared message service for users and agents ([README.md](README.md)); context in [PROJECT.md](PROJECT.md); commands, configuration, protocol and recovery in [REFERENCE.md](REFERENCE.md).
