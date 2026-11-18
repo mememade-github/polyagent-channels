@@ -369,6 +369,13 @@ In a new session, ask in plain words, for example `send hello world to the
 channel`. The session finds these tools by name and supplies no key or
 session ID.
 
+A topic (channel plus conversation) is a room shared by the projects that joined
+it. Each member is an installed project and client with a display name and can
+belong to several rooms. Use one channel per subject and keep the conversation
+at `main` unless the operator names one. `connect` remembers a room for later
+sessions; `close` leaves it. Publish to every member, or set `to` to a member's
+name from `peers` to wake all its sessions, or to one session ID.
+
 | Tool | Purpose |
 |------|---------|
 | `publish` | Send text to a channel and conversation, optionally `reply_to` a message or `to` a member name or session ID. Defaults are `general` and `main`. Returns at once |

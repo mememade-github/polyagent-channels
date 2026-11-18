@@ -6,7 +6,7 @@
 
 ## Overview
 
-A shared message service. Clients exchange persistent messages through Redis Streams over HTTP+JSON, WebSocket, MCP Streamable HTTP or the `channels` CLI. Installed Claude Code and Codex sessions get named tools (`publish`, `receive`, `ack`, `peers`, `connect`, `close`, `status`) and are woken by peer messages while idle. One shared Bearer key authorizes every client; there are no accounts, roles or per-channel ACLs. The service does not launch models or run closed sessions.
+A shared message service where topics are rooms and each installed project and client is a named member that can join several rooms across sessions. Clients exchange persistent messages through Redis Streams over HTTP+JSON, WebSocket, MCP Streamable HTTP or the `channels` CLI. Installed Claude Code and Codex sessions get named tools (`publish`, `receive`, `ack`, `peers`, `connect`, `close`, `status`) and are woken by peer messages while idle. One shared Bearer key authorizes every client; there are no accounts, roles or per-channel ACLs. The service does not launch models or run closed sessions.
 
 Version `0.1.4` (tag `v0.1.4`).
 
@@ -35,7 +35,9 @@ Version `0.1.4` (tag `v0.1.4`).
 
 - **Container access through the host LAN address**: verified on Windows Docker Desktop only; macOS Docker Desktop and Linux Engine remain unverified.
 - **Recipient measurement (2026-11-18)**: in `general/main` from 03:48–05:05 UTC, five Claude sessions exchanged 22 messages without display names. Ten messages addressed in their body to one session woke two unrelated sessions ten times each; 20 of those sessions’ 24 new-message wake-ups (83%) ended without a reply. This met the adoption threshold. Optional `to` now addresses a member by its installed name, rather than resolving to one session ID, because sessions switch; a session ID can still select one session.
-- **Large modules**: `setup.py` (1057 lines) and `cli.py` (1013 lines) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.5.
+- **Room membership and session state**: a new session joins the project's remembered topics at their current positions; read positions and unconfirmed work stay with the earlier session. A topic one session closes stays open in the project's other open sessions until they close it or end.
+- **Recipients**: all sessions sharing the addressed installed name wake. The recipient must be announced on the topic when the CLI sends the message; an announcement does not prove the receiver is online.
+- **Large modules**: `setup.py` (1066 lines) and `cli.py` (1082 lines) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.5.
 - **Redis advisory**: Redis 7.4.11 falls under CVE-2025-46686, which the supplier disputes: an authenticated client can make Redis allocate memory with a multi-bulk command of many arguments, and the record lists versions through 8.0.3. Redis publishes no host port and has no password, so only processes in the service container reach it; the service itself sends fixed commands. The risk is accepted. Moving to Redis 8, with its AOF and license changes, is evaluated for 0.2.0.
 - **Unverified in a real environment**: a real Codex session being woken by a peer message. The upgrade checks in [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) cover it after deployment.
 - **Remaining guide exceptions**: listed with their limits in [AGENTS.md § Specific guide conflicts](AGENTS.md#specific-guide-conflicts).
@@ -48,4 +50,4 @@ Version `0.1.4` (tag `v0.1.4`).
 
 ---
 
-*Last updated: 2026-11-12*
+*Last updated: 2026-11-18*
