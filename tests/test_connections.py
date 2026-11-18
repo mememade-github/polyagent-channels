@@ -107,15 +107,28 @@ def test_list_sessions_excludes_expired_closed_and_expired_during_scan(session_s
             yield 'channels:session:' + key
 
     monkeypatch.setattr(storage, 'scan_iter', keys)
-    transaction.execute.side_effect = [
-        [stored_session('live'), 90000, (1700, 123000)],
-        [stored_session('expired'), 0, (1700, 123000)],
-        [stored_session('closed', state='closed'), 90000, (1700, 123000)],
-        [{}, -2, (1700, 123000)], [stored_session('live'), 90000, (1700, 123000)]]
-    storage.time.return_value = (1700, 123000)
+    transaction.execute.return_value = [
+        stored_session('live'), 90000,
+        stored_session('expired'), 0,
+        stored_session('closed', state='closed'), 90000,
+        {}, -2, stored_session('live'), 90000, (1700, 123000)]
     result = asyncio.run(persistence.list_sessions())
     assert result == {'sessions': [{'session_id': 'live', 'client': None, 'name': None, 'state': 'waiting',
                                    'topics': None, 'ttl_seconds': 90, 'last_seen_ms': 1700123, 'expires_at_ms': 1790123}]}
+
+
+def test_list_sessions_sorts_by_session_id(session_storage, monkeypatch):
+    storage, transaction = session_storage
+    async def keys(**options):
+        for key in ('zulu', 'alpha', 'mike'):
+            yield 'channels:session:' + key
+
+    monkeypatch.setattr(storage, 'scan_iter', keys)
+    transaction.execute.return_value = [
+        stored_session('zulu'), 90000, stored_session('alpha'), 90000,
+        stored_session('mike'), 90000, (1700, 123000)]
+    result = asyncio.run(persistence.list_sessions())
+    assert [record['session_id'] for record in result['sessions']] == ['alpha', 'mike', 'zulu']
 
 
 @pytest.mark.parametrize('method,path', [('GET', '/channels/general/cursor'), ('GET', '/sessions'), ('POST', '/sessions')])

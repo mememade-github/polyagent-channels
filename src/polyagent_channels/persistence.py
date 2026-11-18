@@ -195,19 +195,19 @@ def session_record(fields, remaining_ms, now):
 
 async def list_sessions() -> dict:
     """List unexpired lease observations; absent sessions may simply be disconnected."""
-    records = {}
-    async for key in redis.scan_iter(match='channels:session:*', count=100):
-        async with redis.pipeline(transaction=True) as transaction:
+    keys = [key async for key in redis.scan_iter(match='channels:session:*', count=100)]
+    async with redis.pipeline(transaction=True) as transaction:
+        for key in keys:
             transaction.hgetall(key)
             transaction.pttl(key)
-            transaction.time()
-            value, remaining_ms, now = await transaction.execute()
-        if value and remaining_ms > 0:
-            record = session_record(value, remaining_ms, now)
-            records[record['session_id']] = record
-    now = await server_time_ms()
+        transaction.time()
+        results = await transaction.execute()
+    now = results[-1]
+    records = {value['session_id']: session_record(value, remaining_ms, now)
+               for value, remaining_ms in zip(results[:-1:2], results[1:-1:2])
+               if value and remaining_ms > 0}
     return {'sessions': [records[key] for key in sorted(records)
-                         if records[key]['expires_at_ms'] > now and records[key]['state'] != 'closed']}
+                         if records[key]['state'] != 'closed']}
 
 
 async def publish(channel: str, text: str, session_id: str, reply_to: str | None = None,
