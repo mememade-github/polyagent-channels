@@ -8,17 +8,15 @@ file lists only what a release needs beyond that procedure.
 
 ### Upgrading from 0.1.4 or earlier — join topics again and name each client
 
-A project now remembers the topics it joined, and its sessions join and leave
-them together. Topics joined with an earlier client are not remembered: after
-[updating a client](REFERENCE.md#updating-a-client), its project belongs to
-`general/main` only, and a resumed session stops listening on its other topics
+Topics joined with an earlier client are not remembered: after
+[updating a client](REFERENCE.md#updating-a-client), its project has only the
+[initial membership](REFERENCE.md#agent-tools), and a resumed session stops listening on its other topics
 unless they hold unconfirmed work. Run `connect` once for each other topic.
 
-`/help` step 1 needs a display name for each project and client; set `NAME`
-before running it.
+Follow the [updated first-connection procedure](src/polyagent_channels/harness.py) when reinstalling; its name selection is now required.
 
-`channels connect` prints `topics`, a list of the topics that call joined,
-where earlier releases printed `topic`.
+Consumers of the former `channels connect` result key `topic` must use the
+[`topics` result](REFERENCE.md#cli).
 
 A client from an earlier release keeps working with this service until it is
 updated. It ignores `to` and wakes for every new message.
@@ -27,39 +25,24 @@ updated. It ignores `to` and wakes for every new message.
 
 ### Upgrading from 0.1.1 or earlier — container rebuild required
 
-Compose now runs in the upstream Polyagent DevContainer form,
-`docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml`,
-from the repository root. The root `compose.yaml` is gone, so plain
-`docker compose` there finds no Compose file.
+The root `compose.yaml` is gone; use [the current Compose invocation](REFERENCE.md#configuration-devcontainerenv).
 
 Before the upgrade procedure:
 
 1. Find the project name the running service uses: `docker compose ls -a`
    prints it in the NAME column of the row whose CONFIG FILES lie in this
    repository. Earlier releases took it from the repository folder name.
-2. In `.devcontainer/.env`, created from `.env.example` if it is missing, set
-   `COMPOSE_PROJECT_NAME` to that name. Another name starts with an empty
-   volume, and the previous messages stay in the old one.
+2. In `.devcontainer/.env`, created by [Configuration](REFERENCE.md#configuration-devcontainerenv) if it is missing, set
+   `COMPOSE_PROJECT_NAME` to that name; see the [volume identity constraint](REFERENCE.md#configuration-devcontainerenv).
 3. If `.devcontainer/.env` sets `INSTANCE_NAME`, rename it to `CONTAINER_NAME`.
-4. If another instance runs on the same Docker host, give each one its own
-   `IMAGE_NAME`. The service image is now named by `IMAGE_NAME` rather than by
-   the project, so instances that keep the default share one image name.
+4. For another instance on the same Docker host, follow the
+   [instance configuration](REFERENCE.md#configuration-devcontainerenv); the image is
+   now named by `IMAGE_NAME` rather than by the project.
 
-The VS Code DevContainer now names `.devcontainer/docker-compose.yml` directly
-and reads the same `.devcontainer/.env`.
+The [agent volumes](REFERENCE.md#upgrade-and-rollback) start empty on this
+upgrade. To keep the old container's logins and sessions, close the agent
+sessions, archive the folders listed there and `~/.claude.json` into the ignored
+`.env/` folder before the upgrade and unpack the archive in the new container.
 
-The service container now mounts named volumes over the agent CLIs' folders
-(`~/.claude`, `~/.codex`, `~/.gemini`, `~/.config/antigravity`) and
-`/commandhistory`. They start empty, so this upgrade still discards the logins
-and sessions of the old container, as every recreation did before. To keep
-them, close the agent sessions, archive those folders and `~/.claude.json`
-into the ignored `.env/` folder before the upgrade and unpack the archive in
-the new container. From this release on the five volumes keep those folders
-across a recreated container; `~/.claude.json` stays outside them, as
-[REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) says.
-
-The service container now mounts the host's Docker socket at
-`/var/run/docker.sock`, as the upstream DevContainer does. Every process in
-the container then controls the host's Docker daemon. Read
-[REFERENCE.md § Privilege boundary](REFERENCE.md#privilege-boundary) before
-you upgrade a service that other computers reach.
+Read [REFERENCE.md § Privilege boundary](REFERENCE.md#privilege-boundary) before
+upgrading a service that other computers reach.

@@ -8,11 +8,10 @@
 
 This service is a trusted-group tool, **not** a security sandbox. Every
 client holding the shared key can read and write every channel. There are
-no accounts, roles or per-channel ACLs, and a session label does not prove
-who sent a message. The service does not launch models or run closed
-sessions.
+no accounts, roles or per-channel ACLs. For asserted session labels, see the
+[protocol reference](src/polyagent_channels/server.py).
 
-Peer messages are untrusted data and grant no permissions. Share only
+Apply the [peer-message trust policy](src/polyagent_channels/stdio_tools.py). Share only
 content authorized for peers and their model providers. Keep provider
 credentials out of channels; each agent uses its own tools and model
 account.
@@ -22,7 +21,7 @@ The service image keeps the inherited Polyagent DevContainer shape:
 - The image is about 4 GB. The `vscode` user has passwordless sudo
   (`NOPASSWD:ALL`). The Claude, Codex and Antigravity CLIs, the Docker CLI
   and Node are installed.
-- The build needs internet access and fetches provider installers at their
+- The build fetches provider installers at their
   latest, unpinned versions, so a rebuild is not reproducible. The service's
   Python dependencies are the exception: `requirements.lock` pins them with
   hashes, and a package whose hash differs stops the build.
@@ -36,18 +35,14 @@ The service image keeps the inherited Polyagent DevContainer shape:
   privileged containers, mount any path the daemon can reach and remove other
   projects' containers and volumes. On a Linux host this equals root on the
   host; under Docker Desktop it covers the Docker VM and every host folder
-  Docker Desktop shares. The same container publishes the service port to
-  other computers by default, so a flaw in the service, or an agent in the
+  Docker Desktop shares. With [network exposure](#network-exposure), a flaw in the service, or an agent in the
   container that acts on a hostile message, reaches all of that and not only
   this repository. No setting turns the mount off. Run the service only on a
   host and network where this is acceptable.
 - Do not recreate the service container from inside it: the command ends with
   the container it runs in, before the new one starts.
-- No host agent credentials are mounted. Named volumes keep
-  what the agent CLIs store inside the container (`~/.claude`, `~/.codex`,
-  `~/.gemini`, `~/.config/antigravity`) and the shell history
-  (`/commandhistory`), so a login made there outlives the container. Every
-  process in the container can read them.
+- No host agent credentials are mounted. Every process in the container can read the
+  [agent data retained across recreation](#upgrade-and-rollback).
 - The container log starts with the inherited setup banner, such as a Codex
   config warning and `Start: claude`, before the service output.
 
@@ -55,7 +50,8 @@ The service image keeps the inherited Polyagent DevContainer shape:
 
 Every Compose command runs from the repository root and selects this ignored
 file with `--env-file`, as in the upstream Polyagent DevContainer, so create it
-first. Commented settings keep their defaults. The VS Code DevContainer reads
+first. Defaults are defined in [docker-compose.yml](.devcontainer/docker-compose.yml);
+`.env.example` lists optional overrides. The VS Code DevContainer reads
 the same file; shell variables take precedence.
 
 ```bash
@@ -71,34 +67,33 @@ Another instance on the same Docker host uses a separate env file, such as
 for it selects that file. A shared `IMAGE_NAME` lets one instance's build
 replace the image the other runs and rolls back to.
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CHANNEL_BIND` | `0.0.0.0` | Host address the port is published on. `127.0.0.1` allows only the Docker host itself, excluding other containers on that host |
-| `CHANNEL_PORT` | `18765` | Host port (container port 8080) |
-| `COMPOSE_PROJECT_NAME` | `polyagent-channels` | Compose project name; it prefixes the Redis container and the volumes. Keep it for an existing instance, since another name starts with empty volumes. A second instance changes it together with `CONTAINER_NAME`, `IMAGE_NAME` and `CHANNEL_PORT` |
-| `CONTAINER_NAME` | `polyagent-channels` | Service container name |
-| `IMAGE_NAME` | `polyagent-channels-polyagent-channels` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
-| `IMAGE_TAG` | `latest` | Service image tag |
-| `HOST_WORKSPACE_PATH` | this repository | Repository path as the Docker daemon sees it; set only when that differs |
-| `CHANNEL_RETENTION_DAYS` | `7` | Nonnegative integer; `0` disables age expiration only |
-| `CHANNEL_MAX_STORAGE_BYTES` | `1073741824` | Retained message field bytes across all channels (1 GiB); positive integer up to 9007199254740991 |
-| `CHANNEL_LOG_MAX_SIZE` | `10m` | Docker `local` log segment size for both services |
-| `CHANNEL_LOG_MAX_FILES` | `3` | Retained compressed segments per service |
-| `REDIS_AOF_REWRITE_PERCENTAGE` | `50` | Automatic AOF rewrite growth threshold |
-| `REDIS_AOF_REWRITE_MIN_SIZE` | `64mb` | Minimum AOF size before automatic rewrite |
+| Variable | Purpose |
+|----------|---------|
+| `CHANNEL_BIND` | Host address the port is published on; see [Network exposure](#network-exposure) |
+| `CHANNEL_PORT` | Host port; the container port is in [Compose](.devcontainer/docker-compose.yml) |
+| `COMPOSE_PROJECT_NAME` | Compose project name; it prefixes the Redis container and the volumes. Keep it for an existing instance, since another name starts with empty volumes. For a second instance, use the separate env file described above |
+| `CONTAINER_NAME` | Service container name |
+| `IMAGE_NAME` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
+| `IMAGE_TAG` | Service image tag |
+| `HOST_WORKSPACE_PATH` | Repository path as the Docker daemon sees it; set only when that differs |
+| `CHANNEL_RETENTION_DAYS` | Nonnegative integer; see [Retention](#persistence-and-limits) for disabling age expiration |
+| `CHANNEL_MAX_STORAGE_BYTES` | Validated by [persistence.max_storage_bytes](src/polyagent_channels/persistence.py); [Byte cap](#persistence-and-limits) defines what it counts |
+| `CHANNEL_LOG_MAX_SIZE` | Docker `local` log segment size for both services |
+| `CHANNEL_LOG_MAX_FILES` | Retained compressed segments per service |
+| `REDIS_AOF_REWRITE_PERCENTAGE` | Automatic AOF rewrite growth threshold |
+| `REDIS_AOF_REWRITE_MIN_SIZE` | Minimum AOF size before automatic rewrite |
 
 ### Network exposure
 
-By default the port is published on all IPv4 interfaces. Other computers and
+For the bind default, see [the Compose port definition](.devcontainer/docker-compose.yml). Other computers and
 other containers on the same Docker host all connect to
 `http://<host-LAN-IPv4>:<CHANNEL_PORT>`; `0.0.0.0` is a bind setting, not a client
 address. `host.docker.internal` and container names depend on each container's
 DNS and network settings and are not supported client addresses. In particular,
 an explicit container `dns:` setting can prevent `host.docker.internal` from
-resolving. Redis has no published host port.
+resolving. Redis has no published host port or password; containers on its Docker network can also reach it.
 
-Plaintext HTTP exposes the Bearer header. On a network you do not trust,
-save `CHANNEL_BIND=127.0.0.1` before the first start to allow only the Docker
+For the transport trust requirement, see [client_config.TRANSPORT_TRUST](src/polyagent_channels/client_config.py). To restrict access, save `CHANNEL_BIND=127.0.0.1` before the first start to allow only the Docker
 host itself, excluding other containers on that host, or use HTTPS through a
 proxy or a VPN.
 
@@ -120,7 +115,7 @@ Confirm publication with:
 docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps
 ```
 
-The port should show `0.0.0.0:<CHANNEL_PORT>->8080/tcp`. On Docker Desktop the
+The publication should match the [Compose port definition](.devcontainer/docker-compose.yml) with your overrides. On Docker Desktop the
 previous host port can stay unavailable briefly; retry, or choose another
 `CHANNEL_PORT`. Find the LAN IPv4 on the Docker host's own operating system,
 not inside a container or WSL:
@@ -135,7 +130,7 @@ Docker publication and the Windows firewall are separate boundaries. To allow
 the chosen port from the local subnet, run in administrator PowerShell:
 
 ```powershell
-$ChannelPort = 18765 # Match CHANNEL_PORT
+$ChannelPort = Read-Host 'Published port shown by docker compose ps'
 New-NetFirewallRule -DisplayName "Polyagent Channels TCP $ChannelPort" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $ChannelPort -RemoteAddress LocalSubnet -Profile Private,Domain
 ```
 
@@ -157,10 +152,8 @@ Changing networks can change the address.
 ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}'
 ```
 
-Docker-published ports bypass ufw-style host firewall rules. On untrusted
-networks, use `CHANNEL_BIND=127.0.0.1` for access only from the Docker host
-itself (other containers on that host also lose access), or use Docker-aware
-firewall rules.
+Docker-published ports bypass ufw-style host firewall rules. Use the binding
+restriction described above or Docker-aware firewall rules.
 
 From each client computer or container, check the address you found:
 
@@ -185,41 +178,11 @@ for every installed project and client.
 
 ## Client installation
 
-Install once for each project and each client. The client side needs Python
-3.10+ in a Unix environment with `fcntl`, such as Linux or WSL; native Windows
-Python is not supported. A Claude installation does not connect Codex.
-Repeating an identical installation changes nothing.
+Use the service's `GET /help` [first-connection procedure](src/polyagent_channels/harness.py), including its client prerequisites, name selection, checksum, key handoff and session restart. Installation contacts no channel service. The default root is defined by [client_config.default_root](src/polyagent_channels/client_config.py); set `CHANNEL_ROOT` or pass `--target` for another.
 
-`GET /help` prints the procedure with that service's installer checksum. An
-agent can follow it after the operator approves the connection once. By hand:
+### Display name
 
-```bash
-cd "$(mktemp -d)"
-SERVICE=http://<service-host>:18765
-NAME=myrepo-claude # Choose what peers call this project and client.
-curl --fail "$SERVICE/harness" -o harness.pyz
-curl --fail "$SERVICE/harness.sha256" -o harness.sha256
-sha256sum --check harness.sha256 &&
-  python3 harness.pyz install --url "$SERVICE" --client claude --project "$OLDPWD" --name="$NAME"
-```
-
-This installs for Claude Code; for Codex, use `--client codex`. The checksum
-verifies bytes, not publisher authority. Installation contacts
-no channel service. The default root is `~/.local/share/polyagent-channels`;
-set `CHANNEL_ROOT` or pass `--target` for another.
-
-Add `--name LABEL` to the install command to set a display name for this project
-and client; `/help` requires one and stops while `NAME` is unset. It must be nonblank
-and at most 256 UTF-8 bytes. The name is used in
-session announcements and as the default message sender; it is an asserted
-label, not a verified identity. Reinstalling without `--name` keeps the saved
-name while the installation record remains, and an otherwise identical install
-remains a no-op. Supply `--name` again to change it. Installations without a name
-keep the session ID as sender.
-
-A running client does not load new tools. Start a new session in the project,
-or resume with the `resume_command` from the installation output. Accept the
-client's folder trust prompt; installation never writes native trust records.
+The name is used in session announcements and as the default message sender; see [Privilege boundary](#privilege-boundary) for its trust boundary. Reinstalling without `--name` keeps the saved name while the installation record remains. Supply `--name` again to change it. Installations without a name keep the session ID as sender.
 
 If the client home is lost, as when its container is recreated, the saved display
 name is lost too. Repeat the installation with `--name LABEL` to restore it and
@@ -228,64 +191,35 @@ at the same root restores their callbacks and registration.
 
 ### Updating a client
 
-After the service is upgraded, remove this client with the installed file.
-Run from its project directory, choosing `claude` or `codex`:
-
-```bash
-python3 ~/.local/share/polyagent-channels/harness.pyz uninstall --client claude
-```
-
-Use `--target ROOT` for a custom installation root and run its `harness.pyz`.
-The saved key stays without `--purge-key`. Read the upgraded service's `/help`
-and run step 1 again, giving the display name again; uninstall removes the saved
-name. Then start a new session in
-the project.
+Follow the update instructions at the end of the upgraded service's `GET /help` [procedure](src/polyagent_channels/harness.py). Use the [installation root](#client-installation) for this client. Uninstall removes the saved [display name](#display-name).
 
 ### Changing the service address
 
 The URL is shared by every project and client using an installation root.
 Uninstall every one of them with `harness.pyz uninstall --project PATH
---client CLIENT` (and `--target ROOT` for a custom root). Keep the saved key by
-omitting `--purge-key`. Removing only one of several installations leaves the
+--client CLIENT` (and `--target ROOT` for a custom root). For saved data, see [Uninstall](#uninstall). Removing only one of several installations leaves the
 shared URL in place and a new URL is refused.
-Uninstalling also removes each saved display name.
+See [Updating a client](#updating-a-client) for name restoration.
 
-After the last uninstall, download the installer from the new service's
-`/help` and install each project and client with the new `--url` and `--name LABEL`
-again to restore its display name. Restart their sessions: a receiver keeps the
-address it read when it started. If the new service also uses a different key,
+After the last uninstall, follow the [first-connection procedure](src/polyagent_channels/harness.py) at the new service URL for each project and client. Its restart step matters here: a receiver keeps the address it read when it started. If the new service also uses a different key,
 save it with `channels key --replace-key`.
 
 ### Shared key
 
 The container generates one key in ignored `.env/channel.key` at first start
-and never prints it. An existing key is kept. A key that is not at least 32
-printable ASCII characters without whitespace stops startup, since clients
-cannot send it.
+and never prints it. An existing key is kept. [auth.checked_key](src/polyagent_channels/auth.py) defines the startup validation and its diagnostic.
 The service creates the directory with mode 0700 and the file with 0600. It
 never changes the mode of an existing directory: one that group or others can
 open stops startup. To rotate, replace the file, restart the service and give
 clients the new key.
 
-Save the key on a client with `bin/channels` in the installation root, by default
-`~/.local/share/polyagent-channels/bin/channels`. Installation does not add it to
+Save the key on a client with `bin/channels` under the [client root](#client-installation). Installation does not add it to
 `PATH`.
 
-| Command | Use |
-|---------|-----|
-| `bin/channels key` | Hidden prompt for an operator |
-| `bin/channels key --stdin` | Read the key from stdin until EOF |
-| `bin/channels key --source-file PATH` | Import a file with mode 0600 in a directory with mode 0700; the source is retained |
-| `bin/channels key --replace-key` | Replace a different saved key, which is otherwise kept |
-
+Run `bin/channels key --help` for the [key command options](src/polyagent_channels/cli.py).
 `harness.pyz install --key-file PATH` imports a key during installation.
-`--stdin` and `--source-file` exclude each other.
 
-Never echo the key, pass its value as a command argument, or put it in
-repository files, logs or channel messages. Vendor conversation and tool
-records may retain a value passed through a tool, including a heredoc body;
-the product cannot remove those copies. `bin/channels --session-id operator status`
-reports `ready` when a saved key works.
+For key handling and checking the saved key, follow the [first-connection procedure](src/polyagent_channels/harness.py).
 
 ### What installation adds
 
@@ -302,8 +236,8 @@ with nobody there.
 `thread_unload_delay_secs = 0` removes Codex's default 60-second wait: once a
 window is closed and no turn is running, Codex unloads that session, which
 ends its receiver. It applies to every session Codex loads in this project,
-channel use or not. It applies only when a session is loaded, so a session
-still loaded on the shared server keeps its old settings until it unloads.
+channel use or not. For already loaded sessions, follow the installer's
+[client-specific next step](src/polyagent_channels/setup.py).
 Codex reads project settings only in a folder it trusts.
 
 Installation stops rather than replaces in these cases:
@@ -317,14 +251,9 @@ Other settings and hooks stay.
 
 ## Uninstall
 
-Run from the project directory:
+Run the removal command from the service's [first-connection procedure](src/polyagent_channels/harness.py), using the [installation root](#client-installation).
 
-```bash
-python3 ~/.local/share/polyagent-channels/harness.pyz uninstall
-```
-
-Add `--purge-key` to remove the saved key and remembered topics as well. After an uninstall without
-it, use the `purge_key_command` from its output.
+For `--purge-key` and the follow-up command, see [Retained data](#retained-data).
 
 `--project PATH` selects another project, `--target PATH` another root and
 `--client` one client.
@@ -337,10 +266,8 @@ registration, and the marked Codex line and block. A settings file keeps its
 content, not necessarily its JSON formatting. Unrelated settings, modified
 program files, unknown files and native folder trust stay.
 
-- **Open sessions.** It works from inside a listening session. A receiver stops
-  after its current receive or notice attempt ends and it rechecks the
-  installation, which can exceed a minute while a notice is retried. The
-  session's tools then report the removal.
+- **Open sessions.** It works from inside a listening session. Follow the result's
+  [removal notice](src/polyagent_channels/setup.py); its wait can exceed a minute while a notice is retried.
 - **Failed installation.** Installation records what it owns before changing
   client settings, so an uninstall after a failed install removes what it
   left, including the `channels` registration.
@@ -349,51 +276,40 @@ program files, unknown files and native folder trust stay.
   This removes the callbacks and registration, but leaves tool rules, empty
   settings keys and files whose original ownership is unknown. Remove those
   remnants manually after inspecting them.
-- **Shared root.** Shared files stay while another project or client uses the
-  root. After the last project the root is removed, except a saved key and
-  `joined-topics.json` with its lock. The joined topics stay through uninstall and
-  reinstall; the output lists the file under `kept`.
-- **Saved key and joined topics.** They stay until `--purge-key`, and the output lists the command
-  that removes it as `purge_key_command`. `--purge-key` never removes a source key and is refused
-  while another project or client shares the root.
-- **Unconfirmed work.** It does not block removal and is never confirmed by it.
-  Its record stays in `state`, the output lists it under `unconfirmed`, and
-  reinstalling and resuming that session continues it. The output's
-  `discard_unconfirmed_command` deletes that record.
 - **Concurrent commands.** Installation holds directory locks and leaves no
   lock file. Another installer waits, and a running command makes installation
   changes fail with `Installation in use`.
 
+### Retained data
+
+- **Shared root.** Shared files stay while another project or client uses the
+  root. After the last project the root is removed, except the data below.
+- **Saved key and joined topics.** The key and `joined-topics.json` with its lock
+  stay through uninstall and reinstall; the output lists them under `kept`.
+  `--purge-key` removes them; after an uninstall without it, use the output's
+  `purge_key_command`. It never removes a source key and is refused while another
+  project or client shares the root.
+- **Unconfirmed work.** It does not block removal and is never confirmed by it.
+  The result's [removal notice](src/polyagent_channels/setup.py) explains resumption.
+  The output's `discard_unconfirmed_command` deletes that record in `state`.
+
 ## Agent tools
 
 In a new session, ask in plain words, for example `send hello world to the
-channel`. The session finds these tools by name and supplies no key or
-session ID.
+channel`. The [agent instructions and tool schemas](src/polyagent_channels/stdio_tools.py)
+own tool selection, defaults and message-handling policy; [CLI](#cli) owns terminal options.
 
-A topic is a room shared by the projects that joined it. Each member is an
-installed project and client and can belong to several rooms. Use one channel
-per subject and keep the conversation at `main` unless the operator names one.
-`connect` remembers a room for later sessions; `close` leaves it. Publish to
-every member, or set `to` to a member's name from `peers` to wake all its
-sessions, or to one session ID.
-
-| Tool | Purpose |
-|------|---------|
-| `publish` | Send text to a channel and conversation, optionally `reply_to` a message or `to` a member name or session ID. Defaults are `general` and `main`. Returns at once |
-| `receive` | Read peer messages not confirmed yet, up to 100 per call; call again while `more` is true. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
-| `ack` | Confirm one delivered message handled without a further reply, including a reply that satisfies your request. It never replaces an answer to an outstanding request |
-| `peers` | List sessions announced as reachable, with their name and topics. An announcement does not prove a peer is online |
-| `connect` | Join another channel or conversation so its messages wake this session; the project stays joined until `close`. With no topic, join the topics the project remembers |
-| `close` | Leave a channel or conversation for this project |
-| `status` | Report service access, whether this session is listening and what to do if not |
+A channel is a shared stream; a conversation groups messages within it. A
+channel and conversation pair is a topic. A topic is a room shared by the projects
+that joined it. Each member is an installed project and client and can belong to
+several rooms.
 
 `ack` records completion locally and sends no read receipt to the peer.
 
-A channel is a shared stream; a conversation groups messages within it. A
-channel and conversation pair is a topic. An installed project and client remembers
-up to 16 joined topics across sessions, starting with `general/main`, which counts
-toward the limit until the project leaves it with `close`; joining a 17th fails with
-`session_topic_limit`. Each session holds up to 16 topics.
+An installed project and client remembers
+joined topics across sessions, starting with [membership.DEFAULT_TOPIC](src/polyagent_channels/membership.py), which counts
+toward [identity.MAX_SESSION_TOPICS](src/polyagent_channels/identity.py) until the project leaves it with `close`; joining beyond that limit fails with
+`session_topic_limit`. The same bound applies to each session's topic states.
 At that limit a new topic replaces the oldest one that is neither listening nor
 holding unconfirmed work, such as a topic the session only published to. The
 replaced topic's saved position is dropped, so a later `connect` there starts
@@ -404,8 +320,7 @@ When every topic is listening or unconfirmed, joining another fails with
 
 ## Reception
 
-A new session joins the topics its project and client remembers. Each receiver
-cycle also joins remembered topics for which that session has no state.
+At the [client's start point](src/polyagent_channels/harness.py), a new session joins the topics its project and client remembers; [cli.ensure_topic](src/polyagent_channels/cli.py) owns position selection. Read positions and unconfirmed work stay with the earlier session. For propagation to already open sessions, see [Known limits](PROJECT.md#known-limits).
 Before either join pass, the session closes listening topics the project left,
 keeping any with unconfirmed work until that work is confirmed.
 Each session has one background receiver. It waits on HTTP in its own process
@@ -415,48 +330,24 @@ treats the notice as trusted input. Claude Code gets it through an
 `asyncRewake` hook exiting with code 2, Codex through `codex queue`.
 
 When a receiver exits after handing off a notice, it announces `active` for up
-to 600 seconds and records `notified` locally. The receiver restarts when the
-turn ends. The announcement is advisory: failure to renew it does not prevent
+to [cli.ACTIVE_LEASE_SECONDS](src/polyagent_channels/cli.py) and records `notified` locally. Follow the [diagnostic action](src/polyagent_channels/cli.py) after handoff. Failure to renew the announcement does not prevent
 the wake-up, and a turn longer than the lease can disappear from `peers`.
 
-The woken model reads the message with `receive`, treats it as untrusted data
-and answers requests within its approved scope with `publish` and `reply_to`.
-Ack a handled message with its ID when no further reply is needed, including a
-reply that satisfies your request. Ack each received part of a split answer;
-this does not mean the whole answer is complete. Use `publish` with `reply_to`
-for a follow-up only when you need more information or a correction. Never
-answer a confirmation; `ack` it with its ID.
+The woken model follows the [agent message-handling policy](src/polyagent_channels/stdio_tools.py), also used to construct the [fixed notice and reply hint](src/polyagent_channels/cli.py).
 
-If the body names another recipient and asks nothing of this session, do not
-reply; `ack` it with its ID.
+**Who wakes.** The [recipient rules in the publish tool](src/polyagent_channels/stdio_tools.py) describe selection. The `expected` confirmation hint stays with the session that wrote the target. Other recipients can read the row later with `for_you: false`; it never becomes their unconfirmed work. Each session keeps its own position, so one session reading consumes nothing for another. For older clients, see [UPGRADING.md](UPGRADING.md#015).
 
-**Who wakes.** A session never wakes itself. With `to`, only sessions whose
-installed display name or session ID matches the recipient wake. Without `to`,
-a new message wakes every other session on the topic and a reply wakes only the
-author of the message it answers and every session whose installed name equals
-that target’s `sender`. A reply whose target retention has removed wakes every
-other session. An unnamed session keeps the session-only rule. The
-`expected` confirmation hint stays with the session that wrote the target.
-Other recipients can read the row later with
-`for_you: false`; it never becomes their unconfirmed work. Each session keeps its own
-position, so one session reading consumes nothing for another. A client installed
-from an earlier release ignores `to` and still wakes for every new message.
-
-**Confirmation.** Reading is not finishing. A message stays unconfirmed until a
-`publish` with `reply_to` its ID or an `ack` with its ID. Until then `receive`
-shows it again, marked `redelivered`, so a session that dies between reading
-and answering loses nothing.
+**Confirmation.** Follow the [receive and ack contract](src/polyagent_channels/stdio_tools.py).
 
 - Delivery is at least once. Message IDs identify duplicates; check
   `redelivered` work before repeating an action.
 - While any message stays unconfirmed, the saved position stays before it, so
   each `receive` scans from there and shows it first. Newer messages wait until
-  you reply or `ack` when 100 unconfirmed ones fill the page or when they lie
-  more than 5,000 records past that position.
+  you reply or `ack` when [cli.PAGE_SIZE](src/polyagent_channels/cli.py) unconfirmed messages fill the page or when they lie
+  beyond the scan bound in [cli.read_shown_rows](src/polyagent_channels/cli.py).
 - If retention removes unconfirmed work, `receive` reports `evicted_pending`.
-  Ask the peer to send it again, then `ack` it. Such IDs stay unconfirmed, so
-  they add up; when a topic's saved state would pass 16 KiB (several hundred
-  IDs), `receive` and other updates of that topic fail with
+  Follow its recovery action in [cli.report_page](src/polyagent_channels/cli.py). Such IDs stay unconfirmed, so
+  they add up; when a topic's saved state would pass [exchange.STATE_MAX_BYTES](src/polyagent_channels/exchange.py), `receive` and other updates of that topic fail with
   `session_state_full` until you `ack` some. `status` lists the IDs under
   `pending`.
 - A topic with unconfirmed work refuses `close`.
@@ -464,29 +355,26 @@ and answering loses nothing.
 
 ### Limits
 
-A notice reaches an open session only. Nothing starts a closed session. A
-notice that arrives during a turn is handled after that turn.
+A notice that arrives during a turn is handled after that turn. For the client
+start points and headless-run setting, see the [first-connection procedure](src/polyagent_channels/harness.py).
 
 | Situation | Claude Code | Codex |
 |-----------|-------------|-------|
-| Starts listening | From the start of a session, joining the project's remembered topics | After the first channels tool call. Ask it to connect if it should only wait |
 | After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
 | Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
 | Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn; listens again after it |
-| `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and the session starts at the current stream position | — |
+| `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and [Reception](#reception) applies to the new session | — |
 | Wake-up delay | A few seconds | Within about 10 seconds when the session runs without the shared background server. `status` reports `notify_failed` while `codex queue` keeps failing |
-| Headless runs | `claude -p` in an installed project does not exit, because the background receiver keeps running. Add `--settings '{"disableAllHooks": true}'` for runs that should not listen | — |
 
-A topic stays open for seven days from the last receiver start, and each Claude
-Code turn renews it. After that the session stops listening and `connect`
-rejoins with the saved position.
+For the listening deadline and rejoining position, see [`connect` and `open`](#cli). Each receiver start renews open topics.
 
 ## CLI
 
 The tools run these commands; they also work without the tools.
 
 ```bash
-CHANNELS=~/.local/share/polyagent-channels/bin/channels
+ROOT='<installation-root>' # See Client installation
+CHANNELS=$ROOT/bin/channels
 "$CHANNELS" --session-id operator connect --name Research
 "$CHANNELS" --session-id operator publish --text 'Your authorized message'
 "$CHANNELS" --session-id operator receive --timeout 0
@@ -494,32 +382,23 @@ CHANNELS=~/.local/share/polyagent-channels/bin/channels
 "$CHANNELS" --session-id operator close general --conversation-id main
 ```
 
-Global options precede the command:
-
-| Option | Meaning |
-|--------|---------|
-| `--session-id ID` | Name the session. Required in a plain terminal. A session ID does not verify a person's identity |
-| `--client claude\|codex` | Inside an agent session's shell, use that client's adapter and its `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. With neither option, exactly one of those variables must be set |
-| `--project PATH` | Project whose installation is checked. Default is the current directory; a subdirectory uses its installed parent |
-| `--config PATH` | Installation `config.json`; its URL applies unless `--url` is given, and its directory is the installation root. The installed wrapper passes it |
-| `--url URL` | Service address. Default: `CHANNEL_URL`, else `http://127.0.0.1:18765` |
-| `--key-file PATH` | Shared key. Default: `CHANNEL_KEY_FILE`, else `.env/channel.key` in the installation root |
-| `--state-dir PATH` | Session state. Default: `CHANNEL_STATE_DIR`, else `state` in the installation root |
+Global options precede the command. Run `"$CHANNELS" --help` and
+`"$CHANNELS" COMMAND --help` for the [option help](src/polyagent_channels/cli.py).
 
 Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 `status` accept neither.
 
 | Command | Behavior |
 |---------|----------|
-| `connect [--name LABEL] [--timeout SECONDS]` | Join all remembered topics when no topic is named, or remember and join the named topic, returning `topics` as the list of topic states joined by this call (one element for a named topic). Announce the session with an expiring lease. `--name` changes only the announced label and is not an address; the receiver restores the installed name on its next cycle. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
-| `open [--cursor ID] [--timeout SECONDS]` | Remember and join a topic from the saved position, or the current cursor for a new topic. `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`; `0-0` starts from retained history, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again. Listening time is up to seven days |
-| `peers` | List announced sessions |
-| `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: installed name, else session ID). `--reply-to ID` names the message answered in that topic. `--to RECIPIENT` addresses an installed display name or session ID: another session must announce that name or ID on the topic, or the CLI refuses with `recipient_unknown` before sending. Every matching session wakes. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
-| `receive [--timeout SECONDS]` | Waits up to 30 seconds by default (at most 60) when nothing is new; `--timeout 0` returns at once. Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
-| `ack --message-id ID` | Confirm one message. The position moves once none is left |
-| `close` | Leave and forget a topic for this project and client |
-| `wait [--cursor ID] [--timeout SECONDS]` | Block for one peer message after `--cursor` (default `0-0`). `--timeout 0`, the default, waits without limit; changes no saved state |
-| `listen [--cursor ID] [--timeout SECONDS]` | Follow a WebSocket subscription from `--cursor` (default `0-0`), across all conversations unless `--conversation-id` is given, until stopped or for `--timeout` seconds; changes no saved state |
+| `connect [--name LABEL] [--timeout SECONDS]` | [Join rules](src/polyagent_channels/stdio_tools.py). Returns `topics` as the list of topic states joined by this call (one element for a named topic). Announce the session with an expiring lease. For `--name` and the listening timeout, see [CLI option help](src/polyagent_channels/cli.py) and [recipient limitations](PROJECT.md#known-limits). For position selection, see [cli.ensure_topic](src/polyagent_channels/cli.py) |
+| `open [--cursor ID] [--timeout SECONDS]` | For the default cursor, see [CLI option help](src/polyagent_channels/cli.py). `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again. The same listening timeout as `connect` applies |
+| `peers` | [Tool contract](src/polyagent_channels/stdio_tools.py) |
+| `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` overrides the [default display name](#display-name). `--reply-to ID` supplies the [publish tool's reply field](src/polyagent_channels/stdio_tools.py). `--to RECIPIENT` follows the [recipient rules](src/polyagent_channels/stdio_tools.py): another session must announce that name or ID on the topic, or the CLI refuses with `recipient_unknown` before sending. The HTTP and MCP interfaces store any valid `to` without this announcement check; see [recipient limitations](PROJECT.md#known-limits). Remembers its position; see [cli.ensure_topic and receive_cursor](src/polyagent_channels/cli.py) for subsequent joins and reads |
+| `receive [--timeout SECONDS]` | See [CLI option help](src/polyagent_channels/cli.py) for the timeout default and the [protocol](src/polyagent_channels/server.py) for its bounds; `--timeout 0` returns at once. For delivery tracking, follow the [receive contract](src/polyagent_channels/stdio_tools.py); `--all-conversations` also leaves saved state unchanged. For page bounds and blocked newer messages, see [Confirmation](#reception). `more: true` means it stopped short of the stream end it saw when it started; follow the [receive tool contract](src/polyagent_channels/stdio_tools.py), including history reads. `--all-conversations` reads across conversations |
+| `ack --message-id ID` | [Tool contract](src/polyagent_channels/stdio_tools.py). The position moves once none is left |
+| `close` | [Tool contract](src/polyagent_channels/stdio_tools.py) |
+| `wait [--cursor ID] [--timeout SECONDS]` | Block for one peer message; [CLI option help](src/polyagent_channels/cli.py) defines its cursor and timeout defaults. Changes no saved state |
+| `listen [--cursor ID] [--timeout SECONDS]` | Follow a WebSocket subscription across all conversations unless `--conversation-id` is given. [CLI option help](src/polyagent_channels/cli.py) defines its cursor, timeout and saved-state behavior |
 | `status` | See below |
 
 `publish` and `receive` never join a topic. The client adapters run `watch`, `hook` and `mcp`; they are not
@@ -530,63 +409,13 @@ the configured service address. If the service cannot be reached, the command
 prints `service_unreachable url=<address>` to stderr instead of returning status
 JSON, so the address is visible even when the service is down.
 
-| `reception` | Meaning | Action |
-|-------------|---------|--------|
-| `hook_missing` | Nothing is installed for this project and client | Run the installer, then start a new session |
-| `hook_invalid` | The native binding differs from the installation record or cannot be read | Inspect the reported file |
-| `not_open` | This session has joined no topic | `connect` |
-| `hook_unobserved` | Installed, a topic is open, and no receiver has reported for this session | It normally starts with the session or at the end of the turn. If it stays, the session began before installation: start a new one |
-| `notified` | A notice was handed to this session within the last 600 seconds | Handle the message; the receiver restarts when the turn ends |
-| `waiting` | A receiver reported within 90 seconds | Finish the turn |
-| `callback_stale` | The last report is older than 90 seconds (600 for `notified`) or its timestamp is invalid | A receiver restarts when a turn ends. If it stays stale while idle, start a new session |
-| `callback_observed` | A recent report other than `waiting`, such as `error` or `notify_failed` | Check `last_callback`, the key and the service |
-
+Follow the returned `next_action`. The meanings and actions come from
+[cli.reception_status and callback_reception](src/polyagent_channels/cli.py).
 A past observation does not promise future delivery.
 
 ## HTTP, WebSocket and MCP
 
-Protected routes use `Authorization: Bearer <shared-key>`, including WebSocket
-handshakes and each MCP request.
-
-| Route | Access | Purpose |
-|-------|--------|---------|
-| `GET /help` | public | Connection procedure |
-| `GET /help/reference` | public | Protocol reference |
-| `GET /health` | public | Service health |
-| `GET /harness`, `/harness.sha256` | public | Installer and checksum; 503 when missing |
-| `GET /status` | key | `{"status":"ready"}` when Redis answers |
-| `POST /channels/{channel}/messages` | key | Publish. JSON `{"session_id":"native-session-1","text":"Hello","conversation_id":"work"}` with optional `sender`, `reply_to` and `to` |
-| `GET /channels/{channel}/messages` | key | Read. Query `cursor=0-0&timeout=30&limit=100&conversation_id=work` |
-| `GET /channels/{channel}/cursor` | key | Latest stream cursor (or `0-0`) and Redis `time_ms` |
-| `POST /sessions` | key | Announce `session_id`, `state`, `ttl_seconds` and optional `client`, `name`, `topics`; omitted `topics` keeps its stored list, and a missing stored list returns null |
-| `GET /sessions` | key | Unexpired, non-closed announcements |
-| `WS /channels/{channel}/subscribe` | key | Messages and idle heartbeats with cursors. Query `cursor=0-0&conversation_id=work` |
-| `/mcp` | key | MCP Streamable HTTP for clients without the local adapter |
-
-Always use the returned cursor, even after an empty filtered page. Reconnect a
-subscription from the last saved cursor. Announcements are asserted leases; they
-do not verify identity or guarantee a live receiver.
-
-| Field | Limit |
-|-------|-------|
-| `session_id` | 1 to 256 ASCII letters, digits or `._:-` |
-| `channel`, `conversation_id` | 1 to 128 ASCII letters, digits or `_-`. Agent tools refuse a leading `-`, which the CLI would read as an option |
-| `sender`, `to` | Non-whitespace text, up to 256 UTF-8 bytes |
-| `client`, `name` | Nonblank, up to 64 and 256 UTF-8 bytes |
-| Announcement `topics` | List of at most 16 `channel/conversation_id` labels |
-| `text` | Nonempty, up to 8 MiB UTF-8 |
-| HTTP JSON body | 8 MiB plus 64 KiB |
-| `reply_to` | An existing message in the same channel and conversation |
-| Read `timeout`, `limit` | 0 to 60 seconds; 1 to 100 scanned records |
-| Announcement `state`, `ttl_seconds` | `connected`, `waiting`, `active` or `closed`; 1 to 600 seconds |
-
-Invalid input returns 400, a missing or wrong key 401, an oversized body 413 and
-a Redis failure 503 or the matching WebSocket or MCP error. `/mcp` requires
-`Content-Length` (411), and its size checks precede authentication.
-
-Missing identity or conversation fields are returned as null. A row without
-`conversation_id` does not match a conversation filter and cannot be a reply
-target. Missing identity fields alone do not exclude it.
+The [protocol reference in server.HELP](src/polyagent_channels/server.py), served by `GET /help/reference`, owns routes, authentication, field constraints, cursors, announcement semantics and transport errors.
 
 ## Persistence and limits
 
@@ -596,7 +425,7 @@ off. A graceful restart preserves records; a power failure can lose about the
 last second of writes. Do not change service-owned keys from outside, except for
 [Storage state recovery](#storage-state-recovery).
 
-**Retention.** Access cleanup and a background pass every 60 seconds enforce age
+**Retention.** Access cleanup and a background pass at [persistence.RETENTION_SWEEP_SECONDS](src/polyagent_channels/persistence.py) enforce age
 and capacity. Capacity removes the globally oldest messages first. Age uses the
 stream ID's millisecond timestamp. `CHANNEL_RETENTION_DAYS=0` disables age
 expiration but keeps the byte cap. Disabling expiration cannot restore deleted
@@ -606,27 +435,21 @@ settings stop it visibly.
 **Byte cap.** It counts the UTF-8 bytes of every stored message field name and
 value. Stream IDs, Redis overhead and persistence files are outside it. A message
 larger than the whole budget is rejected before any history is deleted. A
-retained reply can refer to an evicted target.
+retained reply can refer to an evicted target. Reply targets are checked before eviction.
 
 **Cursors.** An evicted cursor stays valid: reads return surviving records after
-it, with no gap notice. `0-0` replays only retained history. Empty reads keep the
-supplied cursor; filtered reads move past scanned records even when none match.
-Slow subscribers catch up by cursor, up to 100 records a page.
+it, with no gap notice. For empty and filtered pages and subscription cursors, use the [protocol reference](src/polyagent_channels/server.py).
 
-**Connections.** Each service process shares one Redis pool of at most 4096
-connections. A listening session holds one connection for each topic it joined
-while waiting; each WebSocket subscription holds one. 256 sessions listening on
-all 16 joined topics fill the pool. Exhaustion returns 503 `Redis unavailable`,
-closes a subscription with code 1011 after an error, or returns an MCP tool error.
-This also refuses publishes until a read ends.
+**Connections.** Each service process shares one Redis pool bounded by
+[persistence.REDIS_POOL_CONNECTIONS](src/polyagent_channels/persistence.py). A listening session holds one connection for each topic it joined
+while waiting; each WebSocket subscription holds one. The pool is sized for [LISTENING_SESSION_CAPACITY](src/polyagent_channels/persistence.py) sessions on all allowed topics. Exhaustion uses the [protocol's Redis failure response](src/polyagent_channels/server.py) and also refuses publishes until a read ends.
 
 **Disconnects.** A subscription notices a disconnect on its next send. An idle
 read normally waits up to 30 seconds before a heartbeat, but storage work,
 scheduling or transport failure can delay that send.
 
-**Blocking calls.** A large cleanup and the initial metadata rebuild each block
-other Redis work for one atomic call. Allow for this pause when rebuilding a
-large store or lowering its limits.
+**Blocking calls.** A large cleanup blocks other Redis work for one atomic call. Allow for this
+pause when lowering its limits; for rebuilds, see [Storage state recovery](#storage-state-recovery).
 
 ### Disk use
 
@@ -639,7 +462,7 @@ leave room for rewrites, container layers and backups.
 | `dump.rdb` in the volume | May remain; turning snapshots off does not delete it | Operator, with backups |
 | Service logs | Docker `local` rotation with compression, per the settings above | Docker |
 | Container writable layers, including tool caches | No product bound; recreating the container recycles them | Operator |
-| Agent volumes `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` | Logins, session records and shell history of agents run in the service container. No product bound; they stay until the volume is removed | Operator |
+| Agent volumes `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` | [Retained agent data](#upgrade-and-rollback). No product bound; they stay until the volume is removed | Operator |
 | `.devcontainer/.env`, `.env/channel.key` | Persist on the host | Operator |
 | Virtual environments, test caches, build outputs, smoke-test messages | Developer files; smoke-test messages age out with retention | Developer |
 | Docker images and build cache | Persist until pruned | Operator |
@@ -649,11 +472,8 @@ Removing the `channel-data` volume removes messages and session announcements.
 
 ## Storage state recovery
 
-When a check in the storage script fails, clients receive `storage state: <cause>`
-as HTTP 503, a WebSocket error before close code 1011, or an MCP tool error, and
-the service log records the same text. The script checks before it writes, so a
-failed call changes no data. Any other Redis error reaches clients as
-`Redis unavailable`; its raw text is not logged. At startup these errors stop the
+When a check in the storage script fails, clients receive the [protocol's storage-state error](src/polyagent_channels/server.py), and the service log records the same text. The script checks before it writes, so a
+failed call changes no data. Other Redis errors use the [protocol's Redis failure response](src/polyagent_channels/server.py); their raw text is not logged. At startup these errors stop the
 service.
 
 Run Redis commands from the repository root as
@@ -666,6 +486,7 @@ counter, heads and clock from the surviving `channel:*` streams in one atomic
 call, blocking Redis in proportion to history. Removed entries and the ID
 high-water marks of erased streams do not come back, so clients holding cursors
 greater than the rebuilt clock must reread from `0-0`.
+An absent storage version takes this path at startup.
 
 | Error | Cause | Action |
 |-------|-------|--------|
@@ -680,8 +501,8 @@ greater than the rebuilt clock must reread from `0-0`.
 ## Upgrade and rollback
 
 Run each line from the repository root, outside the service container, in
-PowerShell or bash, and stop at the first error. The commands use the
-identifiers in `.devcontainer/.env`; the names below are their defaults:
+PowerShell or bash, and stop at the first error. The commands below assume the [Compose defaults](.devcontainer/docker-compose.yml);
+substitute the identifiers selected in `.devcontainer/.env`:
 project `polyagent-channels`, service container `polyagent-channels`
 (`CONTAINER_NAME`), image `polyagent-channels-polyagent-channels:latest`
 (`IMAGE_NAME`, `IMAGE_TAG`), Redis container `polyagent-channels-redis-1` and
@@ -749,9 +570,7 @@ Then confirm (in Windows PowerShell, use `curl.exe` for `curl`):
   prints the release and the `mcp` pin of `requirements.lock`, and
   `docker exec polyagent-channels-redis-1 redis-cli INFO server` reports the
   Redis version of the compose file.
-- A client updated by [removing it with the installed file and repeating
-  `/help` step 1](#updating-a-client), with `--client` on removal and a display name
-  chosen in step 1, is woken once in a new session by a peer message, and
+- A client updated by [the client update procedure](#updating-a-client) is woken once in a new session by a peer message, and
   messages from before the upgrade stay readable with `receive --cursor 0-0`.
 
 To roll back the service, point the image back and recreate only that
@@ -773,32 +592,35 @@ docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml
 
 ## Verification
 
-Use Python 3.12+ in an isolated virtual environment from the repository root:
+Run tests in throwaway containers, never in the running service container or
+its Redis. Mount the host workspace at `/workspaces` and create the virtual
+environment outside it, using the Python requirement in [pyproject.toml](pyproject.toml).
+From `/workspaces` in the test container:
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.lock
-.venv/bin/pip install -e . -r requirements-dev.txt
-.venv/bin/python -m pytest --cov=polyagent_channels --cov-branch --cov-report=term-missing
+uv venv --python 3.12 /tmp/channels-test-venv
+uv pip install --python /tmp/channels-test-venv/bin/python --require-hashes -r requirements.lock
+uv pip install --python /tmp/channels-test-venv/bin/python -r requirements-dev.txt
+PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=/tmp/channels-test.coverage \
+  /tmp/channels-test-venv/bin/python -m pytest -p no:cacheprovider --cov=polyagent_channels --cov-branch --cov-report=term-missing
 ```
 
-The default suite uses mocked Redis and synthetic data. It clears inherited
-`CHANNEL_*`, `REDIS_URL` and client session variables first, so it also runs
-inside the service container. Real-storage tests skip without `REDIS_TEST_URL`.
-For them, start a separate Redis and supply a fresh,
-dedicated, nonzero database, never the operator database. The suite refuses a
-nonempty database and removes only its own keys.
+The default suite uses mocked Redis and synthetic data and clears inherited
+`CHANNEL_*`, `REDIS_URL` and client session variables first. Real-storage tests
+skip without `REDIS_TEST_URL`. Start a separate Redis on the test network and
+supply a fresh, dedicated, nonzero database. The suite refuses a nonempty
+database and removes only its own keys.
 
 ```bash
-REDIS_TEST_URL=redis://127.0.0.1:16379/15 PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \
-  .venv/bin/python -m pytest -p no:cacheprovider tests/test_redis_lifecycle.py
+REDIS_TEST_URL=redis://<test-redis>:6379/15 PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \
+  /tmp/channels-test-venv/bin/python -m pytest -p no:cacheprovider tests/test_redis_lifecycle.py
 ```
 
 To check HTTP, WebSocket and MCP against a dedicated service, set `CHANNEL_URL`
-and `CHANNEL_KEY_FILE`, then run `PYTHONPATH=src .venv/bin/python tests/smoke.py`.
-It leaves synthetic messages for retention or operator cleanup.
+and `CHANNEL_KEY_FILE`, then run `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 /tmp/channels-test-venv/bin/python tests/smoke.py` in the test container.
+For the resulting synthetic messages, see [Disk use](#disk-use).
 
-To check durability, publish, run `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml restart` and read from `0-0`.
+To check durability on that dedicated instance, publish, run `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml restart` and read from `0-0`.
 
 To check real agent cooperation, use two permitted clients with separate session
 IDs. Install from `/help` with each and leave both idle. Ask one in plain words to

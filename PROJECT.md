@@ -1,51 +1,34 @@
 # PROJECT.md — Polyagent Channels
 
-> Persistent message channels for users and tool-enabled agents on a trusted network.
-> Governance: [CLAUDE.md](CLAUDE.md) (Claude) · [AGENTS.md](AGENTS.md) (Codex and other agents)
+> Product scope and prerequisites: [README.md](README.md)
+> Governance: [AGENTS.md](AGENTS.md)
 > Commands: [REFERENCE.md](REFERENCE.md)
 
 ## Overview
 
-A shared message service. Clients exchange persistent messages through Redis Streams over HTTP+JSON, WebSocket, MCP Streamable HTTP or the `channels` CLI. Installed Claude Code and Codex sessions get named tools (`publish`, `receive`, `ack`, `peers`, `connect`, `close`, `status`) and are woken by peer messages while idle. One shared Bearer key authorizes every client; there are no accounts, roles or per-channel ACLs. The service does not launch models or run closed sessions.
-
 Version `0.1.5` (tag `v0.1.5`).
-
-## Tech Stack
-
-| Category | Technology |
-|----------|-----------|
-| Container | Docker Compose (v2.20+), DevContainer spec; inherited Polyagent DevContainer image |
-| Runtime | Python 3.12 service; Python 3.10+ client installer (`harness.pyz`) |
-| Service | Starlette, FastMCP (Streamable HTTP), WebSocket |
-| Storage | Redis 7.4.11 standalone, AOF `everysec`, Lua lifecycle script |
-| Clients | Claude Code, Codex CLI, `channels` CLI |
-| Tests | pytest (mocked Redis by default; opt-in real-Redis suite) |
 
 ## Environment
 
-- **Configuration**: ignored `.devcontainer/.env`, copied from `.devcontainer/.env.example`; every Compose command selects it with `--env-file` (see [REFERENCE.md § Configuration](REFERENCE.md#configuration-devcontainerenv)).
-- **Shared key**: ignored `.env/channel.key`, generated on first start (directory 0700, file 0600); at least 32 printable ASCII characters without whitespace.
-- **Persistent volumes**: `channel-data` (Redis AOF); `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` (logins, sessions and shell history of agents run in the service container).
-- **Docker socket**: the host's `/var/run/docker.sock`, mounted in the service container ([REFERENCE.md § Privilege boundary](REFERENCE.md#privilege-boundary)).
-- **Default address**: `http://127.0.0.1:18765` on the Docker host (container port 8080).
-  Other computers and containers on that host use `http://<host-LAN-IPv4>:<CHANNEL_PORT>`; see [Network exposure](REFERENCE.md#network-exposure).
-- **Client root**: `~/.local/share/polyagent-channels` (installer, wrapper, URL-only config, session state).
+Service dependencies and the Python requirement are in [pyproject.toml](pyproject.toml) and [requirements.lock](requirements.lock); the container and Redis definitions are in [docker-compose.yml](.devcontainer/docker-compose.yml) and [Dockerfile](.devcontainer/Dockerfile).
+
+See [Configuration](REFERENCE.md#configuration-devcontainerenv), [Shared key](REFERENCE.md#shared-key), [Disk use](REFERENCE.md#disk-use), [Privilege boundary](REFERENCE.md#privilege-boundary), [Network exposure](REFERENCE.md#network-exposure) and [Client installation](REFERENCE.md#client-installation).
 
 ## Known limits
 
 - **Container access through the host LAN address**: verified on Windows Docker Desktop only; macOS Docker Desktop and Linux Engine remain unverified.
-- **Room membership and session state**: a new session joins the project's remembered topics at their current positions; read positions and unconfirmed work stay with the earlier session. An open session that already saved a position in a topic by publishing there does not start listening when its project joins that topic; `connect` in that session or a new session does. Sessions of a project that left every topic stop their receivers and join again at their next turn.
-- **Recipients**: display names are not checked for uniqueness, so installations that chose the same name are addressed together. Only the `channels` client checks that a recipient is announced on the topic, by listing every announced session, so the check costs more as sessions grow; the HTTP and MCP interfaces store any `to`.
-- **Large modules**: `setup.py` (1066 lines) and `cli.py` (1126 lines) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, is planned for 0.1.6.
-- **Redis advisory**: Redis 7.4.11 falls under CVE-2025-46686, which the supplier disputes: an authenticated client can make Redis allocate memory with a multi-bulk command of many arguments, and the record lists versions through 8.0.3. Redis publishes no host port and has no password, so only processes in the service container reach it; the service itself sends fixed commands. The risk is accepted. Moving to Redis 8, with its AOF and license changes, is evaluated for 0.2.0.
+- **Room membership and session state**: [Reception](REFERENCE.md#reception) describes normal joining. An open session that already saved a position in a topic by publishing there does not start listening when its project joins that topic; `connect` in that session or a new session does. Sessions of a project that left every topic stop their receivers; they observe a later join only at their next turn.
+- **Recipients**: display names and session IDs share one matching space: a session ID can also match another installation's name. The CLI accepts a temporary `connect --name` announcement as a recipient, but that session's receiver matches its installed name, so the accepted send may not wake it. The recipient check lists every announced session, so the check costs more as sessions grow. See [recipient rules](src/polyagent_channels/stdio_tools.py) and [CLI publishing](REFERENCE.md#cli).
+- **Large modules**: [setup.py](src/polyagent_channels/setup.py) and [cli.py](src/polyagent_channels/cli.py) exceed the guide's small-entity aim, and seven functions exceed 40 lines: `harness.setup_help`, `setup.install`, `setup.uninstall`, `setup.managed_binding`, `cli.command_parser`, `cli.run` and `cli.main`. Splitting the client bindings out of `setup.py` and shortening these functions, without behavior change, remains separate from this release.
+- **Redis advisory**: Redis 7.4.11 falls under CVE-2025-46686, which the supplier disputes: an authenticated client can make Redis allocate memory with a multi-bulk command of many arguments, and the record lists versions through 8.0.3. See [Network exposure](REFERENCE.md#network-exposure) for Redis access; the service itself sends fixed commands. The risk is accepted. Moving to Redis 8, with its AOF and license changes, is evaluated for 0.2.0.
 - **Unverified in a real environment**: a real Codex session being woken by a peer message. The upgrade checks in [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback) cover it after deployment.
 - **Remaining guide exceptions**: listed with their limits in [AGENTS.md § Specific guide conflicts](AGENTS.md#specific-guide-conflicts).
 
 ## Distribution
 
 - **GitHub** (origin): `mememade-github/polyagent-channels`
-- **Upstream**: container files derive from `mememade-github/polyagent-devcontainer` (MIT notice in `.devcontainer/LICENSE`)
-- **Package**: `polyagent-channels` (`pyproject.toml`); `MANIFEST.in` lists the documents and notice files for source distributions
+- **Attribution**: [README.md § License & attribution](README.md#license--attribution)
+- **Package**: [pyproject.toml](pyproject.toml); [MANIFEST.in](MANIFEST.in) lists source-distribution files
 
 ---
 
