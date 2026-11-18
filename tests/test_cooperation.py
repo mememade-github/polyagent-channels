@@ -426,7 +426,7 @@ def test_notification_handoff_records_active_presence_without_blocking_exit(tmp_
     status = cli.run_hook(hook_options(tmp_path, '--client', 'claude'))
     diagnostic = json.loads((exchange.session_directory(tmp_path, 'idle-session') / 'last-hook.json').read_text())
     assert (status, presence[-1], diagnostic['state']) == (
-        2, {'session_id': 'idle-session', 'client': 'claude', 'state': 'active', 'ttl_seconds': 600}, 'notified')
+        2, {'session_id': 'idle-session', 'client': 'claude', 'state': 'active', 'ttl_seconds': 600, 'topics': ['general/main']}, 'notified')
 
 
 def test_turn_end_renews_an_open_topic_and_leaves_a_lapsed_one(tmp_path, monkeypatch):

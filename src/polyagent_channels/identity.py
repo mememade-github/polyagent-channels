@@ -8,6 +8,22 @@ IDENTIFIER_PATTERN = '[A-Za-z0-9_-]{1,128}'
 CURSOR_PATTERN = '[0-9]{1,20}-[0-9]{1,20}'
 SESSION_ID_PATTERN = '[A-Za-z0-9._:-]{1,256}'
 CURSOR_PART_MAX = 2**64 - 1
+MAX_SESSION_TOPICS = 16
+
+
+def topic_label(channel, conversation_id):
+    if not is_identifier(channel) or not is_identifier(conversation_id):
+        raise ValueError('Invalid topic label')
+    return channel + '/' + conversation_id
+
+
+def is_topic_label(value):
+    return isinstance(value, str) and len(value.split('/')) == 2 and all(is_identifier(part) for part in value.split('/'))
+
+
+def validate_topics(topics):
+    if not isinstance(topics, list) or len(topics) > MAX_SESSION_TOPICS or not all(is_topic_label(topic) for topic in topics):
+        raise ValueError('topics must be a list of at most ' + str(MAX_SESSION_TOPICS) + ' channel/conversation_id labels')
 
 
 def is_identifier(value):

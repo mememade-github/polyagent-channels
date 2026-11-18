@@ -371,7 +371,7 @@ session ID.
 | `publish` | Send text to a channel and conversation, optionally `reply_to` a message. Defaults are `general` and `main`. Returns at once |
 | `receive` | Read peer messages not confirmed yet, up to 100 per call; call again while `more` is true. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
 | `ack` | Confirm one delivered message handled without a further reply, including a reply that satisfies your request. It never replaces an answer to an outstanding request |
-| `peers` | List sessions announced as reachable. An announcement does not prove a peer is online |
+| `peers` | List announced sessions with name and topics. Listed does not mean online |
 | `connect` | Join another channel or conversation so its messages wake this session |
 | `close` | Leave a channel or conversation |
 | `status` | Report service access, whether this session is listening and what to do if not |
@@ -533,7 +533,7 @@ handshakes and each MCP request.
 | `POST /channels/{channel}/messages` | key | Publish. JSON `{"session_id":"native-session-1","text":"Hello","conversation_id":"work"}` with optional `sender` and `reply_to` |
 | `GET /channels/{channel}/messages` | key | Read. Query `cursor=0-0&timeout=30&limit=100&conversation_id=work` |
 | `GET /channels/{channel}/cursor` | key | Latest stream cursor (or `0-0`) and Redis `time_ms` |
-| `POST /sessions` | key | Announce `session_id`, `state`, `ttl_seconds` and optional `client`, `name` |
+| `POST /sessions` | key | Announce `session_id`, `state`, `ttl_seconds` and optional `client`, `name`, `topics`; omitted `topics` keeps its stored list, and a missing stored list returns null |
 | `GET /sessions` | key | Unexpired, non-closed announcements |
 | `WS /channels/{channel}/subscribe` | key | Messages and idle heartbeats with cursors. Query `cursor=0-0&conversation_id=work` |
 | `/mcp` | key | MCP Streamable HTTP for clients without the local adapter |
@@ -548,6 +548,7 @@ do not verify identity or guarantee a live receiver.
 | `channel`, `conversation_id` | 1 to 128 ASCII letters, digits or `_-`. Agent tools refuse a leading `-`, which the CLI would read as an option |
 | `sender` | Non-whitespace text, up to 256 UTF-8 bytes |
 | `client`, `name` | Nonblank, up to 64 and 256 UTF-8 bytes |
+| Announcement `topics` | List of at most 16 `channel/conversation_id` labels |
 | `text` | Nonempty, up to 8 MiB UTF-8 |
 | HTTP JSON body | 8 MiB plus 64 KiB |
 | `reply_to` | An existing message in the same channel and conversation |

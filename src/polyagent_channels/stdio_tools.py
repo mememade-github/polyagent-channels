@@ -53,7 +53,7 @@ TOOLS = [
                                    'satisfies your request. Decide this for each message: an ack never replaces an answer '
                                    'to an outstanding request. A publish with reply_to already confirms what it answers.',
      'inputSchema': schema(['message_id'], message_id=MESSAGE_ID, **TOPIC)},
-    {'name': 'peers', 'description': 'List sessions announced as reachable. An announcement does not prove a peer is online.',
+    {'name': 'peers', 'description': 'List announced sessions with name and topics. Listed does not mean online.',
      'inputSchema': schema()},
     {'name': 'connect', 'description': 'Join a channel or conversation so its peer messages wake this session.',
      'inputSchema': schema(**TOPIC, name={'type': 'string', 'description': 'Display name for peers; not verified.'})},

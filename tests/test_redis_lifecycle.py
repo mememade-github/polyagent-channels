@@ -42,6 +42,27 @@ def database():
     connection.close()
 
 
+def test_session_topics_round_trip(database, monkeypatch):
+    from redis.asyncio import Redis as AsyncRedis
+
+    connection, _, _, owned = database
+    session_id = 'rooms-test-' + uuid.uuid4().hex
+    owned.add('channels:session:' + session_id)
+
+    async def announce():
+        storage = AsyncRedis.from_url(os.environ['REDIS_TEST_URL'], decode_responses=True)
+        monkeypatch.setattr(persistence, 'redis', storage)
+        first = await persistence.lease_session(session_id, 'waiting', 90, topics=['general/main', 'review/design'])
+        renewed = await persistence.lease_session(session_id, 'active', 90)
+        listed = await persistence.list_sessions()
+        await storage.aclose()
+        return first['topics'], renewed['topics'], listed['sessions'][0]['topics']
+
+    result = asyncio.run(announce())
+    assert (result, connection.hget('channels:session:' + session_id, 'topics')) == (
+        (['general/main', 'review/design'],) * 3, '["general/main", "review/design"]')
+
+
 def assert_accounting(connection):
     # Independent oracle, used only in tests; production never scans history per write.
     expected = 0

@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from polyagent_channels import identity
+from polyagent_channels.identity import MAX_SESSION_TOPICS
 
 try:
     from asyncio import timeout as timeout_context
@@ -23,7 +24,6 @@ except ImportError:  # Python 3.10, which the client installer still supports
 RECEPTION_TIMEOUT = 604800
 POLL_TIMEOUT = 60
 WATCH_POLL = 30
-MAX_SESSION_TOPICS = 16
 STATE_MAX_BYTES = 16384
 STATE_FIELDS = {'session_id', 'channel', 'conversation_id', 'cursor', 'notified', 'delivered', 'deadline', 'errors', 'pending'}
 LARGEST_SEQUENCE = 2**64 - 1
@@ -164,9 +164,8 @@ def client_pointer(directory, pid):
 
 
 def topic_name(target):
-    for field in ('channel', 'conversation_id'):
-        validate_identifier(target[field])
-    return 'topic-' + hashlib.sha256((target['channel'] + '/' + target['conversation_id']).encode('ascii')).hexdigest() + '.json'
+    label = identity.topic_label(target['channel'], target['conversation_id'])
+    return 'topic-' + hashlib.sha256(label.encode('ascii')).hexdigest() + '.json'
 
 
 def list_states(directory, session_id):

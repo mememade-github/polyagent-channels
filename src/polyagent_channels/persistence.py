@@ -1,12 +1,13 @@
 """Redis Streams persistence and shared message validation."""
 import asyncio
+import json
 import logging
 import os
 import re
 import time
 from importlib.resources import files
 
-from polyagent_channels.identity import (is_cursor_form, is_identifier, validate_sender, validate_session_id,
+from polyagent_channels.identity import (is_cursor_form, is_identifier, validate_sender, validate_session_id, validate_topics,
                                          within_cursor_range)
 
 from redis.asyncio import Redis
@@ -152,7 +153,7 @@ async def channel_cursor(channel: str) -> dict:
 
 
 async def lease_session(session_id: str, state: str, ttl_seconds: int,
-                        client: str | None = None, name: str | None = None) -> dict:
+                        client: str | None = None, name: str | None = None, topics: list[str] | None = None) -> dict:
     """Record a bounded, asserted observation, not model liveness or verified identity."""
     validate_session_id(session_id)
     if not isinstance(state, str) or state not in {'connected', 'waiting', 'active', 'closed'}:
@@ -168,6 +169,9 @@ async def lease_session(session_id: str, state: str, ttl_seconds: int,
         record['client'] = client
     if name is not None:
         record['name'] = name
+    if topics is not None:
+        validate_topics(topics)
+        record['topics'] = json.dumps(topics)
     key = 'channels:session:' + session_id
     async with redis.pipeline(transaction=True) as transaction:
         transaction.hset(key, mapping=record)
@@ -184,6 +188,7 @@ def session_record(fields, remaining_ms, now):
     expires_at_ms = seconds * 1000 + microseconds // 1000 + remaining_ms
     ttl_seconds = int(fields['ttl_seconds'])
     return {**fields, 'client': fields.get('client'), 'name': fields.get('name'),
+            'topics': json.loads(fields['topics']) if 'topics' in fields else None,
             'ttl_seconds': ttl_seconds, 'last_seen_ms': expires_at_ms - ttl_seconds * 1000,
             'expires_at_ms': expires_at_ms}
 

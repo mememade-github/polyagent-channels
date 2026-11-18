@@ -461,6 +461,22 @@ def named_connection_client(connection_client):
     return connection_client
 
 
+@pytest.mark.parametrize('channels', [[], ['general'], ['general', 'review', 'build']])
+def test_presence_announces_live_topics(connection_client, channels):
+    session = connection_client
+    for channel in channels:
+        session.invoke('connect', channel)
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex',
+                       '--session-id', 'native-self', 'status')
+    assert sorted(cli.presence_payload(selected)['topics']) == sorted(channel + '/main' for channel in channels)
+
+
+def test_connect_announces_the_topic_it_just_joined(connection_client):
+    session = connection_client
+    session.invoke('connect', 'review', '--conversation-id', 'design')
+    assert session.presence[-1]['topics'] == ['review/design']
+
+
 @pytest.mark.parametrize('state', ['connected', 'waiting', 'active'])
 def test_announcements_use_the_installed_name(named_connection_client, state):
     session = named_connection_client
@@ -468,7 +484,7 @@ def test_announcements_use_the_installed_name(named_connection_client, state):
                        '--session-id', 'native-self', 'connect')
     cli.announce_presence(selected, 'synthetic-connection-key', state, 600)
     assert session.presence[-1] == {'session_id': 'native-self', 'client': 'codex', 'state': state,
-                                    'ttl_seconds': 600, 'name': '검사 agent'}
+                                    'ttl_seconds': 600, 'name': '검사 agent', 'topics': []}
 
 
 @pytest.mark.parametrize('arguments, sender', [((), '검사 agent'), (('--sender', 'explicit sender'), 'explicit sender')])

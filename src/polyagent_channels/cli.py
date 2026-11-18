@@ -22,7 +22,7 @@ import httpx
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
-from polyagent_channels import exchange
+from polyagent_channels import exchange, identity
 from polyagent_channels.client_config import ConfigError, apply_config
 
 
@@ -392,7 +392,9 @@ def session_name(options):
 
 def presence_payload(options, state='connected', ttl_seconds=600):
     adapter = selected_adapter(options)
-    payload = {'session_id': options.session_id, 'client': adapter, 'state': state, 'ttl_seconds': ttl_seconds}
+    topics = [exchange.read_state(path) for path in live_topic_paths(options)[0]]
+    payload = {'session_id': options.session_id, 'client': adapter, 'state': state, 'ttl_seconds': ttl_seconds,
+               'topics': [identity.topic_label(topic['channel'], topic['conversation_id']) for topic in topics]}
     name = session_name(options)
     if name is not None:
         payload['name'] = name
@@ -921,8 +923,8 @@ def run(options):
                                         or (options.command == 'receive' and options.cursor is None))
     key = connection_key(options) if options.command == 'connect' else read_secret(options.key_file)
     if options.command == 'connect':
-        announce_presence(options, key)
         state = ensure_topic(options, key)
+        announce_presence(options, key)
         print(json.dumps({'type': 'connected', 'session_id': options.session_id, 'topic': state,
                           **reception_status(options)}))
         return

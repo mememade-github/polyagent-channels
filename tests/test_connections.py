@@ -1,5 +1,6 @@
 """Connection observations use isolated fake storage, never a running service."""
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,7 +40,7 @@ def test_lease_stores_atomic_expiring_observation_and_preserves_omitted_labels(s
     mapping = transaction.hset.call_args.kwargs['mapping']
     assert (record, storage.pipeline.call_args.kwargs, mapping, transaction.expire.call_args.args) == (
         {'session_id': 'synthetic-session', 'client': 'codex', 'name': 'Synthetic peer', 'state': 'waiting',
-         'ttl_seconds': 90, 'last_seen_ms': 1700123, 'expires_at_ms': 1790123},
+         'topics': None, 'ttl_seconds': 90, 'last_seen_ms': 1700123, 'expires_at_ms': 1790123},
         {'transaction': True},
         {'session_id': 'synthetic-session', 'state': 'waiting', 'ttl_seconds': 90},
         ('channels:session:synthetic-session', 90))
@@ -52,6 +53,31 @@ def test_lease_accepts_client_and_name_labels(session_storage):
     assert transaction.hset.call_args.kwargs['mapping'] == {
         'session_id': 'synthetic-session', 'client': 'cli', 'name': 'peer', 'state': 'connected',
         'ttl_seconds': 600}
+
+
+@pytest.mark.parametrize('topics', [[], ['general/main'], [f'room-{number}/main' for number in range(16)]])
+def test_sessions_accept_store_and_return_topics(client, headers, session_storage, topics):
+    _, transaction = session_storage
+    transaction.execute.return_value = [1, True, stored_session(topics=json.dumps(topics)), 90000, (1700, 123000)]
+    response = client.post('/sessions', headers=headers, json={
+        'session_id': 'synthetic-session', 'state': 'waiting', 'ttl_seconds': 90, 'topics': topics})
+    assert (response.status_code, response.json()['topics'], transaction.hset.call_args.kwargs['mapping']['topics']) == (
+        200, topics, json.dumps(topics))
+
+
+def test_omitted_topics_preserve_the_stored_list(session_storage):
+    _, transaction = session_storage
+    transaction.execute.return_value = [1, True, stored_session(topics='["general/main"]'), 90000, (1700, 123000)]
+    record = asyncio.run(persistence.lease_session('synthetic-session', 'waiting', 90))
+    assert (record['topics'], 'topics' in transaction.hset.call_args.kwargs['mapping']) == (['general/main'], False)
+
+
+@pytest.mark.parametrize('topics', ['general/main', {}, [1], ['general'], ['a/b/c'], ['x/main'] * 17])
+def test_sessions_reject_malformed_or_excess_topics(client, headers, session_storage, topics):
+    storage, _ = session_storage
+    response = client.post('/sessions', headers=headers, json={
+        'session_id': 'synthetic-session', 'state': 'waiting', 'ttl_seconds': 90, 'topics': topics})
+    assert (response.status_code, storage.pipeline.call_count) == (400, 0)
 
 
 def test_lease_timestamps_follow_delayed_redis_commit(session_storage):
@@ -89,7 +115,7 @@ def test_list_sessions_excludes_expired_closed_and_expired_during_scan(session_s
     storage.time.return_value = (1700, 123000)
     result = asyncio.run(persistence.list_sessions())
     assert result == {'sessions': [{'session_id': 'live', 'client': None, 'name': None, 'state': 'waiting',
-                                   'ttl_seconds': 90, 'last_seen_ms': 1700123, 'expires_at_ms': 1790123}]}
+                                   'topics': None, 'ttl_seconds': 90, 'last_seen_ms': 1700123, 'expires_at_ms': 1790123}]}
 
 
 @pytest.mark.parametrize('method,path', [('GET', '/channels/general/cursor'), ('GET', '/sessions'), ('POST', '/sessions')])
