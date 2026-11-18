@@ -5,6 +5,9 @@ from polyagent_channels import exchange, identity
 from polyagent_channels.setup import atomic_write
 
 
+DEFAULT_TOPIC = 'general/main'
+
+
 def read_memberships(root):
     path = root / 'joined-topics.json'
     if not path.exists():
@@ -49,7 +52,7 @@ def topics(root, project, client):
 
 def project_topics(document, project, client):
     clients = document.get(str(project), {})
-    return clients.get(client, ['general/main'])[:]
+    return clients.get(client, [DEFAULT_TOPIC])[:]
 
 
 def remember(root, project, client, label):

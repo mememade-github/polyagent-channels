@@ -489,7 +489,7 @@ def connect_topics(options, key):
 def join_remembered_topics(options, key):
     labels = remembered_topics(options)
     if labels is None:
-        labels = ['general/main']
+        labels = [membership.DEFAULT_TOPIC]
     return [ensure_topic(topic_options(options, label), key) for label in labels]
 
 
