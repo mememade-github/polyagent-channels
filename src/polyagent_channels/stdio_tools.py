@@ -25,7 +25,7 @@ CLOSE_DESCRIPTION = ('Stop receiving a channel or conversation for this project.
                      'asks to leave it.')
 CONFIRMATION_RULE = ('For a default receive on a topic this session already holds, a message marked for_you stays '
                      'unconfirmed until publish with reply_to its ID, or ack with its ID; '
-                     'until then it is shown again, marked redelivered.')
+                     'until then it is shown again while retained, marked redelivered.')
 CONNECT_DESCRIPTION = ('Join a channel or conversation so its peer messages wake this session; the project '
                        'stays joined until close. With no topic, join the topics this project remembers.')
 ANNOUNCEMENT_NOTICE = 'An announcement does not prove a peer is online.'
