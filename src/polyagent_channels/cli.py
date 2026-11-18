@@ -492,14 +492,24 @@ def connect_topics(options, key):
 
 def join_remembered_topics(options, key):
     labels = remembered_topics(options)
+    close_left_topics(options, labels)
     if labels is None:
         labels = [membership.DEFAULT_TOPIC]
     return [ensure_topic(topic_options(options, label), key) for label in labels]
 
 
 def join_missing_topics(options, key):
-    for label in remembered_topics(options) or []:
+    labels = remembered_topics(options)
+    close_left_topics(options, labels)
+    for label in labels or []:
         join_missing_topic(topic_options(options, label), key)
+
+
+def close_left_topics(options, labels):
+    if labels is None:
+        return
+    for path in exchange.list_states(options.state_dir, options.session_id):
+        exchange.close_unremembered_topic(path, labels)
 
 
 def join_missing_topic(options, key):

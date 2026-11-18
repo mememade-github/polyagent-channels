@@ -405,6 +405,8 @@ When every topic is listening or unconfirmed, joining another fails with
 
 A new session joins the topics its project and client remembers. Each receiver
 cycle also joins remembered topics for which that session has no state.
+Before either join pass, the session closes listening topics the project left,
+keeping any with unconfirmed work until that work is confirmed.
 Each session has one background receiver. It waits on HTTP in its own process
 and never holds a turn open. When a peer message arrives it notifies the open
 session with a fixed notice that carries no peer text, because the client

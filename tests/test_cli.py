@@ -500,6 +500,111 @@ def test_open_session_picks_up_new_membership_on_next_cycle(connection_client, m
     assert sorted(cli.presence_payload(selected)['topics']) == ['general/main', 'review/main']
 
 
+@pytest.mark.parametrize('channel, remaining', [('general', []), ('review', ['general/main'])])
+def test_open_session_drops_membership_left_by_another_session_on_next_cycle(connection_client, monkeypatch, channel, remaining):
+    session = connection_client
+    session.invoke('connect', channel)
+    selected = member_options(session, 'other-session', 'watch')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    session.invoke('close', channel)
+    monkeypatch.setattr(exchange, 'watch_topics', AsyncMock(return_value=[]))
+    cli.watch_once(selected, 'synthetic-connection-key')
+    assert cli.presence_payload(selected)['topics'] == remaining
+
+
+def test_open_session_replaces_left_topics_at_the_limit_on_next_cycle(connection_client, monkeypatch):
+    session = connection_client
+    session.invoke('connect')
+    for number in range(15):
+        session.invoke('connect', f'room-{number}')
+    selected = member_options(session, 'other-session', 'watch')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    initial_topics = cli.presence_payload(selected)['topics']
+    for number in range(5):
+        session.invoke('close', f'room-{number}')
+    for number in range(15, 20):
+        session.invoke('connect', f'room-{number}')
+    remembered = cli.remembered_topics(selected)
+    monkeypatch.setattr(exchange, 'watch_topics', AsyncMock(return_value=[]))
+    cli.watch_once(selected, 'synthetic-connection-key')
+    assert (len(initial_topics), len(remembered), sorted(cli.presence_payload(selected)['topics'])) == (
+        16, 16, sorted(remembered))
+
+
+def test_left_topic_stays_until_unconfirmed_work_is_confirmed(connection_client, monkeypatch):
+    session = connection_client
+    session.invoke('connect', 'review')
+    selected = member_options(session, 'other-session', 'watch')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    target = {'channel': 'review', 'conversation_id': 'main'}
+    path = exchange.owned_state(session.directory, selected.session_id, target)
+    exchange.settle_read(path, '2-0', ['2-0'])
+    session.invoke('close', 'review')
+    monkeypatch.setattr(exchange, 'watch_topics', AsyncMock(return_value=[]))
+    cli.watch_once(selected, 'synthetic-connection-key')
+    pending = exchange.read_state(path)['pending']
+    topics_before_ack = sorted(cli.presence_payload(selected)['topics'])
+    exchange.ack_exchange(session.directory, selected.session_id, target, '2-0')
+    cli.watch_once(selected, 'synthetic-connection-key')
+    assert (pending, topics_before_ack, cli.presence_payload(selected)['topics']) == (
+        ['2-0'], ['general/main', 'review/main'], ['general/main'])
+
+
+@pytest.mark.parametrize('join_topics', [cli.join_default_topic, cli.connect_topics])
+def test_joining_all_remembered_topics_drops_topics_the_project_left(connection_client, join_topics):
+    session = connection_client
+    session.invoke('connect', 'review')
+    selected = member_options(session, 'other-session')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    session.invoke('close', 'review')
+    join_topics(selected, 'synthetic-connection-key')
+    assert cli.presence_payload(selected)['topics'] == ['general/main']
+
+
+@pytest.mark.parametrize('join_topics', [cli.join_missing_topics, cli.join_remembered_topics])
+def test_session_outside_an_installed_project_keeps_its_topics(connection_client, join_topics):
+    session = connection_client
+    selected = member_options(session, 'outside-session')
+    selected.project = str(session.root.parent / 'uninstalled')
+    cli.ensure_topic(cli.topic_options(selected, 'review/main'), 'synthetic-connection-key')
+    cli.ensure_topic(cli.topic_options(selected, 'general/main'), 'synthetic-connection-key')
+    join_topics(selected, 'synthetic-connection-key')
+    assert (cli.remembered_topics(selected), sorted(cli.presence_payload(selected)['topics'])) == (
+        None, ['general/main', 'review/main'])
+
+
+@pytest.mark.parametrize('join_topics', [cli.join_missing_topics, cli.join_remembered_topics])
+def test_joining_remembered_topics_keeps_positions_of_topics_only_published_to(connection_client, join_topics):
+    session = connection_client
+    session.invoke('publish', 'review', '--text', 'hello')
+    path = exchange.owned_state(session.directory, 'native-self')
+    saved = exchange.read_state(path)
+    selected = member_options(session, 'native-self')
+    join_topics(selected, 'synthetic-connection-key')
+    assert exchange.read_state(path) == saved
+
+
+def test_left_topic_keeps_work_recorded_before_its_lock_is_acquired(connection_client, monkeypatch):
+    session = connection_client
+    session.invoke('connect', 'review')
+    selected = member_options(session, 'other-session', 'watch')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    path = exchange.owned_state(session.directory, selected.session_id, {'channel': 'review', 'conversation_id': 'main'})
+    session.invoke('close', 'review')
+    original_lock = exchange.locked_state
+    def record_work_before_lock(selected_path):
+        if selected_path == path:
+            with original_lock(path):
+                state = exchange.read_state(path)
+                exchange.write_state(path, exchange.with_pending(state, ['2-0'], '2-0'))
+        return original_lock(selected_path)
+    monkeypatch.setattr(exchange, 'locked_state', record_work_before_lock)
+    monkeypatch.setattr(exchange, 'watch_topics', AsyncMock(return_value=[]))
+    cli.watch_once(selected, 'synthetic-connection-key')
+    assert (exchange.read_state(path)['pending'], sorted(cli.presence_payload(selected)['topics'])) == (
+        ['2-0'], ['general/main', 'review/main'])
+
+
 def test_connect_without_topic_returns_all_remembered_topics(connection_client):
     session = connection_client
     session.invoke('connect', 'review')

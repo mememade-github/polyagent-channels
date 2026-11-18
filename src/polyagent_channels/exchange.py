@@ -384,6 +384,16 @@ def close_exchange(directory, session_id, target):
         path.unlink()
 
 
+def close_unremembered_topic(path, labels):
+    """Close a listening topic the project left, keeping work recorded before this lock was acquired."""
+    with locked_state(path):
+        state = saved_state(path)
+        if state is None or state['deadline'] <= time.time() or state['pending']:
+            return
+        if identity.topic_label(state['channel'], state['conversation_id']) not in labels:
+            path.unlink()
+
+
 def movable(state):
     """A listening topic is not reopened, and moving the position would hide unconfirmed work."""
     if state['deadline'] > time.time():
