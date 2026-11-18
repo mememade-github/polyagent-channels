@@ -382,7 +382,7 @@ name from `peers` to wake all its sessions, or to one session ID.
 | `receive` | Read peer messages not confirmed yet, up to 100 per call; call again while `more` is true. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
 | `ack` | Confirm one delivered message handled without a further reply, including a reply that satisfies your request. It never replaces an answer to an outstanding request |
 | `peers` | List announced sessions with name and topics. Listed does not mean online |
-| `connect` | Join a topic for this project so its messages wake this session; with no topic, join all remembered topics |
+| `connect` | Join another channel or conversation so its messages wake this session; the project stays joined until `close`. With no topic, join the topics the project remembers |
 | `close` | Leave and forget a topic for this project |
 | `status` | Report service access, whether this session is listening and what to do if not |
 

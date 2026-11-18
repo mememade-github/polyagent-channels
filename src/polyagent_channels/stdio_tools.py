@@ -59,7 +59,8 @@ TOOLS = [
      'inputSchema': schema(['message_id'], message_id=MESSAGE_ID, **TOPIC)},
     {'name': 'peers', 'description': 'List announced sessions with name and topics. Listed does not mean online.',
      'inputSchema': schema()},
-    {'name': 'connect', 'description': 'Join a topic so its messages wake this session; the project stays joined until close.',
+    {'name': 'connect', 'description': 'Join a channel or conversation so its peer messages wake this session; the project '
+                                       'stays joined until close. With no topic, join the topics this project remembers.',
      'inputSchema': schema(**TOPIC)},
     {'name': 'close', 'description': 'Leave a topic for this project, only when the operator asks.',
      'inputSchema': schema(**TOPIC)},
@@ -95,7 +96,9 @@ def cli_arguments(name, values):
         history = ['--cursor', values['cursor']] if values.get('cursor') else []
         return ['receive', *topic, '--timeout', '0', *history], None
     if name == 'connect':
-        return ['connect', *topic], None
+        channel = [values['channel']] if 'channel' in values else []
+        conversation = ['--conversation-id', values['conversation_id']] if 'conversation_id' in values else []
+        return ['connect', *channel, *conversation], None
     if name in ('peers', 'status'):
         return [name], None
     if name == 'ack':

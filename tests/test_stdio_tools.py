@@ -119,6 +119,19 @@ def test_publish_tool_refuses_an_empty_recipient(tmp_path, monkeypatch, installe
     assert (result['isError'], result['content'][0]['text'].strip()) == (True, 'channel client failed: recipient_invalid')
 
 
+@pytest.mark.parametrize('arguments, expected', [
+    ({}, ['connect']),
+    ({'channel': 'review'}, ['connect', 'review']),
+    ({'conversation_id': 'design'}, ['connect', '--conversation-id', 'design']),
+    ({'channel': 'review', 'conversation_id': 'design'}, ['connect', 'review', '--conversation-id', 'design']),
+])
+def test_connect_tool_passes_only_the_topic_arguments_given(tmp_path, monkeypatch, executed, arguments, expected):
+    monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'session')
+    stdio_tools.call(adapter_options(tmp_path, 'claude'), {'name': 'connect', 'arguments': arguments}, None)
+    command = executed[0][0]
+    assert command[command.index('connect'):] == expected
+
+
 @pytest.mark.parametrize('identifier', ['general', '_', 'a-b', 'x' * 128])
 def test_tool_identifier_pattern_accepts_exchange_identifiers(identifier):
     assert re.fullmatch(stdio_tools.IDENTIFIER['pattern'], identifier)
