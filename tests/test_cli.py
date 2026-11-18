@@ -507,6 +507,14 @@ def test_connect_without_topic_returns_all_remembered_topics(connection_client):
     assert (sorted(topic['channel'] for topic in result['topics']), 'topic' in result) == (['general', 'review'], False)
 
 
+def test_connect_with_topic_returns_only_that_topic(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    result = session.invoke('connect', 'review', '--conversation-id', 'design')
+    assert ([(topic['channel'], topic['conversation_id']) for topic in result['topics']], 'topic' in result) == (
+        [('review', 'design')], False)
+
+
 def test_membership_limit_refuses_before_session_state_changes(connection_client):
     session = connection_client
     for number in range(15):

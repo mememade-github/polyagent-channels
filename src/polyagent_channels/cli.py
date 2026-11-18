@@ -487,7 +487,7 @@ def connect_topics(options, key):
     topic = topic_of(options)
     label = identity.topic_label(topic['channel'], topic['conversation_id'])
     membership.remember(*membership_owner(options), label)
-    return {'topic': ensure_topic(topic_options(options, label), key)}
+    return {'topics': [ensure_topic(topic_options(options, label), key)]}
 
 
 def join_remembered_topics(options, key):
