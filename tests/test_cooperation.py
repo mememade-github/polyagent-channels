@@ -313,6 +313,50 @@ def test_quiet_topic_does_not_delay_another(tmp_path, monkeypatch):
     assert result[0]['text'] == 'ready' and cancelled == [paths[0]]
 
 
+@pytest.mark.parametrize('first_page', [
+    {'messages': [{'id': '1-0', 'session_id': 'peer', 'to': 'another-member'}], 'cursor': '1-0'},
+    {'messages': [], 'cursor': '0-0'},
+])
+def test_topic_keeps_polling_after_a_page_without_a_notice(tmp_path, first_page):
+    paths = []
+    for channel in ('quiet', 'busy'):
+        topic = exchange.new_state('native-a', {**TARGET, 'channel': channel}, 600)
+        exchange.open_exchange(tmp_path, 'native-a', topic)
+        paths.append(exchange.owned_state(tmp_path, 'native-a', topic))
+    pages = iter([first_page, {'messages': [{'id': '2-0', 'session_id': 'peer', 'to': 'native-a'}], 'cursor': '2-0'}])
+    cursors = []
+
+    async def handler(request):
+        if request.url.path == '/channels/quiet/messages':
+            await asyncio.sleep(.2)
+            return httpx.Response(200, json={'messages': [], 'cursor': '0-0'})
+        cursors.append(request.url.params['cursor'])
+        return httpx.Response(200, json=next(pages))
+
+    async def run():
+        async with httpx.AsyncClient(base_url='http://synthetic/', transport=httpx.MockTransport(handler)) as client:
+            return await exchange.watch_topics(client, paths, {'session_id': 'native-a', 'name': None}, .1)
+
+    notices = asyncio.run(run())
+    assert ([item['through'] for item in notices], cursors) == (['2-0'], ['0-0', first_page['cursor']])
+
+
+def test_repeated_quiet_pages_do_not_extend_the_watch_cycle(tmp_path):
+    path = opened(tmp_path)
+
+    async def handler(request):
+        return httpx.Response(200, json={'messages': [], 'cursor': request.url.params['cursor']})
+
+    async def run():
+        async with httpx.AsyncClient(base_url='http://synthetic/', transport=httpx.MockTransport(handler)) as client:
+            started = time.monotonic()
+            notices = await exchange.watch_topics(client, [path], {'session_id': 'native-a', 'name': None}, .1)
+            return notices, time.monotonic() - started
+
+    notices, elapsed = asyncio.run(run())
+    assert (notices, .09 <= elapsed < .5) == ([], True)
+
+
 def test_two_topics_due_at_once_are_both_returned_and_neither_recorded(tmp_path):
     paths = []
     for name in ('first', 'second'):

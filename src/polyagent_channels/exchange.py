@@ -550,16 +550,28 @@ async def next_notice(client, path, reader, duration):
 
 async def watch_topics(client, paths, reader, duration=WATCH_POLL):
     """Wait on every open topic at once so a quiet topic never delays another; return all topics now due."""
-    tasks = {asyncio.create_task(next_notice(client, path, reader, duration)) for path in paths}
+    deadline = time.monotonic() + duration
+    tasks = {asyncio.create_task(watch_topic(client, path, reader, deadline)) for path in paths}
     all_tasks = set(tasks)
     try:
         while tasks:
-            done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            remaining = max(0, deadline - time.monotonic()) if duration else None
+            done, tasks = await asyncio.wait(tasks, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
             notices = [notice for notice in [task.result() for task in done] if notice]
-            if notices:
+            if notices or not done:
                 return notices
         return []
     finally:
         for task in all_tasks:
             task.cancel()
         await asyncio.gather(*all_tasks, return_exceptions=True)
+
+
+async def watch_topic(client, path, reader, deadline):
+    remaining = max(0, deadline - time.monotonic())
+    notice = None
+    while path.exists() and notice is None and remaining >= 0:
+        notice = await next_notice(client, path, reader, math.ceil(remaining))
+        await asyncio.sleep(0)
+        remaining = deadline - time.monotonic()
+    return notice
