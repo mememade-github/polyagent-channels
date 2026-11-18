@@ -505,16 +505,17 @@ async def reply_target(client, target, message):
 
 
 async def addressed_to(client, target, message, session_id, name=None):
-    """A reply wakes only the author of its target; unknown or evicted targets still wake."""
+    """Resolve the reply target before applying the shared recipient and author rule."""
     answered = await reply_target(client, target, message)
     return message_for_session(message, answered, session_id, name)
 
 
 def message_for_session(message, answered, session_id, name=None):
-    """A reply is for the author of its target; new or evicted targets are for everyone."""
+    """An explicit recipient wins; otherwise replies follow the target's session or installed name."""
     if message.get('to') is not None:
         return message['to'] in (session_id, name)
-    return answered is None or answered.get('session_id') == session_id
+    return (answered is None or answered.get('session_id') == session_id
+            or (name is not None and answered.get('sender') == name))
 
 
 async def next_notice(client, path, session_id, duration, name=None):

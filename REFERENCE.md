@@ -415,7 +415,10 @@ reply; `ack` it with its ID.
 **Who wakes.** A session never wakes itself. With `to`, only sessions whose
 installed display name or session ID matches the recipient wake. Without `to`,
 a new message wakes every other session on the topic and a reply wakes only the
-author of the message it answers. Other recipients can read the row later with
+author of the message it answers and every session whose installed name equals
+that target’s `sender`. An unnamed session keeps the session-only rule. The
+`expected` confirmation hint stays with the session that wrote the target.
+Other recipients can read the row later with
 `for_you: false`; it never becomes their unconfirmed work. Each session keeps its own
 position, so one session reading consumes nothing for another. A client installed
 from an earlier release ignores `to` and still wakes for every new message.

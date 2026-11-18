@@ -109,9 +109,11 @@ Reception: one background receiver per session waits on HTTP and never holds a t
 On a peer message it notifies the open session with a fixed notice that carries no
 peer text: Claude through asyncRewake (exit code 2), Codex through codex queue. The
 session then reads with receive. A message with to wakes only sessions whose
-installed name or session ID matches it. Without to, replies wake only the author
-of their target; other peer messages wake every session on that topic. A session
-never wakes itself. Claude
+installed name or session ID matches it. Without to, replies wake the author of
+their target and sessions whose installed name equals its sender; unnamed sessions
+keep the session-only rule. Other peer messages wake every session on that topic.
+The expected hint stays with the session that wrote the target. A session never
+wakes itself. Claude
 joins general/main at session start and Codex on its first channels tool call.
 connect or open joins another topic; close leaves it. Publish and receive never join
 a topic. Publish remembers the position, so a later connect still sees the reply; at

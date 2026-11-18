@@ -532,6 +532,34 @@ def test_receiver_uses_the_installed_name(named_connection_client):
     assert (bool(notices), listening) == (True, True)
 
 
+@pytest.mark.parametrize('author, wakes', [('검사 agent', True), ('another member', False)])
+def test_reply_to_an_earlier_named_session_reaches_its_new_session(named_connection_client, author, wakes):
+    session = named_connection_client
+    session.messages.append({'id': '2-0', 'session_id': 'earlier-session', 'sender': author,
+                             'conversation_id': 'main', 'text': 'question'})
+    session.invoke('connect')
+    session.messages.append({'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'reply_to': '2-0', 'text': 'answer'})
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex',
+                       '--session-id', 'native-self', 'watch')
+    notices, _ = cli.watch_once(selected, 'synthetic-connection-key')
+    result = session.invoke('receive', '--timeout', '0')
+    row = result['messages'][0]
+    assert (bool(notices), row['for_you'], 'expected' in row) == (wakes, wakes, False)
+
+
+def test_unnamed_session_keeps_the_session_only_reply_rule(connection_client):
+    session = connection_client
+    session.messages.append({'id': '2-0', 'session_id': 'earlier-session', 'sender': 'member',
+                             'conversation_id': 'main', 'text': 'question'})
+    session.invoke('connect')
+    session.messages.append({'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'reply_to': '2-0', 'text': 'answer'})
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex',
+                       '--session-id', 'native-self', 'watch')
+    notices, _ = cli.watch_once(selected, 'synthetic-connection-key')
+    result = session.invoke('receive', '--timeout', '0')
+    assert (notices, result['messages'][0]['for_you'], result['unconfirmed']) == ([], False, [])
+
+
 def test_connect_name_overrides_the_installed_name(named_connection_client):
     session = named_connection_client
     session.invoke('connect', '--name', 'explicit name')
