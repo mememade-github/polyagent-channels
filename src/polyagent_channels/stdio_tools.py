@@ -58,7 +58,7 @@ TOOLS = [
     {'name': 'peers', 'description': 'List announced sessions with name and topics. Listed does not mean online.',
      'inputSchema': schema()},
     {'name': 'connect', 'description': 'Join a channel or conversation so its peer messages wake this session.',
-     'inputSchema': schema(**TOPIC, name={'type': 'string', 'description': 'Display name for peers; not verified.'})},
+     'inputSchema': schema(**TOPIC)},
     {'name': 'close', 'description': 'Stop receiving a channel or conversation. Use only when the operator asks to leave it.',
      'inputSchema': schema(**TOPIC)},
     {'name': 'status', 'description': 'Report service access, whether this session is listening, and what to do if not.',
@@ -93,7 +93,7 @@ def cli_arguments(name, values):
         history = ['--cursor', values['cursor']] if values.get('cursor') else []
         return ['receive', *topic, '--timeout', '0', *history], None
     if name == 'connect':
-        return ['connect', *topic, *(['--name=' + values['name']] if values.get('name') else [])], None
+        return ['connect', *topic], None
     if name in ('peers', 'status'):
         return [name], None
     if name == 'ack':

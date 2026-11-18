@@ -88,10 +88,11 @@ def test_message_text_travels_through_stdin_only(tmp_path, monkeypatch, executed
             and command[-2:] == ['--reply-to', '1-0'] and settings['env']['PYTHONUTF8'] == '1')
 
 
-def test_display_name_cannot_become_an_option(tmp_path, monkeypatch, executed):
+def test_recipient_cannot_become_an_option(tmp_path, monkeypatch, executed):
     monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'session')
-    stdio_tools.call(adapter_options(tmp_path, 'claude'), {'name': 'connect', 'arguments': {'name': '--client=codex'}}, None)
-    assert executed[0][0][-1] == '--name=--client=codex'
+    stdio_tools.call(adapter_options(tmp_path, 'claude'),
+                     {'name': 'publish', 'arguments': {'text': 'hello', 'to': '--client=codex'}}, None)
+    assert executed[0][0][-1] == '--to=--client=codex'
 
 
 def test_publish_tool_maps_recipient_to_one_cli_argument():
@@ -110,7 +111,8 @@ def test_deeply_nested_line_is_a_parse_error():
 
 def test_argument_the_system_refuses_is_a_tool_error(tmp_path, monkeypatch):
     monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'session')
-    result = stdio_tools.call(adapter_options(tmp_path, 'claude'), {'name': 'connect', 'arguments': {'name': 'a\x00b'}}, None)
+    result = stdio_tools.call(adapter_options(tmp_path, 'claude'),
+                              {'name': 'publish', 'arguments': {'text': 'hello', 'to': 'a\x00b'}}, None)
     assert result == stdio_tools.tool_error('ValueError')
 
 
