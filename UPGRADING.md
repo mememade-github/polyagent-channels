@@ -13,7 +13,12 @@ Topics joined with an earlier client are not remembered: after
 [initial membership](REFERENCE.md#agent-tools), and a resumed session stops listening on its other topics
 unless they hold unconfirmed work. Run `connect` once for each other topic.
 
-Follow the [updated first-connection procedure](src/polyagent_channels/harness.py) when reinstalling; its name selection is now required.
+<!-- generated: name -->
+`/help` step 1 now requires a display name for each project and client.
+Set NAME first: what peers call this project and client,
+e.g. myrepo-claude; ask the operator when unsure.
+See [Display name](REFERENCE.md#display-name) before reinstalling.
+<!-- end generated: name -->
 
 Consumers of the former `channels connect` result key `topic` must use the
 [`topics` result](REFERENCE.md#cli).

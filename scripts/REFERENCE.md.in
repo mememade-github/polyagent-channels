@@ -1,0 +1,696 @@
+## Privilege boundary
+
+This service is a trusted-group tool, **not** a security sandbox. Every
+client holding the shared key can read and write every channel. There are
+no accounts, roles or per-channel ACLs. For asserted session labels, see the
+[protocol reference](#http-websocket-and-mcp).
+
+Apply the [peer-message trust policy](#agent-tools). Share only
+content authorized for peers and their model providers. Keep provider
+credentials out of channels; each agent uses its own tools and model
+account.
+
+The service image keeps the inherited Polyagent DevContainer shape:
+
+- The image is about 4 GB. The `vscode` user has passwordless sudo
+  (`NOPASSWD:ALL`). The Claude, Codex and Antigravity CLIs, the Docker CLI
+  and Node are installed.
+- The build fetches provider installers at their
+  latest, unpinned versions, so a rebuild is not reproducible. The service's
+  Python dependencies are the exception: `requirements.lock` pins them with
+  hashes, and a package whose hash differs stops the build.
+- The service process can write to the repository mounted at `/workspaces`.
+  `setup-env.sh` sets `core.filemode false` in that repository's git config
+  at each start.
+- The service container mounts the Docker socket of its host at
+  `/var/run/docker.sock`, as the upstream DevContainer does, and `vscode` is
+  in the `docker` group. Every process in the container, the service and any
+  agent run there included, controls that Docker daemon: it can start
+  privileged containers, mount any path the daemon can reach and remove other
+  projects' containers and volumes. On a Linux host this equals root on the
+  host; under Docker Desktop it covers the Docker VM and every host folder
+  Docker Desktop shares. With [network exposure](#network-exposure), a flaw in the service, or an agent in the
+  container that acts on a hostile message, reaches all of that and not only
+  this repository. No setting turns the mount off. Run the service only on a
+  host and network where this is acceptable.
+- Do not recreate the service container from inside it: the command ends with
+  the container it runs in, before the new one starts.
+- No host agent credentials are mounted. Every process in the container can read the
+  [agent data retained across recreation](#upgrade-and-rollback).
+- The container log starts with the inherited setup banner, such as a Codex
+  config warning and `Start: claude`, before the service output.
+
+## Configuration (`.devcontainer/.env`)
+
+Every Compose command runs from the repository root and selects this ignored
+file with `--env-file`, as in the upstream Polyagent DevContainer, so create it
+first. Defaults are defined in [docker-compose.yml](.devcontainer/docker-compose.yml);
+`.env.example` lists optional overrides. The VS Code DevContainer reads
+the same file; shell variables take precedence.
+
+```bash
+cp .devcontainer/.env.example .devcontainer/.env
+chmod 600 .devcontainer/.env
+# Edit the file, then recreate the services:
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --build
+```
+
+Another instance on the same Docker host uses a separate env file, such as
+`.devcontainer/.env.instance-b`, with its own `COMPOSE_PROJECT_NAME`,
+`CONTAINER_NAME`, `IMAGE_NAME` and `CHANNEL_PORT`, and every Compose command
+for it selects that file. A shared `IMAGE_NAME` lets one instance's build
+replace the image the other runs and rolls back to.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CHANNEL_BIND` | `{{compose.CHANNEL_BIND}}` | Host address the port is published on; see [Network exposure](#network-exposure) |
+| `CHANNEL_PORT` | `{{compose.CHANNEL_PORT}}` | Host port (container port {{compose.container_port}}) |
+| `COMPOSE_PROJECT_NAME` | `{{compose.COMPOSE_PROJECT_NAME}}` | Compose project name; it prefixes the Redis container and the volumes. Keep it for an existing instance, since another name starts with empty volumes. For a second instance, use the separate env file described above |
+| `CONTAINER_NAME` | `{{compose.CONTAINER_NAME}}` | Service container name |
+| `IMAGE_NAME` | `{{compose.IMAGE_NAME}}` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
+| `IMAGE_TAG` | `{{compose.IMAGE_TAG}}` | Service image tag |
+| `HOST_WORKSPACE_PATH` | `{{compose.HOST_WORKSPACE_PATH}}` | Repository path relative to the Compose file, as the Docker daemon sees it; set only when that differs |
+| `CHANNEL_RETENTION_DAYS` | `{{compose.CHANNEL_RETENTION_DAYS}}` | Nonnegative integer; see [Retention](#persistence-and-limits) for disabling age expiration |
+| `CHANNEL_MAX_STORAGE_BYTES` | `{{compose.CHANNEL_MAX_STORAGE_BYTES}}` | {{storage.validation}}; [Byte cap](#persistence-and-limits) defines what it counts |
+| `CHANNEL_LOG_MAX_SIZE` | `{{compose.CHANNEL_LOG_MAX_SIZE}}` | Docker `local` log segment size for both services |
+| `CHANNEL_LOG_MAX_FILES` | `{{compose.CHANNEL_LOG_MAX_FILES}}` | Retained compressed segments per service |
+| `REDIS_AOF_REWRITE_PERCENTAGE` | `{{compose.REDIS_AOF_REWRITE_PERCENTAGE}}` | Automatic AOF rewrite growth threshold |
+| `REDIS_AOF_REWRITE_MIN_SIZE` | `{{compose.REDIS_AOF_REWRITE_MIN_SIZE}}` | Minimum AOF size before automatic rewrite |
+
+### Network exposure
+
+For the bind default, see [Configuration](#configuration-devcontainerenv). Other computers and
+other containers on the same Docker host all connect to
+`http://<host-LAN-IPv4>:<CHANNEL_PORT>`; `0.0.0.0` is a bind setting, not a client
+address. `host.docker.internal` and container names depend on each container's
+DNS and network settings and are not supported client addresses. In particular,
+an explicit container `dns:` setting can prevent `host.docker.internal` from
+resolving. Redis has no published host port or password; containers on its Docker network can also reach it.
+
+Plaintext HTTP exposes the Bearer header. {{client_config.TRANSPORT_TRUST}} To restrict access, save `CHANNEL_BIND=127.0.0.1` before the first start to allow only the Docker
+host itself, excluding other containers on that host, or use HTTPS through a
+proxy or a VPN.
+
+Clients send the key only to the configured address: HTTP requests do not
+follow redirects, and `listen` refuses any WebSocket redirect with
+`HTTP redirect refused`. Clients do use proxies from the environment, and over
+plaintext HTTP a proxy can read the key:
+
+- HTTP requests use `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`.
+- `listen` uses `WS_PROXY` or `WSS_PROXY`, else `HTTPS_PROXY`, else for `ws`
+  `HTTP_PROXY`, and honors `NO_PROXY`. It ignores `ALL_PROXY`.
+- SOCKS proxies are not supported; a SOCKS setting makes the client fail.
+
+**Find and check the address.** After a change, run
+`docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d`.
+Confirm publication with:
+
+```bash
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps
+```
+
+The port should show `{{compose.CHANNEL_BIND}}:<CHANNEL_PORT>->{{compose.container_port}}/tcp` with your overrides. On Docker Desktop the
+previous host port can stay unavailable briefly; retry, or choose another
+`CHANNEL_PORT`. Find the LAN IPv4 on the Docker host's own operating system,
+not inside a container or WSL:
+
+**Windows with Docker Desktop.** In PowerShell:
+
+```powershell
+Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | ForEach-Object { $_.IPv4Address.IPAddress }
+```
+
+Docker publication and the Windows firewall are separate boundaries. To allow
+the chosen port from the local subnet, run in administrator PowerShell:
+
+```powershell
+$ChannelPort = {{compose.CHANNEL_PORT}} # Match CHANNEL_PORT
+New-NetFirewallRule -DisplayName "Polyagent Channels TCP $ChannelPort" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $ChannelPort -RemoteAddress LocalSubnet -Profile Private,Domain
+```
+
+The rule excludes Public-profile networks. This project does not apply firewall
+rules for you.
+
+**macOS with Docker Desktop.** In the host's shell:
+
+```bash
+ipconfig getifaddr "$(route -n get default | awk '/interface:/{print $2}')"
+```
+
+Allow Docker's incoming connections in System Settings → Network → Firewall.
+Changing networks can change the address.
+
+**Linux.** In the Docker host's shell:
+
+```bash
+ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}'
+```
+
+Docker-published ports bypass ufw-style host firewall rules. Use the binding
+restriction described above or Docker-aware firewall rules.
+
+From each client computer or container, check the address you found:
+
+```bash
+curl --fail http://<host-LAN-IPv4>:<CHANNEL_PORT>/health
+```
+
+If it fails, check publication and the host firewall guidance above.
+
+**Keep the address stable.** Reserve the host's LAN IPv4 in DHCP using its
+network adapter's MAC address, or arrange a static IP with the network
+administrator. Find the adapter's MAC address on the host:
+
+| Host | Command |
+|------|---------|
+| Windows PowerShell | `Get-NetAdapter \| Where-Object Status -eq 'Up' \| Select-Object Name, MacAddress` |
+| macOS | `ifconfig <interface> \| awk '/ether/{print $2}'` (use the interface from `route -n get default`) |
+| Linux | `ip -br link` |
+
+If the address changes, follow [Changing the service address](#changing-the-service-address)
+for every installed project and client.
+
+## Client installation
+
+{{help.requirements}}
+
+`GET /help` prints the procedure with that service's installer checksum. Read it
+at a trusted origin and obtain approval once for local installation and the intended
+collaboration. {{help.install}}
+
+Choose the [display name](#display-name) before running step 1 from the project
+directory. Replace `service-host` with the address from [Network exposure](#network-exposure).
+The commands below fetch the checksum from that service:
+
+```bash
+{{help.commands}}
+```
+
+{{help.failure}} Installation contacts no channel service.
+The default root is `~/{{client_config.DEFAULT_ROOT}}`; set `CHANNEL_ROOT` or
+pass `--target` for another. For the key handoff, see [Shared key](#shared-key).
+
+{{help.next}}
+
+| Client | Next step |
+|--------|-----------|
+| Claude Code | {{setup.claude_next}} |
+| Codex | {{setup.codex_next}} |
+
+Derived from [harness.setup_help](src/polyagent_channels/harness.py) and
+[setup.NEXT_STEP](src/polyagent_channels/setup.py).
+
+### Display name
+
+{{help.name}}
+
+The name is used in session announcements and as the default message sender; see [Privilege boundary](#privilege-boundary) for its trust boundary. Reinstalling without `--name` keeps the saved name while the installation record remains. Supply `--name` again to change it. Installations without a name keep the session ID as sender.
+
+If the client home is lost, as when its container is recreated, the saved display
+name is lost too. Repeat the installation with `--name LABEL` to restore it and
+save the shared key again. Project settings can outlive the home; reinstalling
+at the same root restores their callbacks and registration.
+
+### Updating a client
+
+{{help.update}}
+
+For saved data, see [Retained data](#retained-data). Uninstall removes the saved
+[display name](#display-name), so supply it again.
+
+### Changing the service address
+
+The URL is shared by every project and client using an installation root.
+Uninstall every one of them with `harness.pyz uninstall --project PATH
+--client CLIENT` (and `--target ROOT` for a custom root). For saved data, see [Uninstall](#uninstall). Removing only one of several installations leaves the
+shared URL in place and a new URL is refused.
+See [Updating a client](#updating-a-client) for name restoration.
+
+After the last uninstall, follow the [first-connection procedure](#client-installation) at the new service URL for each project and client. Its restart step matters here: a receiver keeps the address it read when it started. If the new service also uses a different key,
+save it with `channels key --replace-key`.
+
+### Shared key
+
+The container generates one key in ignored `.env/channel.key` at first start
+and never prints it. An existing key is kept. A key that is not at least {{auth.KEY_MIN_LENGTH}} printable ASCII characters without whitespace stops startup, since clients cannot send it.
+The service creates the directory with mode {{key.directory_mode}} and the file with {{key.file_mode}}. It
+never changes the mode of an existing directory: one that group or others can
+open stops startup. To rotate, replace the file, restart the service and give
+clients the new key.
+
+Save the key on a client with `bin/channels` under the [client root](#client-installation). Installation does not add it to
+`PATH`.
+
+```text
+{{cli.key_help}}
+```
+
+`--stdin` and `--source-file` exclude each other. A source key file must have
+the same file and directory modes as above; the source is retained.
+`harness.pyz install --key-file PATH` imports a key during installation.
+
+Use `ROOT`, `CHANNELS` and `CLIENT` from [Client installation](#client-installation):
+
+```text
+{{help.key}}
+```
+
+Derived from [auth.checked_key](src/polyagent_channels/auth.py),
+[cli.command_parser](src/polyagent_channels/cli.py) and the first-connection procedure above.
+
+### What installation adds
+
+| Where | Claude Code | Codex |
+|-------|-------------|-------|
+| Client registry | `claude mcp add -s local channels`, kept by the client in `~/.claude.json` for this project | none |
+| Project | `.claude/settings.local.json`: background callbacks on `SessionStart` and `Stop`, and the tool rule `mcp__channels` | `.codex/config.toml`: a marked `thread_unload_delay_secs = {{setup.unload_delay}}` line at the top, and a marked block registering the tools with `default_tools_approval_mode = "approve"` |
+| Shared root | `harness.pyz`, `bin/channels`, URL-only `config.json`, `install-manifest.json`, protected `.env/channel.key`, session-hashed `state`, `joined-topics.json` and its lock | the same |
+
+The tool rule and the approval mode record the one consent given at
+installation. Without them a woken session would stop at a permission prompt
+with nobody there.
+
+`thread_unload_delay_secs = {{setup.unload_delay}}` removes Codex's default 60-second wait: once a
+window is closed and no turn is running, Codex unloads that session, which
+ends its receiver. It applies to every session Codex loads in this project,
+channel use or not. For already loaded sessions, follow the [client-specific next step](#client-installation).
+Codex reads project settings only in a folder it trusts.
+
+Installation stops rather than replaces in these cases:
+
+- `thread_unload_delay_secs` already has a different value or another type.
+- The Codex configuration is invalid TOML.
+- Another server is named `channels`, or a receiver is unknown.
+- An installation or binding path is a symlink alias.
+
+Other settings and hooks stay.
+
+## Uninstall
+
+Run from the project directory, using `ROOT` and `PROJECT` from [Client installation](#client-installation):
+
+```bash
+{{help.remove}}
+```
+
+{{setup.UNINSTALL_NOTICE}}
+
+For `--purge-key` and the follow-up command, see [Retained data](#retained-data).
+
+`--project PATH` selects another project, `--target PATH` another root and
+`--client` one client.
+
+To reinstall after a service upgrade, follow [Updating a client](#updating-a-client).
+
+Uninstall removes exactly what installation added: the callbacks, the tool
+rule, the settings keys or file it created, this root's `channels`
+registration, and the marked Codex line and block. A settings file keeps its
+content, not necessarily its JSON formatting. Unrelated settings, modified
+program files, unknown files and native folder trust stay.
+
+- **Open sessions.** It works from inside a listening session; the wait described above can exceed a minute while a notice is retried.
+- **Failed installation.** Installation records what it owns before changing
+  client settings, so an uninstall after a failed install removes what it
+  left, including the `channels` registration.
+- **Lost client home.** Uninstall alone cannot remove callbacks whose root and
+  ownership record were lost. Reinstall at the same root, then uninstall.
+  This removes the callbacks and registration, but leaves tool rules, empty
+  settings keys and files whose original ownership is unknown. Remove those
+  remnants manually after inspecting them.
+- **Concurrent commands.** Installation holds directory locks and leaves no
+  lock file. Another installer waits, and a running command makes installation
+  changes fail with `Installation in use`.
+
+### Retained data
+
+- **Shared root.** Shared files stay while another project or client uses the
+  root. After the last project the root is removed, except the data below.
+- **Saved key and joined topics.** The key and `joined-topics.json` with its lock
+  stay through uninstall and reinstall; the output lists them under `kept`.
+  `--purge-key` removes them; after an uninstall without it, use the output's
+  `purge_key_command`. It never removes a source key and is refused while another
+  project or client shares the root.
+- **Unconfirmed work.** It does not block removal and is never confirmed by it.
+  See the [removal notice](#uninstall) for resumption.
+  The output's `discard_unconfirmed_command` deletes that record in `state`.
+
+## Agent tools
+
+In a new session, ask in plain words, for example `send hello world to the
+channel`. Available tools: {{tools.names}}. See [CLI](#cli) for their commands.
+Topic arguments default to channel `{{identity.DEFAULT_CHANNEL}}` and conversation
+`{{identity.DEFAULT_CONVERSATION}}`; `connect` with no topic joins remembered topics.
+Agent tools refuse a leading `-` in identifiers, which the CLI would read as an option.
+
+{{tools.instructions}}
+
+Derived from [stdio_tools.INSTRUCTIONS and TOOLS](src/polyagent_channels/stdio_tools.py).
+
+A channel is a shared stream; a conversation groups messages within it. A
+channel and conversation pair is a topic. A topic is a room shared by the projects
+that joined it. Each member is an installed project and client and can belong to
+several rooms.
+
+`ack` records completion locally and sends no read receipt to the peer.
+
+An installed project and client remembers
+up to {{identity.MAX_SESSION_TOPICS}} joined topics across sessions, starting with `{{membership.DEFAULT_TOPIC}}`, which counts
+toward that limit until the project leaves it with `close`; joining beyond that limit fails with
+`session_topic_limit`. The same bound applies to each session's topic states.
+At that limit a new topic replaces the oldest one that is neither listening nor
+holding unconfirmed work, such as a topic the session only published to. The
+replaced topic's saved position is dropped, so a later `connect` there starts
+at the current position and does not show replies that arrived before; a
+`receive` on it that was waiting meanwhile fails with `session_topic_replaced`.
+When every topic is listening or unconfirmed, joining another fails with
+`session_topic_limit`.
+
+## Reception
+
+A new session joins the topics its project and client remembers. Each receiver
+cycle also joins remembered topics for which that session has no state. For rejoining, see [CLI](#cli). Read positions and unconfirmed work stay with the earlier session. For propagation to already open sessions, see [Known limits](PROJECT.md#known-limits).
+Before either join pass, the session closes listening topics the project left,
+keeping any with unconfirmed work until that work is confirmed.
+Each session has one background receiver. It waits on HTTP in its own process
+and never holds a turn open. When a peer message arrives it notifies the open
+session with a fixed notice that carries no peer text, because the client
+treats the notice as trusted input. Claude Code gets it through an
+`asyncRewake` hook exiting with code 2, Codex through `codex queue`.
+
+When a receiver exits after handing off a notice, it announces `active` for up
+to {{cli.ACTIVE_LEASE_SECONDS}} seconds and records `notified` locally. {{cli.RECEIVER_RESTART}} Failure to renew the announcement does not prevent
+the wake-up, and a turn longer than the lease can disappear from `peers`.
+
+The woken model follows the [agent message-handling policy](#agent-tools).
+
+**Who wakes.** {{tools.recipients}} The `expected` confirmation hint stays with the session that wrote the target. Other recipients can read the row later with `for_you: false`; it never becomes their unconfirmed work. Each session keeps its own position, so one session reading consumes nothing for another. For older clients, see [UPGRADING.md](UPGRADING.md#015).
+
+**Confirmation.** {{stdio_tools.CONFIRMATION_RULE}}
+
+- Delivery is at least once. Message IDs identify duplicates; check
+  `redelivered` work before repeating an action.
+- While any message stays unconfirmed, the saved position stays before it, so
+  each `receive` scans from there and shows it first. Newer messages wait until
+  you reply or `ack` when {{cli.PAGE_SIZE}} unconfirmed messages fill the page or when they lie
+  more than {{read.scan_limit}} records past that position.
+- If retention removes unconfirmed work, `receive` reports `evicted_pending`.
+  {{receive.recovery}} Such IDs stay unconfirmed, so
+  they add up; when a topic's saved state would pass {{state.kib}} KiB (several hundred IDs), `receive` and other updates of that topic fail with
+  `session_state_full` until you `ack` some. `status` lists the IDs under
+  `pending`.
+- A topic with unconfirmed work refuses `close`.
+- A resumed session gets one new notice for what it had not confirmed.
+
+### Limits
+
+A notice that arrives during a turn is handled after that turn.
+
+{{help.starts}}
+
+| Situation | Claude Code | Codex |
+|-----------|-------------|-------|
+| After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
+| Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
+| Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn; listens again after it |
+| `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and [Reception](#reception) applies to the new session | — |
+| Wake-up delay | A few seconds | Within about 10 seconds when the session runs without the shared background server. `status` reports `notify_failed` while `codex queue` keeps failing |
+
+For the listening deadline and rejoining position, see [`connect` and `open`](#cli). Each receiver start renews open topics.
+
+## CLI
+
+The tools run these commands; they also work without the tools.
+
+```bash
+ROOT=${CHANNEL_ROOT:-$HOME/{{client_config.DEFAULT_ROOT}}}
+CHANNELS=$ROOT/bin/channels
+"$CHANNELS" --session-id operator connect --name Research
+"$CHANNELS" --session-id operator publish --text 'Your authorized message'
+"$CHANNELS" --session-id operator receive --timeout 0
+"$CHANNELS" --session-id operator status
+"$CHANNELS" --session-id operator close general --conversation-id main
+```
+
+Global options precede the command:
+
+```text
+{{cli.options}}
+```
+
+Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
+`status` accept neither.
+
+| Command | Behavior |
+|---------|----------|
+| `connect [--name LABEL] [--timeout SECONDS]` | {{stdio_tools.CONNECT_DESCRIPTION}} Returns `topics` as the list of topic states joined by this call (one element for a named topic). Announce the session with an expiring lease. `--name` changes only the announced label; the receiver restores the installed name on its next cycle. {{cli.CURSOR_SELECTION}} Listening seconds default to {{cli.connect_timeout}}, maximum {{exchange.RECEPTION_TIMEOUT}} |
+| `open [--cursor ID] [--timeout SECONDS]` | Remember and join a topic. For the default position and listening timeout, see `connect` above. `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`; `0-0` starts from retained history, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again |
+| `peers` | {{stdio_tools.PEERS_DESCRIPTION}} |
+| `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` overrides the [default display name](#display-name). `--reply-to ID`: {{tools.reply_to}} `--to RECIPIENT` follows [Who wakes](#reception): another session must announce that name or ID on the topic, or the CLI refuses with `recipient_unknown` before sending. The HTTP and MCP interfaces store any valid `to` without this announcement check; see [recipient limitations](PROJECT.md#known-limits). Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
+| `receive [--timeout SECONDS]` | Waits up to {{cli.receive_timeout}} seconds by default (at most {{persistence.MAX_READ_TIMEOUT}}) when nothing is new; `--timeout 0` returns at once. Records what it delivered on a topic this session already holds. Returns up to {{cli.PAGE_SIZE}} messages, reading past other conversations and its own messages; for the scan bound and blocked newer messages, see [Confirmation](#reception). `more: true` means it stopped short of the stream end it saw when it started, so run it again. `--cursor ID`: {{stdio_tools.HISTORY_DESCRIPTION}} `--all-conversations` reads across conversations and also leaves saved state unchanged |
+| `ack --message-id ID` | Follow the [message-handling policy](#agent-tools). {{tools.ack_caveat}} The position moves once none is left |
+| `close` | {{stdio_tools.CLOSE_DESCRIPTION}} |
+| `wait [--cursor ID] [--timeout SECONDS]` | Block for one peer message after `--cursor` (default `{{cli.wait_cursor}}`). `--timeout {{cli.wait_timeout}}`, the default, waits without limit; changes no saved state |
+| `listen [--cursor ID] [--timeout SECONDS]` | Follow a WebSocket subscription from `--cursor` (default `{{cli.listen_cursor}}`), across all conversations unless `--conversation-id` is given. `--timeout {{cli.listen_timeout}}`, the default, follows until stopped; otherwise follows for that many seconds. Changes no saved state |
+| `status` | {{stdio_tools.STATUS_DESCRIPTION}} See below |
+
+`publish` and `receive` never join a topic. The client adapters run `watch`, `hook` and `mcp`; they are not
+for direct use.
+
+`status` reports service access separately from reception. Its `url` field shows
+the configured service address. If the service cannot be reached, the command
+prints `service_unreachable url=<address>` to stderr instead of returning status
+JSON, so the address is visible even when the service is down.
+
+Follow the returned `next_action`:
+
+{{cli.diagnostics}}
+
+Derived from [cli.command_parser, reception_status and callback_reception](src/polyagent_channels/cli.py).
+A past observation does not promise future delivery.
+
+## HTTP, WebSocket and MCP
+
+The protocol reference, also served by `GET /help/reference`. For the shared
+trust and announcement rules, see [Network exposure](#network-exposure),
+[Agent tools](#agent-tools) and [`peers`](#cli).
+
+```text
+{{protocol}}
+```
+
+Derived from [server.HELP](src/polyagent_channels/server.py).
+
+## Persistence and limits
+
+Redis runs standalone with its default `noeviction` policy, AOF
+`appendfsync {{compose.appendfsync}}` and the `channel-data` volume. Automatic snapshots are
+off. A graceful restart preserves records; a power failure can lose about the
+last second of writes. Do not change service-owned keys from outside, except for
+[Storage state recovery](#storage-state-recovery).
+
+**Retention.** Access cleanup and a background pass every {{persistence.RETENTION_SWEEP_SECONDS}} seconds enforce age
+and capacity. Capacity removes the globally oldest messages first. Age uses the
+stream ID's millisecond timestamp. `CHANNEL_RETENTION_DAYS=0` disables age
+expiration but keeps the byte cap. Disabling expiration cannot restore deleted
+rows. Startup enforces current limits, including a lowered cap, and invalid
+settings stop it visibly.
+
+**Byte cap.** It counts the UTF-8 bytes of every stored message field name and
+value. Stream IDs, Redis overhead and persistence files are outside it. A message
+larger than the whole budget is rejected before any history is deleted. A
+retained reply can refer to an evicted target. Reply targets are checked before eviction.
+
+**Cursors.** An evicted cursor stays valid: reads return surviving records after
+it, with no gap notice. For empty and filtered pages and subscription cursors, use the [protocol reference](#http-websocket-and-mcp).
+
+**Connections.** Each service process shares one Redis pool of at most
+{{persistence.REDIS_POOL_CONNECTIONS}} connections. A listening session holds one connection for each topic it joined
+while waiting; each WebSocket subscription holds one. {{persistence.LISTENING_SESSION_CAPACITY}} sessions listening on
+all {{identity.MAX_SESSION_TOPICS}} joined topics fill the pool. Exhaustion uses the [protocol's Redis failure response](#http-websocket-and-mcp) and also refuses publishes until a read ends.
+
+**Disconnects.** A subscription notices a disconnect on its next send. An idle
+read normally waits up to {{subscribe.timeout}} seconds before a heartbeat, but storage work,
+scheduling or transport failure can delay that send.
+
+Derived from [persistence storage limits](src/polyagent_channels/persistence.py) and
+[exchange session limits](src/polyagent_channels/exchange.py).
+
+**Blocking calls.** A large cleanup blocks other Redis work for one atomic call. Allow for this
+pause when lowering its limits; for rebuilds, see [Storage state recovery](#storage-state-recovery).
+
+### Disk use
+
+The message byte cap is **not a total disk cap**. Monitor physical disk usage and
+leave room for rewrites, container layers and backups.
+
+| Data | Lifecycle | Who manages it |
+|------|-----------|----------------|
+| Redis AOF files in the volume | Automatic rewrite recycles old history. Thresholds are triggers, not size limits, and a rewrite needs extra free space | Service; operator leaves disk room |
+| `dump.rdb` in the volume | May remain; turning snapshots off does not delete it | Operator, with backups |
+| Service logs | Docker `local` rotation with compression, per the settings above | Docker |
+| Container writable layers, including tool caches | No product bound; recreating the container recycles them | Operator |
+| Agent volumes `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` | [Retained agent data](#upgrade-and-rollback). No product bound; they stay until the volume is removed | Operator |
+| `.devcontainer/.env`, `.env/channel.key` | Persist on the host | Operator |
+| Virtual environments, test caches, build outputs, smoke-test messages | Developer files; smoke-test messages age out with retention | Developer |
+| Docker images and build cache | Persist until pruned | Operator |
+
+Removing the `channel-data` volume removes messages and session announcements.
+`down -v` removes every volume of the project, the agent volumes included.
+
+## Storage state recovery
+
+When a check in the storage script fails, clients receive the [protocol's storage-state error](#http-websocket-and-mcp), and the service log records the same text. The script checks before it writes, so a
+failed call changes no data. Other Redis errors use the [protocol's Redis failure response](#http-websocket-and-mcp); their raw text is not logged. At startup these errors stop the
+service.
+
+Run Redis commands from the repository root as
+`docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml exec redis redis-cli <command>`.
+
+**Restart:** `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml restart polyagent-channels`.
+
+**Rebuild:** run `DEL channels:version`, then restart. Startup rebuilds the byte
+counter, heads and clock from the surviving `channel:*` streams in one atomic
+call, blocking Redis in proportion to history. Removed entries and the ID
+high-water marks of erased streams do not come back, so clients holding cursors
+greater than the rebuilt clock must reread from `0-0`.
+An absent storage version takes this path at startup.
+
+| Error | Cause | Action |
+|-------|-------|--------|
+| `Invalid message lifecycle arguments` | The running code and its bundled `lifecycle.lua` do not match, as after a partial or modified install | No Redis repair. `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --build` from one unmodified release |
+| `Unexpected storage key type` | Another client wrote a foreign type under a service name. `channels:heads` must be a sorted set, `channels:bytes` and `channels:version` strings, `channels:clock` and every `channel:*` key streams | Find it with `TYPE` and `SCAN`. Move it aside with `RENAMENX` to a name outside `channels:*` and `channel:*`, then Rebuild. A foreign `channel:*` key shows only as `Redis unavailable` during eviction, so check those too |
+| `Unsupported message storage version` | `channels:version` holds a value other than `{{storage.version}}` | Run a release that supports it. Only if no release wrote it, Rebuild |
+| `Message clock must be empty` | Another client wrote to `channels:clock` | `XTRIM channels:clock MAXLEN 0`, which keeps the last-generated ID, then Restart |
+| `Invalid message byte counter` | `channels:bytes` is not a nonnegative number, because another client changed it or wrote to `channel:*` streams | Stop that writer. `DEL channels:bytes`, then Rebuild |
+| `Missing message clock` | `channels:version` is `{{storage.version}}` but another client removed `channels:clock` | Rebuild |
+| `Stream ID exhausted` | The highest issued ID is the largest Redis stream ID. Reads work; publishing fails | Set `REDIS_URL` in `.devcontainer/docker-compose.yml` to a new, empty database such as `redis://redis:6379/1`, then `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d`. Clients read the new store from `0-0` |
+
+## Upgrade and rollback
+
+Run each line from the repository root, outside the service container, in
+PowerShell or bash, and stop at the first error. The commands below assume the [Compose defaults](.devcontainer/docker-compose.yml);
+substitute the identifiers selected in `.devcontainer/.env`:
+project `{{compose.COMPOSE_PROJECT_NAME}}`, service container `{{compose.CONTAINER_NAME}}`
+(`CONTAINER_NAME`), image `{{compose.IMAGE_NAME}}:{{compose.IMAGE_TAG}}`
+(`IMAGE_NAME`, `IMAGE_TAG`), Redis container `{{compose.COMPOSE_PROJECT_NAME}}-redis-1` and
+volume `{{compose.COMPOSE_PROJECT_NAME}}_channel-data`.
+
+Recreating the service container ends everything running inside it and
+discards `/tmp` and its home directory apart from the agent volumes. An agent
+session working in that DevContainer stops. The volumes keep only the folders
+they are mounted on: `~/.claude`, `~/.codex`, `~/.gemini`,
+`~/.config/antigravity` and `/commandhistory`. `~/.claude.json` is outside
+them: save its contents before every recreation and put them back before
+starting Claude Code. A copy in `~/.claude/backups/` is a fallback that can be
+older. The repository at `/workspaces`, including `.env/` and
+`.devcontainer/.env`, and the data volume stay. Copy out anything else you
+need first.
+
+Run the procedure once. Before running it again, rename the
+`polyagent-channels:previous` tag and the archive, or they are replaced. The
+archive holds every retained message: keep it private and outside the
+repository. It is written to your home directory through a bind mount, so run
+the procedure where the Docker daemon can bind that directory, such as Docker
+Desktop on the same computer. On a Linux host the archive belongs to root.
+
+Check out the release and confirm what Compose will use:
+
+```bash
+git fetch --tags
+git checkout <release tag>
+git status --short                        # must print nothing
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml config
+```
+
+Stop unless `name`, `container_name`, `image`, the bind `source`, `published`
+and the `channel-data` volume match the running service
+(`docker inspect {{compose.CONTAINER_NAME}}`).
+
+Keep the running image for rollback, build, then stop, back up and start:
+
+```bash
+docker image tag $(docker inspect -f '{{.Image}}' {{compose.CONTAINER_NAME}}) polyagent-channels:previous
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml build    # the running service stays up meanwhile
+docker pull alpine
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml stop
+docker run --rm -v {{compose.COMPOSE_PROJECT_NAME}}_channel-data:/data -v "${HOME}:/backup" alpine tar czf /backup/channel-data-previous.tgz -C /data .
+docker run --rm -v "${HOME}:/backup" alpine sh -c 'tar tzf /backup/channel-data-previous.tgz > /dev/null && chmod 600 /backup/channel-data-previous.tgz && echo backup ok'
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d
+```
+
+If a line fails after `stop`, start the previous service again. The build has
+already moved the image tag to the new image, so point it back first (with
+other `IMAGE_NAME` or `IMAGE_TAG` values, retag to those):
+
+```bash
+docker image tag polyagent-channels:previous {{compose.IMAGE_NAME}}:{{compose.IMAGE_TAG}}
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build
+```
+
+Then confirm (in Windows PowerShell, use `curl.exe` for `curl`):
+
+- `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml ps` shows both containers healthy, and
+  `curl -fsS http://127.0.0.1:{{compose.CHANNEL_PORT}}/health` succeeds.
+- `docker exec {{compose.CONTAINER_NAME}} sh -c 'curl -fsS http://127.0.0.1:{{compose.container_port}}/harness | sha256sum; curl -fsS http://127.0.0.1:{{compose.container_port}}/harness.sha256'`
+  prints the same hash twice.
+- `docker exec {{compose.CONTAINER_NAME}} /home/vscode/channels-venv/bin/python -c "import importlib.metadata as m; print(m.version('polyagent-channels'), m.version('mcp'))"`
+  prints the release and the `mcp` pin of `requirements.lock`, and
+  `docker exec {{compose.COMPOSE_PROJECT_NAME}}-redis-1 redis-cli INFO server` reports the
+  Redis version of the compose file.
+- A client updated by [the client update procedure](#updating-a-client) is woken once in a new session by a peer message, and
+  messages from before the upgrade stay readable with `receive --cursor 0-0`.
+
+To roll back the service, point the image back and recreate only that
+container; Redis {{compose.redis_version}} also serves the previous release. With other
+`IMAGE_NAME` or `IMAGE_TAG` values, retag to those:
+
+```bash
+docker image tag polyagent-channels:previous {{compose.IMAGE_NAME}}:{{compose.IMAGE_TAG}}
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build --force-recreate polyagent-channels
+```
+
+If the data itself is damaged, replace the volume contents with the archive:
+
+```bash
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml stop
+docker run --rm -v {{compose.COMPOSE_PROJECT_NAME}}_channel-data:/data -v "${HOME}:/backup" alpine sh -c 'find /data -mindepth 1 -delete && tar xzf /backup/channel-data-previous.tgz -C /data'
+docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d --no-build
+```
+
+## Verification
+
+Run tests in throwaway containers, never in the running service container or
+its Redis. Mount the host workspace at `/workspaces` and create the virtual
+environment outside it, using Python {{project.python_requirement}} ([pyproject.toml](pyproject.toml)).
+From `/workspaces` in the test container:
+
+```bash
+uv venv --python {{project.python_version}} /tmp/channels-test-venv
+uv pip install --python /tmp/channels-test-venv/bin/python --require-hashes -r requirements.lock
+uv pip install --python /tmp/channels-test-venv/bin/python -r requirements-dev.txt
+PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=/tmp/channels-test.coverage \
+  /tmp/channels-test-venv/bin/python -m pytest -p no:cacheprovider --cov=polyagent_channels --cov-branch --cov-report=term-missing
+```
+
+The default suite uses mocked Redis and synthetic data and clears inherited
+`CHANNEL_*`, `REDIS_URL` and client session variables first. Real-storage tests
+skip without `REDIS_TEST_URL`. Start a separate Redis on the test network and
+supply a fresh, dedicated, nonzero database. The suite refuses a nonempty
+database and removes only its own keys.
+
+```bash
+REDIS_TEST_URL=redis://<test-redis>:6379/15 PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \
+  /tmp/channels-test-venv/bin/python -m pytest -p no:cacheprovider tests/test_redis_lifecycle.py
+```
+
+To check HTTP, WebSocket and MCP against a dedicated service, set `CHANNEL_URL`
+and `CHANNEL_KEY_FILE`, then run `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 /tmp/channels-test-venv/bin/python tests/smoke.py` in the test container.
+For the resulting synthetic messages, see [Disk use](#disk-use).
+
+To check durability on that dedicated instance, publish, run `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml restart` and read from `0-0`.
+
+To check real agent cooperation, use two permitted clients with separate session
+IDs. Install from `/help` with each and leave both idle. Ask one in plain words to
+question the other. The idle peer should wake without key input, reply according
+to the content, and `session_id` and `reply_to` should match. A scripted stand-in
+proves adapter wiring only.

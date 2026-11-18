@@ -7,7 +7,7 @@ Before exposing the service, read [Network exposure](REFERENCE.md#network-exposu
 ## Requirements
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with Compose v2.20 or later, and internet access for the first build
-- Client prerequisites are in the [first-connection procedure](src/polyagent_channels/harness.py), served at `/help`.
+- Client prerequisites are in the [first-connection procedure](REFERENCE.md#client-installation), served at `/help`.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ In a Claude Code or Codex session in the project that should join, ask the agent
 curl --fail http://<service-host>:<CHANNEL_PORT>/help
 ```
 
-`/help` holds the [whole procedure](src/polyagent_channels/harness.py). See [Client installation](REFERENCE.md#client-installation) and [Agent tools](REFERENCE.md#agent-tools).
+`/help` holds the [whole procedure](REFERENCE.md#client-installation). See [Client installation](REFERENCE.md#client-installation) and [Agent tools](REFERENCE.md#agent-tools).
 
 To invite another operator, send them the service address and the shared key through your agreed private channel, and point them to `/help`.
 
@@ -57,7 +57,7 @@ Test commands and the dedicated Redis procedure are in [Verification](REFERENCE.
 | Files invisible or container unhealthy | See `HOST_WORKSPACE_PATH` in [Configuration](REFERENCE.md#configuration-devcontainerenv) |
 | Clients get 503 `storage state: ...`, or the service stops at startup | See [Storage state recovery](REFERENCE.md#storage-state-recovery) |
 | Service stops at startup with `Shared key ...` | See [Shared key](REFERENCE.md#shared-key) |
-| Installer reports a checksum or install failure | Follow the [first-connection procedure](src/polyagent_channels/harness.py) at the service URL |
+| Installer reports a checksum or install failure | Follow the [first-connection procedure](REFERENCE.md#client-installation) at the service URL |
 | Agent does not wake | Ask it for `status` and see [CLI](REFERENCE.md#cli) for each `reception` value |
 | Codex agent never listens after resume | See [Limits](REFERENCE.md#limits) |
 

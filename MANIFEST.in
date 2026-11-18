@@ -8,3 +8,4 @@ include AGENTS.md CLAUDE.md PROJECT.md REFERENCE.md UPGRADING.md
 include .devcontainer/LICENSE .dockerignore
 
 include scripts/build_harness.py
+include scripts/render_docs.py scripts/REFERENCE.md.in
