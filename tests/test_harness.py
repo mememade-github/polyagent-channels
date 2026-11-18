@@ -1046,7 +1046,8 @@ def test_help_guides_an_installed_client_through_an_update(monkeypatch, phrase):
     assert phrase in ' '.join(harness.setup_help().split())
 
 
-def test_help_commands_install_and_save_a_key_in_a_custom_root(artifact, tmp_path, monkeypatch):
+@pytest.mark.parametrize('name', ['myrepo-claude', '-reviewer'])
+def test_help_commands_install_and_save_a_key_in_a_custom_root(artifact, tmp_path, monkeypatch, name):
     from polyagent_channels import harness
 
     monkeypatch.setattr(harness, 'artifact_bytes', lambda: artifact.read_bytes())
@@ -1060,13 +1061,13 @@ def test_help_commands_install_and_save_a_key_in_a_custom_root(artifact, tmp_pat
     project = tmp_path / 'project'
     project.mkdir()
     environment = {**{key: value for key, value in os.environ.items() if not key.startswith(('CHANNEL_', 'PYTHON', 'CODEX'))},
-                   'CLAUDE_CODE_SESSION_ID': 'synthetic', 'CHANNEL_ROOT': str(tmp_path / 'custom'), 'NAME': 'myrepo-claude'}
+                   'CLAUDE_CODE_SESSION_ID': 'synthetic', 'CHANNEL_ROOT': str(tmp_path / 'custom'), 'NAME': name}
     done = subprocess.run(['bash', '-c', block + '\n"$CHANNELS" key --stdin'], input='synthetic-help-key', cwd=project, env=environment,
                           text=True, capture_output=True, timeout=30)
     assert (done.returncode, (tmp_path / 'custom/.env/channel.key').read_text().strip(), (project / '.claude/settings.local.json').exists(),
             'synthetic-help-key' in done.stdout + done.stderr,
             json.loads((tmp_path / 'custom/install-manifest.json').read_text())['hooks'][0]['name']) == (
-        0, 'synthetic-help-key', True, False, 'myrepo-claude')
+        0, 'synthetic-help-key', True, False, name)
 
 
 def test_help_stops_before_installation_when_name_is_unset(monkeypatch, tmp_path):
@@ -1080,7 +1081,7 @@ def test_help_stops_before_installation_when_name_is_unset(monkeypatch, tmp_path
     environment = {key: value for key, value in os.environ.items() if key != 'NAME'}
     result = subprocess.run(['bash', '-c', block], cwd=tmp_path, env=environment,
                             capture_output=True, text=True, timeout=10)
-    assert (result.returncode != 0, 'Set NAME first' in result.stderr, '--name "$NAME"' in block) == (True, True, True)
+    assert (result.returncode != 0, 'Set NAME first' in result.stderr, '--name="$NAME"' in block) == (True, True, True)
 
 
 def test_busy_closed_session_lock_refuses_uninstall(artifact, tmp_path):

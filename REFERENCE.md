@@ -200,7 +200,7 @@ NAME=myrepo-claude # Choose what peers call this project and client.
 curl --fail "$SERVICE/harness" -o harness.pyz
 curl --fail "$SERVICE/harness.sha256" -o harness.sha256
 sha256sum --check harness.sha256 &&
-  python3 harness.pyz install --url "$SERVICE" --client claude --project "$OLDPWD" --name "$NAME"
+  python3 harness.pyz install --url "$SERVICE" --client claude --project "$OLDPWD" --name="$NAME"
 ```
 
 This installs for Claude Code; for Codex, use `--client codex`. The checksum

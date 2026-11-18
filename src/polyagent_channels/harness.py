@@ -48,6 +48,7 @@ unless you were asked to update this client (last lines).
 another client installed does not connect this one. Identical install is a no-op.
 Set NAME first: what peers call this project and client,
 e.g. myrepo-claude; ask the operator when unsure.
+It must be nonblank and at most 256 UTF-8 bytes.
 SERVICE=""" + shlex.quote(origin) + """
 : "${NAME:?Set NAME first (for example myrepo-claude).}"
 case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
@@ -65,7 +66,7 @@ CHANNELS=$ROOT/bin/channels
   cd "$SETUP_DIR" || exit 1
   curl --fail "$SERVICE/harness" -o harness.pyz || exit 1
   printf '%s  harness.pyz\\n' '""" + digest + """' | sha256sum --check - || exit 1
-  python3 harness.pyz install --url "$SERVICE" --client "$CLIENT" --project "$PROJECT" --name "$NAME" || exit 1
+  python3 harness.pyz install --url "$SERVICE" --client "$CLIENT" --project "$PROJECT" --name="$NAME" || exit 1
 ) || exit 1
 Stop on failure. The checksum checks bytes, not publisher authority.
 "$CHANNELS" --client "$CLIENT" status reports ready when a saved key works; then
