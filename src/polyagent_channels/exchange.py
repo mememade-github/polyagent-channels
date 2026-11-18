@@ -37,6 +37,10 @@ class ExchangeMismatch(ValueError):
     """The requested exchange does not match the authenticated local owner/target."""
 
 
+class SessionTopicLimit(ValueError):
+    """The session has no topic slot that can be replaced."""
+
+
 def validate_identifier(value):
     if not identity.is_identifier(value):
         raise ValueError('Invalid exchange identifier')
@@ -292,13 +296,13 @@ def make_room(directory, session_id):
     if len(states) < MAX_SESSION_TOPICS:
         return
     if not idle:
-        raise ValueError('session_topic_limit')
+        raise SessionTopicLimit('session_topic_limit')
     drop_idle(Path(idle[0][1]))
 
 
 def require_idle(state):
     if state['deadline'] > time.time() or state['pending']:
-        raise ValueError('session_topic_limit')
+        raise SessionTopicLimit('session_topic_limit')
 
 
 def drop_idle(path):

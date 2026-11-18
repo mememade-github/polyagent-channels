@@ -532,6 +532,60 @@ def test_open_session_replaces_left_topics_at_the_limit_on_next_cycle(connection
         16, 16, sorted(remembered))
 
 
+@pytest.fixture
+def full_session_with_left_pending_topic(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    for number in range(15):
+        session.invoke('connect', f'room-{number}')
+    selected = member_options(session, 'other-session', 'watch')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    paths = sorted(exchange.list_states(session.directory, selected.session_id))
+    target = {'channel': 'room-0', 'conversation_id': 'main'}
+    path = exchange.owned_state(session.directory, selected.session_id, target)
+    exchange.settle_read(path, '2-0', ['2-0'])
+    session.invoke('close', 'room-0')
+    session.invoke('connect', 'replacement')
+    return selected, path, paths
+
+
+def test_receiver_at_topic_limit_keeps_watching_and_joins_after_ack(full_session_with_left_pending_topic, monkeypatch):
+    selected, path, original_paths = full_session_with_left_pending_topic
+    watcher = AsyncMock(return_value=[])
+    monkeypatch.setattr(exchange, 'watch_topics', watcher)
+    first = cli.watch_once(selected, 'synthetic-connection-key')
+    pending = exchange.read_state(path)['pending']
+    exchange.ack_exchange(selected.state_dir, selected.session_id, {'channel': 'room-0', 'conversation_id': 'main'}, '2-0')
+    second = cli.watch_once(selected, 'synthetic-connection-key')
+    watched = [sorted(call.args[1]) for call in watcher.await_args_list]
+    current = sorted(exchange.list_states(selected.state_dir, selected.session_id))
+    assert (first, second, pending, watched, path.exists(), sorted(cli.presence_payload(selected)['topics'])) == (
+        ([], True), ([], True), ['2-0'], [original_paths, current], False, sorted(cli.remembered_topics(selected)))
+
+
+def test_receiver_start_at_topic_limit_keeps_watching(full_session_with_left_pending_topic, monkeypatch):
+    selected, path, original_paths = full_session_with_left_pending_topic
+    watcher = AsyncMock(return_value=[])
+    monkeypatch.setattr(exchange, 'watch_topics', watcher)
+    wanted = iter([True, False])
+    monkeypatch.setattr(cli, 'receiver_wanted', lambda options, owner: next(wanted))
+    monkeypatch.setattr(cli, 'ERROR_RETRY_SECONDS', 0)
+    status = cli.watch_cycles(selected, True)
+    watched = [sorted(call.args[1]) for call in watcher.await_args_list]
+    assert (status, watched, exchange.read_state(path)['pending'], cli.last_callback(selected)['state']) == (
+        0, [original_paths], ['2-0'], 'waiting')
+
+
+@pytest.mark.parametrize('label', [None, 'replacement/main'])
+def test_explicit_connect_at_topic_limit_still_fails(connection_client, full_session_with_left_pending_topic, label):
+    selected, _, _ = full_session_with_left_pending_topic
+    selected = member_options(connection_client, selected.session_id)
+    if label is not None:
+        selected = cli.topic_options(selected, label)
+    with pytest.raises(ValueError, match='session_topic_limit'):
+        cli.connect_topics(selected, 'synthetic-connection-key')
+
+
 def test_left_topic_stays_until_unconfirmed_work_is_confirmed(connection_client, monkeypatch):
     session = connection_client
     session.invoke('connect', 'review')

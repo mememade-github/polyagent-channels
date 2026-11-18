@@ -491,11 +491,15 @@ def connect_topics(options, key):
 
 
 def join_remembered_topics(options, key):
+    return [ensure_topic(selected, key) for selected in remembered_topic_options(options)]
+
+
+def remembered_topic_options(options):
     labels = remembered_topics(options)
     close_left_topics(options, labels)
     if labels is None:
         labels = [membership.DEFAULT_TOPIC]
-    return [ensure_topic(topic_options(options, label), key) for label in labels]
+    return [topic_options(options, label) for label in labels]
 
 
 def join_missing_topics(options, key):
@@ -519,6 +523,11 @@ def close_left_topic(options, path):
 
 def join_missing_topic(options, key):
     if exchange.owned_state(options.state_dir, options.session_id, topic_of(options)) is None:
+        join_receiver_topic(options, key)
+
+
+def join_receiver_topic(options, key):
+    with contextlib.suppress(exchange.SessionTopicLimit):
         ensure_topic(options, key)
 
 
@@ -721,7 +730,8 @@ NOTIFIERS = {'claude': rewake_claude, 'codex': queue_codex}
 
 
 def join_default_topic(options, key):
-    join_remembered_topics(options, key)
+    for selected in remembered_topic_options(options):
+        join_receiver_topic(selected, key)
 
 
 def renew_live_topics(options):
