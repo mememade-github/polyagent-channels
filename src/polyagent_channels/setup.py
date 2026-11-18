@@ -806,10 +806,12 @@ def uninstall(options, root, project, clients):
     if options.purge_key and key.exists():
         key.unlink()
         removed.append(str(key))
+    if options.purge_key:
+        purge_joined_topics(root, removed)
     follow_up = None
-    if key.exists():
+    if key.exists() or (root / 'joined-topics.json').exists():
         installer = Path(sys.argv[0]).absolute()
-        follow_up = shlex.join(['rm', '--', str(key)])
+        follow_up = shlex.join(['rm', '-f', '--', str(key), str(root / 'joined-topics.json'), str(root / 'joined-topics.lock')])
         if installer.is_file():
             follow_up = shlex.join(['python3', str(installer), 'uninstall',
                                    '--target', str(root), '--project', str(project), '--purge-key'])
@@ -822,6 +824,13 @@ def uninstall(options, root, project, clients):
                       'discard_unconfirmed_command': discard_command(root, unconfirmed) if not manifest['hooks'] else None,
                       'note': 'Open sessions stop listening within a minute; their channels tools then report the removal. '
                               'Unconfirmed messages stay recorded under unconfirmed: reinstalling and resuming that session continues them.'}))
+
+
+def purge_joined_topics(root, removed):
+    paths = [root / name for name in ('joined-topics.json', 'joined-topics.lock')]
+    for path in [path for path in paths if path.exists()]:
+        path.unlink()
+        removed.append(str(path))
 
 
 def report_nothing_installed(root, project):

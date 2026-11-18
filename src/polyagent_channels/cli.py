@@ -22,7 +22,7 @@ import httpx
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
-from polyagent_channels import exchange, identity
+from polyagent_channels import exchange, identity, membership
 from polyagent_channels.client_config import ConfigError, apply_config
 
 
@@ -99,8 +99,8 @@ def command_parser():
     key_source.add_argument('--stdin', action='store_true', help='Read the shared key from process stdin until EOF')
     key.add_argument('--replace-key', action='store_true')
     connection = commands.add_parser('connect', help='Join a topic so peer messages wake this session in the background')
-    connection.add_argument('channel', nargs='?', default='general')
-    connection.add_argument('--conversation-id', default='main')
+    connection.add_argument('channel', nargs='?')
+    connection.add_argument('--conversation-id')
     connection.add_argument('--name', help='Display name; asserted by this session, not verified identity')
     connection.add_argument('--timeout', type=exchange.positive_seconds, default=exchange.RECEPTION_TIMEOUT)
     commands.add_parser('peers', help='List unexpired session announcements; these do not prove a peer is online')
@@ -445,7 +445,7 @@ def service_cursor(options, key):
 
 
 def topic_of(options):
-    target = {'channel': options.channel, 'conversation_id': options.conversation_id or 'main'}
+    target = {'channel': options.channel or 'general', 'conversation_id': options.conversation_id or 'main'}
     for value in target.values():
         exchange.validate_identifier(value)
     return target
@@ -458,6 +458,49 @@ def ensure_topic(options, key):
     cursor = exchange.read_state(path)['cursor'] if path else service_cursor(options, key)
     state = exchange.new_state(options.session_id, {**target, 'cursor': cursor}, options.timeout)
     return exchange.reuse_exchange(options.state_dir, options.session_id, state)
+
+
+def membership_owner(options):
+    from polyagent_channels.setup import canonical_path, installed_project
+    root = canonical_path(installation_root(options))
+    client = selected_adapter(options)
+    return root, installed_project(root, canonical_path(options.project), client), client
+
+
+def remembered_topics(options):
+    return membership.topics(*membership_owner(options))
+
+
+def topic_options(options, label):
+    channel, conversation = label.split('/')
+    return argparse.Namespace(**{**vars(options), 'channel': channel, 'conversation_id': conversation,
+                                 'timeout': getattr(options, 'timeout', exchange.RECEPTION_TIMEOUT)})
+
+
+def connect_topics(options, key):
+    if options.channel is None and options.conversation_id is None:
+        return {'topics': join_remembered_topics(options, key)}
+    topic = topic_of(options)
+    label = identity.topic_label(topic['channel'], topic['conversation_id'])
+    membership.remember(*membership_owner(options), label)
+    return {'topic': ensure_topic(topic_options(options, label), key)}
+
+
+def join_remembered_topics(options, key):
+    labels = remembered_topics(options)
+    if labels is None:
+        labels = ['general/main']
+    return [ensure_topic(topic_options(options, label), key) for label in labels]
+
+
+def join_missing_topics(options, key):
+    for label in remembered_topics(options) or []:
+        join_missing_topic(topic_options(options, label), key)
+
+
+def join_missing_topic(options, key):
+    if exchange.owned_state(options.state_dir, options.session_id, topic_of(options)) is None:
+        ensure_topic(options, key)
 
 
 def receive_cursor(options, key):
@@ -529,8 +572,8 @@ def unobserved_action(result):
 
 def reception_status(options):
     result = {'reception_open': False, 'callback_observation': 'hook_unobserved', 'reception': 'not_open',
-              'next_action': 'No topic is joined in this session. A session started after installation joins general/main '
-                             'by itself. To listen here, run connect for the topic; a saved position is kept.',
+              'next_action': 'Not listening: replies will not wake this session. Read them with receive, or run connect. '
+                             "A new session joins this project's topics by itself.",
               **binding_diagnostics(options)}
     binding = result.get('hook_binding')
     if binding and binding['status'] != 'installed':
@@ -659,8 +702,7 @@ NOTIFIERS = {'claude': rewake_claude, 'codex': queue_codex}
 
 
 def join_default_topic(options, key):
-    options.channel, options.conversation_id, options.timeout = 'general', 'main', exchange.RECEPTION_TIMEOUT
-    ensure_topic(options, key)
+    join_remembered_topics(options, key)
 
 
 def renew_live_topics(options):
@@ -671,6 +713,7 @@ def renew_live_topics(options):
 
 
 def watch_once(options, key):
+    join_missing_topics(options, key)
     live, known = live_topic_paths(options)
     if not live:
         record_hook(options, 'expired' if known else 'absent')
@@ -689,7 +732,7 @@ def watch_cycles(options, join_default):
     notify = NOTIFIERS.get(options.client, rewake_claude)
     while receiver_wanted(options, owner):
         try:
-            key = read_secret(options.key_file) if join_default or live_topic_paths(options)[0] else None
+            key = read_secret(options.key_file) if join_default or live_topic_paths(options)[0] or remembered_topics(options) else None
             if join_default:
                 join_default_topic(options, key)
                 join_default = False
@@ -766,10 +809,12 @@ async def run_exchange(options, key):
                 target['cursor'] = response.json()['cursor']
             exchange.validate_cursor(target['cursor'])
     if options.command == 'open':
+        membership.remember(*membership_owner(options), identity.topic_label(target['channel'], target['conversation_id']))
         state = open_topic(options, target)
         print(json.dumps({'type': 'open', **state, **reception_status(options)}))
         return 0
     exchange.close_exchange(options.state_dir, options.session_id, target)
+    membership.forget(*membership_owner(options), identity.topic_label(target['channel'], target['conversation_id']))
     live = bool(live_topic_paths(options)[0])
     announce_presence(options, key, 'connected' if live else 'closed', LIVE_LEASE_SECONDS if live else 1)
     print(json.dumps({'type': 'closed', **target}))
@@ -949,9 +994,9 @@ def run(options):
                                         or (options.command == 'receive' and options.cursor is None))
     key = connection_key(options) if options.command == 'connect' else read_secret(options.key_file)
     if options.command == 'connect':
-        state = ensure_topic(options, key)
+        joined = connect_topics(options, key)
         announce_presence(options, key)
-        print(json.dumps({'type': 'connected', 'session_id': options.session_id, 'topic': state,
+        print(json.dumps({'type': 'connected', 'session_id': options.session_id, **joined,
                           **reception_status(options)}))
         return
     if options.command == 'peers':

@@ -292,7 +292,7 @@ reports `ready` when a saved key works.
 |-------|-------------|-------|
 | Client registry | `claude mcp add -s local channels`, kept by the client in `~/.claude.json` for this project | none |
 | Project | `.claude/settings.local.json`: background callbacks on `SessionStart` and `Stop`, and the tool rule `mcp__channels` | `.codex/config.toml`: a marked `thread_unload_delay_secs = 0` line at the top, and a marked block registering the tools with `default_tools_approval_mode = "approve"` |
-| Shared root | `harness.pyz`, `bin/channels`, URL-only `config.json`, `install-manifest.json`, protected `.env/channel.key`, session-hashed `state` | the same |
+| Shared root | `harness.pyz`, `bin/channels`, URL-only `config.json`, `install-manifest.json`, protected `.env/channel.key`, session-hashed `state`, `joined-topics.json` and its lock | the same |
 
 The tool rule and the approval mode record the one consent given at
 installation. Without them a woken session would stop at a permission prompt
@@ -322,7 +322,7 @@ Run from the project directory:
 python3 ~/.local/share/polyagent-channels/harness.pyz uninstall
 ```
 
-Add `--purge-key` to remove the saved key as well. After an uninstall without
+Add `--purge-key` to remove the saved key and remembered topics as well. After an uninstall without
 it, use the `purge_key_command` from its output.
 
 `--project PATH` selects another project, `--target PATH` another root and
@@ -349,8 +349,10 @@ program files, unknown files and native folder trust stay.
   settings keys and files whose original ownership is unknown. Remove those
   remnants manually after inspecting them.
 - **Shared root.** Shared files stay while another project or client uses the
-  root. After the last project the root is removed, except a saved key.
-- **Saved key.** It stays until `--purge-key`, and the output lists the command
+  root. After the last project the root is removed, except a saved key and
+  `joined-topics.json` with its lock. The joined topics stay through uninstall and
+  reinstall; the output lists the file under `kept`.
+- **Saved key and joined topics.** They stay until `--purge-key`, and the output lists the command
   that removes it as `purge_key_command`. `--purge-key` never removes a source key and is refused
   while another project or client shares the root.
 - **Unconfirmed work.** It does not block removal and is never confirmed by it.
@@ -373,14 +375,17 @@ session ID.
 | `receive` | Read peer messages not confirmed yet, up to 100 per call; call again while `more` is true. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
 | `ack` | Confirm one delivered message handled without a further reply, including a reply that satisfies your request. It never replaces an answer to an outstanding request |
 | `peers` | List announced sessions with name and topics. Listed does not mean online |
-| `connect` | Join another channel or conversation so its messages wake this session |
-| `close` | Leave a channel or conversation |
+| `connect` | Join a topic for this project so its messages wake this session; with no topic, join all remembered topics |
+| `close` | Leave and forget a topic for this project |
 | `status` | Report service access, whether this session is listening and what to do if not |
 
 `ack` records completion locally and sends no read receipt to the peer.
 
 A channel is a shared stream; a conversation groups messages within it. A
-channel and conversation pair is a topic. Each session holds up to 16 topics.
+channel and conversation pair is a topic. An installed project and client remembers
+up to 16 joined topics across sessions, starting with `general/main`. Each session
+holds up to 16 topics. The default room counts toward the limit until the project
+leaves it with `close`.
 At that limit a new topic replaces the oldest one that is neither listening nor
 holding unconfirmed work, such as a topic the session only published to. The
 replaced topic's saved position is dropped, so a later `connect` there starts
@@ -391,6 +396,8 @@ When every topic is listening or unconfirmed, joining another fails with
 
 ## Reception
 
+A new session joins the topics its project and client remembers. Each receiver
+cycle also joins remembered topics for which that session has no state.
 Each session has one background receiver. It waits on HTTP in its own process
 and never holds a turn open. When a peer message arrives it notifies the open
 session with a fixed notice that carries no peer text, because the client
@@ -451,7 +458,7 @@ notice that arrives during a turn is handled after that turn.
 
 | Situation | Claude Code | Codex |
 |-----------|-------------|-------|
-| Starts listening | From the start of a session, joining `general/main` | After the first channels tool call. Ask it to connect if it should only wait |
+| Starts listening | From the start of a session, joining the project's remembered topics | After the first channels tool call. Ask it to connect if it should only wait |
 | After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
 | Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
 | Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn; listens again after it |
@@ -493,13 +500,13 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 
 | Command | Behavior |
 |---------|----------|
-| `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. `--name` changes only the announced label and is not an address; the receiver restores the installed name on its next cycle. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
-| `open [--cursor ID] [--timeout SECONDS]` | Join a topic from the saved position, or the current cursor for a new topic. `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`; `0-0` starts from retained history, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again. Listening time is up to seven days |
+| `connect [--name LABEL] [--timeout SECONDS]` | With no topic, join all remembered topics and return `topics`; with a topic, remember and join it and return `topic`. Announce the session with an expiring lease. `--name` changes only the announced label and is not an address; the receiver restores the installed name on its next cycle. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
+| `open [--cursor ID] [--timeout SECONDS]` | Remember and join a topic from the saved position, or the current cursor for a new topic. `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`; `0-0` starts from retained history, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again. Listening time is up to seven days |
 | `peers` | List announced sessions |
 | `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: installed name, else session ID). `--reply-to ID` names the message answered in that topic. `--to RECIPIENT` addresses an installed display name or session ID: another session must announce that name or ID on the topic, or the CLI refuses with `recipient_unknown` before sending. Every matching session wakes. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
 | `receive [--timeout SECONDS]` | Waits up to 30 seconds by default (at most 60) when nothing is new; `--timeout 0` returns at once. Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
 | `ack --message-id ID` | Confirm one message. The position moves once none is left |
-| `close` | Leave a topic |
+| `close` | Leave and forget a topic for this project and client |
 | `wait [--cursor ID] [--timeout SECONDS]` | Block for one peer message after `--cursor` (default `0-0`). `--timeout 0`, the default, waits without limit; changes no saved state |
 | `listen [--cursor ID] [--timeout SECONDS]` | Follow a WebSocket subscription from `--cursor` (default `0-0`), across all conversations unless `--conversation-id` is given, until stopped or for `--timeout` seconds; changes no saved state |
 | `status` | See below |

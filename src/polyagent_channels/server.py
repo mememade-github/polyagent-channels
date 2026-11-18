@@ -114,8 +114,10 @@ their target and sessions whose installed name equals its sender; unnamed sessio
 keep the session-only rule. Other peer messages wake every session on that topic.
 The expected hint stays with the session that wrote the target. A session never
 wakes itself. Claude
-joins general/main at session start and Codex on its first channels tool call.
-connect or open joins another topic; close leaves it. Publish and receive never join
+joins this project's remembered topics at session start and Codex on its first
+channels tool call; a project with no saved membership starts with general/main.
+connect with no topic rejoins all remembered topics; connect or open with a topic
+remembers and joins it, and close leaves and forgets it. Publish and receive never join
 a topic. Publish remembers the position, so a later connect still sees the reply; at
 16 topics a new one replaces the oldest topic that is neither listening nor
 unconfirmed, and its position is dropped. A topic lapses seven days after the last

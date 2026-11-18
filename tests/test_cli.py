@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from polyagent_channels import cli, exchange, setup
+from polyagent_channels import cli, exchange, membership, setup
 from polyagent_channels.client_config import apply_config
 
 
@@ -477,6 +477,61 @@ def test_connect_announces_the_topic_it_just_joined(connection_client):
     assert session.presence[-1]['topics'] == ['review/design']
 
 
+def member_options(session, session_id, command='connect'):
+    return options('--config', str(session.root / 'config.json'), '--client', 'codex',
+                   '--session-id', session_id, command)
+
+
+def test_new_session_joins_all_remembered_topics(connection_client):
+    session = connection_client
+    session.invoke('connect', 'review')
+    selected = member_options(session, 'new-session')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    assert sorted(cli.presence_payload(selected)['topics']) == ['general/main', 'review/main']
+
+
+def test_open_session_picks_up_new_membership_on_next_cycle(connection_client, monkeypatch):
+    session = connection_client
+    selected = member_options(session, 'other-session', 'watch')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    session.invoke('connect', 'review')
+    monkeypatch.setattr(exchange, 'watch_topics', AsyncMock(return_value=[]))
+    cli.watch_once(selected, 'synthetic-connection-key')
+    assert sorted(cli.presence_payload(selected)['topics']) == ['general/main', 'review/main']
+
+
+def test_connect_without_topic_returns_all_remembered_topics(connection_client):
+    session = connection_client
+    session.invoke('connect', 'review')
+    result = session.invoke('connect')
+    assert (sorted(topic['channel'] for topic in result['topics']), 'topic' in result) == (['general', 'review'], False)
+
+
+def test_membership_limit_refuses_before_session_state_changes(connection_client):
+    session = connection_client
+    for number in range(15):
+        membership.remember(session.root, session.root, 'codex', f'room-{number}/main')
+    before = list(session.directory.glob('**/*'))
+    with pytest.raises(ValueError, match='session_topic_limit'):
+        session.invoke('connect', 'overflow')
+    assert list(session.directory.glob('**/*')) == before
+
+
+def test_closing_general_is_remembered_by_new_sessions(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.invoke('close')
+    selected = member_options(session, 'next-session')
+    cli.join_default_topic(selected, 'synthetic-connection-key')
+    assert (cli.presence_payload(selected)['topics'], remembered := cli.remembered_topics(selected)) == ([], [])
+
+
+def test_open_remembers_the_topic(connection_client):
+    session = connection_client
+    session.invoke('open', 'review')
+    assert membership.topics(session.root, session.root, 'codex') == ['general/main', 'review/main']
+
+
 @pytest.mark.parametrize('state', ['connected', 'waiting', 'active'])
 def test_announcements_use_the_installed_name(named_connection_client, state):
     session = named_connection_client
@@ -695,7 +750,7 @@ def test_connect_reuses_key_preserves_position_and_is_idempotent(connection_clie
     path = exchange.owned_state(session.directory, 'native-self')
     exchange.write_state(path, {**exchange.read_state(path), 'pending': '2-0', 'deadline': time.time() - 1})
     second = session.invoke('connect')
-    assert (second['topic']['cursor'] == '1-0' and second['topic']['pending'] == ['2-0']
+    assert (second['topics'][0]['cursor'] == '1-0' and second['topics'][0]['pending'] == ['2-0']
             and sum(request.url.path.endswith('/cursor') for request in session.requests) == 1
             and session.presence[0]['name'] == 'reviewer' and 'name' not in session.presence[1])
 
@@ -1065,7 +1120,8 @@ def test_topics_only_published_to_leave_room_for_a_new_one(connection_client):
 
 
 def test_listening_topics_keep_their_slots(connection_client):
-    for number in range(16):
+    connection_client.invoke('connect')
+    for number in range(15):
         connection_client.invoke('connect', '--conversation-id', f'live-{number}')
     with pytest.raises(ValueError, match='session_topic_limit'):
         connection_client.invoke('connect', '--conversation-id', 'new')
@@ -1221,7 +1277,7 @@ def test_reply_after_publish_is_not_skipped_by_a_later_connect(connection_client
     session.messages.append({'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'fast reply'})
     connected = session.invoke('connect')
     received = session.invoke('receive', '--timeout', '0')
-    assert (connected['topic']['cursor'] == published['id'] and connected['topic']['notified'] == published['id']
+    assert (connected['topics'][0]['cursor'] == published['id'] and connected['topics'][0]['notified'] == published['id']
             and [row['text'] for row in received['messages']] == ['fast reply'])
 
 

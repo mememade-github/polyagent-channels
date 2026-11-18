@@ -14,7 +14,7 @@ import zipfile
 
 import pytest
 
-from polyagent_channels import exchange
+from polyagent_channels import exchange, membership
 from polyagent_channels.setup import (CLAUDE_TOOL_RULE, CODEX_SETTING, SetupError, codex_block, finish_removal,
                                       hook_binding_status, installed_project, lifecycle_lock, wrapper_content)
 
@@ -667,7 +667,33 @@ def test_bundle_is_client_only_and_carries_the_tool_adapter(artifact):
         names = archive.namelist()
         entry = archive.read('__main__.py').decode()
     assert ('uninstall' in entry, any(name.startswith(('redis/', 'starlette/', 'mcp/')) for name in names),
-            any(name.endswith(('.pyc', '.so')) for name in names), 'polyagent_channels/stdio_tools.py' in names) == (True, False, False, True)
+            any(name.endswith(('.pyc', '.so')) for name in names), 'polyagent_channels/stdio_tools.py' in names,
+            'polyagent_channels/membership.py' in names) == (True, False, False, True, True)
+
+
+def test_uninstall_keeps_joined_topics(artifact, tmp_path):
+    installed = invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+    root = tmp_path / 'root'
+    membership.remember(root, tmp_path, 'codex', 'review/main')
+    removed = invoke(artifact, 'uninstall', '--target', root, '--project', tmp_path, cwd=tmp_path)
+    output = json.loads(removed.stdout)
+    assert (installed.returncode, removed.returncode, str(root / 'joined-topics.json') in output['kept'],
+            membership.topics(root, tmp_path, 'codex')) == (0, 0, True, ['general/main', 'review/main'])
+
+
+@pytest.mark.parametrize('purge', ['option', 'follow-up'])
+def test_purge_removes_joined_topics_and_lock(artifact, tmp_path, purge):
+    installed = invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+    root = tmp_path / 'root'
+    membership.remember(root, tmp_path, 'codex', 'review/main')
+    arguments = ['--purge-key'] if purge == 'option' else []
+    removed = invoke(root / 'harness.pyz', 'uninstall', '--target', root, '--project', tmp_path, *arguments, cwd=tmp_path)
+    result = removed
+    if purge == 'follow-up':
+        result = subprocess.run(shlex.split(json.loads(removed.stdout)['purge_key_command']), cwd=tmp_path,
+                                capture_output=True, text=True, timeout=15)
+    assert (installed.returncode, removed.returncode, result.returncode,
+            (root / 'joined-topics.json').exists(), (root / 'joined-topics.lock').exists()) == (0, 0, 0, False, False)
 
 
 def test_uninstall_only_valid_generated_session_state(artifact, tmp_path):
