@@ -173,24 +173,29 @@ def topic_name(target):
 
 
 def list_states(directory, session_id):
+    return [path for path, state in read_states(directory, session_id)]
+
+
+def read_states(directory, session_id):
+    """Read each listed topic once; a file removed meanwhile is already closed."""
     folder = session_directory(directory, session_id)
     if Path(directory).is_symlink() or folder.is_symlink():
         raise ExchangeMismatch()
     paths = [path for path in sorted(folder.glob('topic-*.json'))
              if re.fullmatch(r'topic-[a-f0-9]{64}\.json', path.name)] + list(folder.glob('exchange.json'))
-    for path in paths:
-        if read_state(path)['session_id'] != session_id:
-            raise ExchangeMismatch()
-    return paths
+    states = [(path, state) for path in paths if (state := saved_state(path)) is not None]
+    if any(state['session_id'] != session_id for path, state in states):
+        raise ExchangeMismatch()
+    return states
 
 
 def owned_state(directory, session_id, target=None):
-    paths = list_states(directory, session_id)
+    states = read_states(directory, session_id)
     if target is None:
-        if len(paths) > 1:
+        if len(states) > 1:
             raise ValueError('session_topic_required')
-        return next(iter(paths), None)
-    return next((path for path in paths if all(read_state(path)[field] == target[field]
+        return next((path for path, state in states), None)
+    return next((path for path, state in states if all(state[field] == target[field]
                  for field in ('channel', 'conversation_id'))), None)
 
 
@@ -290,8 +295,8 @@ def make_room(directory, session_id):
     """At the topic limit, drop the oldest topic that is neither listening nor holding unconfirmed work.
 
     Such a state only remembers a position, as publish leaves one; live topics and pending work always stay."""
-    states = [(read_state(path), path) for path in list_states(directory, session_id)]
-    idle = sorted((state['deadline'], str(path)) for state, path in states
+    states = read_states(directory, session_id)
+    idle = sorted((state['deadline'], str(path)) for path, state in states
                   if state['deadline'] <= time.time() and not state['pending'])
     if len(states) < MAX_SESSION_TOPICS:
         return
@@ -301,15 +306,15 @@ def make_room(directory, session_id):
 
 
 def require_idle(state):
-    if state['deadline'] > time.time() or state['pending']:
+    if state is not None and (state['deadline'] > time.time() or state['pending']):
         raise SessionTopicLimit('session_topic_limit')
 
 
 def drop_idle(path):
     """Check again under the topic's own lock, so a receive recording work there at that moment keeps it."""
     with (contextlib.nullcontext() if path.name == 'exchange.json' else locked_state(path)):
-        require_idle(read_state(path))
-        path.unlink()
+        require_idle(saved_state(path))
+        path.unlink(missing_ok=True)
 
 
 def topic_directory(directory, session_id, state):
@@ -345,7 +350,10 @@ def topic_slot(directory, session_id, state):
 
 
 def saved_state(path):
-    return read_state(path) if path.exists() or path.is_symlink() else None
+    try:
+        return read_state(path)
+    except FileNotFoundError:
+        return None
 
 
 def refuse_live(existing):
@@ -379,13 +387,22 @@ def close_exchange(directory, session_id, target):
     path = owned_state(directory, session_id, target)
     if path is None:
         raise ExchangeMismatch()
+    close_state(path, target)
+
+
+def close_state(path, target):
     with locked_state(path):
-        state = read_state(path)
-        if any(state[field] != target[field] for field in ('channel', 'conversation_id')):
-            raise ExchangeMismatch()
-        if state['pending']:
-            raise ValueError('session_pending_ack_required')
-        path.unlink()
+        require_closed(saved_state(path), target)
+        path.unlink(missing_ok=True)
+
+
+def require_closed(state, target):
+    if state is None:
+        return
+    if any(state[field] != target[field] for field in ('channel', 'conversation_id')):
+        raise ExchangeMismatch()
+    if state['pending']:
+        raise ValueError('session_pending_ack_required')
 
 
 def close_unremembered_topic(path, labels):
@@ -477,7 +494,8 @@ def ack_exchange(directory, session_id, target, message_id):
 def confirm_answered(directory, session_id, target, reply_to):
     """A reply finishes the one message it answers."""
     path = owned_state(directory, session_id, target)
-    if path is not None and reply_to and reply_to in read_state(path)['pending']:
+    state = saved_state(path) if path is not None else None
+    if state is not None and reply_to and reply_to in state['pending']:
         confirm_processed(path, reply_to)
 
 
@@ -485,8 +503,8 @@ def redeliver_unconfirmed(directory, session_id):
     """A session that came back gets one new notice for what it had not confirmed before it stopped."""
     for path in list_states(directory, session_id):
         with locked_state(path):
-            state = read_state(path)
-            if state['notified'] != state['cursor']:
+            state = saved_state(path)
+            if state is not None and state['notified'] != state['cursor']:
                 write_state(path, {**state, 'notified': state['cursor']})
 
 
@@ -533,11 +551,12 @@ def message_for_session(message, answered, reader):
 
 async def next_notice(client, path, reader, duration):
     """Long-poll one topic. Peer work is returned unrecorded so a failed notice stays due; a quiet page is recorded."""
-    state = read_state(path)
+    state = saved_state(path)
+    if state is None:
+        return None
     page = await read_page(client, state, state['notified'], duration)
-    try:
-        current = read_state(path)
-    except FileNotFoundError:
+    current = saved_state(path)
+    if current is None:
         return None
     for message in page['messages']:
         validate_cursor(message['id'])

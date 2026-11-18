@@ -50,6 +50,42 @@ def test_shared_key_sessions_have_independent_state(tmp_path):
     assert exchange.owned_state(tmp_path, 'native-a') != exchange.owned_state(tmp_path, 'native-b')
 
 
+@pytest.mark.parametrize('read_step', ['stat', 'read_text'])
+def test_list_states_skips_a_topic_removed_before_read(tmp_path, monkeypatch, read_step):
+    removed = opened(tmp_path)
+    remaining = {**TARGET, 'conversation_id': 'remaining'}
+    exchange.open_exchange(tmp_path, 'native-a', exchange.new_state('native-a', remaining, 600))
+    kept = exchange.owned_state(tmp_path, 'native-a', remaining)
+    original = getattr(type(removed), read_step)
+
+    def remove_before_read(path, *arguments, **settings):
+        if path == removed:
+            path.unlink(missing_ok=True)
+        return original(path, *arguments, **settings)
+
+    monkeypatch.setattr(type(removed), read_step, remove_before_read)
+    assert exchange.list_states(tmp_path, 'native-a') == [kept]
+
+
+@pytest.mark.parametrize('document', ['{', json.dumps(state('native-b'))])
+def test_list_states_refuses_an_invalid_or_foreign_state(tmp_path, document):
+    path = opened(tmp_path)
+    path.write_text(document)
+    with pytest.raises(ValueError):
+        exchange.list_states(tmp_path, 'native-a')
+
+
+def test_list_states_preserves_a_read_permission_error(tmp_path, monkeypatch):
+    path = opened(tmp_path)
+
+    def refused_read(path):
+        raise PermissionError('synthetic permission failure')
+
+    monkeypatch.setattr(exchange, 'read_state', refused_read)
+    with pytest.raises(PermissionError, match='synthetic permission failure'):
+        exchange.list_states(tmp_path, 'native-a')
+
+
 def test_duplicate_open_serialized(tmp_path):
     barrier = Barrier(2)
     def open_once():

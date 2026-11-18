@@ -421,7 +421,8 @@ def session_reader(options):
 
 def presence_payload(options, state='connected', ttl_seconds=600):
     adapter = selected_adapter(options)
-    topics = [exchange.read_state(path) for path in live_topic_paths(options)[0]]
+    topics = [topic for path, topic in exchange.read_states(options.state_dir, options.session_id)
+              if topic['deadline'] > time.time()]
     payload = {'session_id': options.session_id, 'client': adapter, 'state': state, 'ttl_seconds': ttl_seconds,
                'topics': [identity.topic_label(topic['channel'], topic['conversation_id']) for topic in topics]}
     name = session_name(options)
@@ -457,8 +458,7 @@ def topic_of(options):
 def ensure_topic(options, key):
     """Join a topic; rejoining keeps its saved position."""
     target = topic_of(options)
-    path = exchange.owned_state(options.state_dir, options.session_id, target)
-    cursor = exchange.read_state(path)['cursor'] if path else service_cursor(options, key)
+    cursor = receive_cursor(options, key)
     state = exchange.new_state(options.session_id, {**target, 'cursor': cursor}, options.timeout)
     return exchange.reuse_exchange(options.state_dir, options.session_id, state)
 
@@ -532,7 +532,8 @@ def join_receiver_topic(options, key):
 
 def receive_cursor(options, key):
     path = exchange.owned_state(options.state_dir, options.session_id, topic_of(options))
-    return exchange.read_state(path)['cursor'] if path else service_cursor(options, key)
+    state = exchange.saved_state(path) if path is not None else None
+    return state['cursor'] if state is not None else service_cursor(options, key)
 
 
 def installation_root(options):
@@ -608,7 +609,7 @@ def reception_status(options):
     if not options.session_id:
         result['next_action'] = 'Select --client in its native session, or provide --session-id.'
         return result
-    topics = [exchange.read_state(path) for path in exchange.list_states(options.state_dir, options.session_id)]
+    topics = [state for path, state in exchange.read_states(options.state_dir, options.session_id)]
     if getattr(options, 'channel', None) is not None:
         conversation = getattr(options, 'conversation_id', None) or identity.DEFAULT_CONVERSATION
         topics = [topic for topic in topics if (topic['channel'], topic['conversation_id']) == (options.channel, conversation)]
@@ -682,8 +683,8 @@ def receiver_wanted(options, owner):
 
 
 def live_topic_paths(options):
-    paths = exchange.list_states(options.state_dir, options.session_id)
-    return [path for path in paths if exchange.read_state(path)['deadline'] > time.time()], bool(paths)
+    states = exchange.read_states(options.state_dir, options.session_id)
+    return [path for path, state in states if state['deadline'] > time.time()], bool(states)
 
 
 def notice_text(notices):
@@ -818,7 +819,7 @@ def close_topic(options, target):
     if path is None and label not in (remembered_topics(options) or []):
         raise exchange.ExchangeMismatch()
     if path is not None:
-        exchange.close_exchange(options.state_dir, options.session_id, target)
+        exchange.close_state(path, target)
     membership.forget(*membership_owner(options), label)
 
 
@@ -836,9 +837,10 @@ async def run_exchange(options, key):
         response = await client.get('status')
         response.raise_for_status()
         if options.command == 'open' and 'cursor' not in target:
-            previous = exchange.owned_state(options.state_dir, options.session_id, target)
+            path = exchange.owned_state(options.state_dir, options.session_id, target)
+            previous = exchange.saved_state(path) if path is not None else None
             if previous is not None:
-                target['cursor'] = exchange.read_state(previous)['cursor']
+                target['cursor'] = previous['cursor']
             if previous is None:
                 response = await client.get('channels/' + options.channel + '/cursor')
                 response.raise_for_status()
@@ -947,8 +949,7 @@ def client_status(options, key):
         directory = exchange.session_directory(options.state_dir, options.session_id)
         result['state_path'] = str(directory)
         topics = []
-        for path in exchange.list_states(options.state_dir, options.session_id):
-            state = exchange.read_state(path)
+        for path, state in exchange.read_states(options.state_dir, options.session_id):
             topics.append({**state, 'state': 'not_listening' if state['deadline'] <= time.time() else 'live',
                            'processing': 'pending' if state['pending'] else 'idle'})
         result['topics'] = topics
@@ -977,7 +978,7 @@ def report_page(options, key, default_read):
     """A default read shows what is new or still unconfirmed; --cursor only reads history and changes nothing."""
     tracked = default_read and options.conversation_id is not None
     path = exchange.owned_state(options.state_dir, options.session_id, topic_of(options)) if tracked else None
-    before = exchange.read_state(path) if path else None
+    before = exchange.saved_state(path) if path is not None else None
     page = read_shown_rows(options, key, before, default_read)
     rows = page['messages']
     marked, evicted = asyncio.run(read_details(options, key, rows, before)) if options.session_id else (rows, [])

@@ -746,6 +746,54 @@ def test_close_refuses_a_topic_without_session_state_or_project_membership(conne
     assert membership.topics(session.root, session.root, 'codex') == ['general/main']
 
 
+@pytest.mark.parametrize('removal_step', ['lookup', 'lock'])
+def test_close_forgets_a_topic_removed_during_close(connection_client, monkeypatch, removal_step):
+    session = connection_client
+    session.invoke('connect', 'review')
+    target = {'channel': 'review', 'conversation_id': 'main'}
+    removed = exchange.owned_state(session.directory, 'native-self', target)
+    original_lookup = exchange.owned_state
+    original_lock = exchange.locked_state
+
+    def lookup_then_remove(*arguments):
+        path = original_lookup(*arguments)
+        if path == removed:
+            path.unlink()
+        return path
+
+    def remove_before_lock(path):
+        if path == removed:
+            path.unlink()
+        return original_lock(path)
+
+    replacements = {'lookup': ('owned_state', lookup_then_remove), 'lock': ('locked_state', remove_before_lock)}
+    monkeypatch.setattr(exchange, *replacements[removal_step])
+    result = session.invoke('close', 'review')
+    assert (result['type'], result['channel'], removed.exists(),
+            membership.topics(session.root, session.root, 'codex')) == ('closed', 'review', False, ['general/main'])
+
+
+@pytest.mark.parametrize('arguments', [
+    ('publish', '--text', 'message'), ('receive',), ('status',), ('connect', 'general'),
+])
+def test_command_keeps_working_when_a_listed_topic_closes(connection_client, monkeypatch, arguments):
+    session = connection_client
+    session.invoke('connect')
+    session.invoke('connect', 'review')
+    removed = exchange.owned_state(session.directory, 'native-self', {'channel': 'review', 'conversation_id': 'main'})
+    original = exchange.read_state
+
+    def read_then_remove(path):
+        state = original(path)
+        if path == removed:
+            path.unlink()
+        return state
+
+    monkeypatch.setattr(exchange, 'read_state', read_then_remove)
+    result = session.invoke(*arguments)
+    assert (result['reception_open'], removed.exists()) == (True, False)
+
+
 def test_open_remembers_the_topic(connection_client):
     session = connection_client
     session.invoke('open', 'review')
