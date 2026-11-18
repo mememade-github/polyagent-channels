@@ -40,7 +40,7 @@ def client_for(rows):
 def notice(path, rows, session='native-a'):
     async def run():
         async with client_for(rows) as client:
-            return await exchange.next_notice(client, path, session, 0)
+            return await exchange.next_notice(client, path, {'session_id': session, 'name': None}, 0)
     return asyncio.run(run())
 
 
@@ -138,7 +138,7 @@ def test_recipient_selects_the_receiver(tmp_path, recipient, wakes):
 
     async def watch():
         async with client_for(rows) as client:
-            return await exchange.watch_topics(client, [path], 'native-a', duration=0, name='member-a')
+            return await exchange.watch_topics(client, [path], {'session_id': 'native-a', 'name': 'member-a'}, duration=0)
 
     assert bool(asyncio.run(watch())) is wakes
 
@@ -147,7 +147,8 @@ def test_explicit_recipient_takes_priority_over_reply_target(tmp_path):
     path = opened(tmp_path)
     rows = [{'id': '1-0', 'session_id': 'native-a', 'text': 'request'},
             {'id': '2-0', 'session_id': 'peer', 'to': 'someone-else', 'reply_to': '1-0', 'text': 'forwarded'}]
-    assert (notice(path, rows), cli.addressed_row(rows[1], rows[0], 'native-a')['for_you']) == (None, False)
+    reader = {'session_id': 'native-a', 'name': None}
+    assert (notice(path, rows), cli.addressed_row(rows[1], rows[0], reader)['for_you']) == (None, False)
 
 
 @pytest.mark.parametrize('message_id,before', [('5-3', '5-2'), ('5-0', '4-18446744073709551615'), ('0-0', '0-0')])
@@ -162,7 +163,7 @@ def test_message_read_during_the_poll_needs_no_notice(tmp_path):
             exchange.settle_read(path, '3-0', ['3-0'])
             return httpx.Response(200, json={'messages': [{'id': '3-0', 'session_id': 'native-b'}], 'cursor': '3-0'})
         async with httpx.AsyncClient(base_url='http://synthetic/', transport=httpx.MockTransport(handler)) as client:
-            return await exchange.next_notice(client, path, 'native-a', 0)
+            return await exchange.next_notice(client, path, {'session_id': 'native-a', 'name': None}, 0)
     assert asyncio.run(run()) is None
 
 
@@ -288,7 +289,7 @@ def test_topic_closed_during_poll_gives_no_notice(tmp_path):
             exchange.close_exchange(tmp_path, 'native-a', TARGET)
             return httpx.Response(200, json={'messages': [{'id': '1-0', 'session_id': 'native-b'}], 'cursor': '1-0'})
         async with httpx.AsyncClient(base_url='http://synthetic/', transport=httpx.MockTransport(handler)) as client:
-            return await exchange.next_notice(client, path, 'native-a', 0)
+            return await exchange.next_notice(client, path, {'session_id': 'native-a', 'name': None}, 0)
     assert asyncio.run(run()) is None and not path.exists()
 
 
@@ -299,7 +300,7 @@ def test_quiet_topic_does_not_delay_another(tmp_path, monkeypatch):
         exchange.open_exchange(tmp_path, 'native-a', topic)
         paths.append(exchange.owned_state(tmp_path, 'native-a', topic))
     cancelled = []
-    async def poll(client, path, session_id, duration):
+    async def poll(client, path, reader, duration):
         if exchange.read_state(path)['conversation_id'] == 'fast':
             await asyncio.sleep(.01)
             return {'id': '4-0', 'text': 'ready'}
@@ -308,7 +309,7 @@ def test_quiet_topic_does_not_delay_another(tmp_path, monkeypatch):
         finally:
             cancelled.append(path)
     monkeypatch.setattr(exchange, 'next_notice', poll)
-    result = asyncio.run(exchange.watch_topics(None, paths, 'native-a', 1))
+    result = asyncio.run(exchange.watch_topics(None, paths, {'session_id': 'native-a', 'name': None}, 1))
     assert result[0]['text'] == 'ready' and cancelled == [paths[0]]
 
 
@@ -320,7 +321,7 @@ def test_two_topics_due_at_once_are_both_returned_and_neither_recorded(tmp_path)
         paths.append(exchange.owned_state(tmp_path, 'native-a', topic))
     async def run():
         async with client_for([{'id': '1-0', 'session_id': 'native-b', 'text': 'work'}]) as client:
-            return await exchange.watch_topics(client, paths, 'native-a', 0)
+            return await exchange.watch_topics(client, paths, {'session_id': 'native-a', 'name': None}, 0)
     notices = asyncio.run(run())
     assert {item['conversation_id'] for item in notices} == {'first', 'second'} and all(exchange.read_state(path)['notified'] == '0-0' for path in paths)
 

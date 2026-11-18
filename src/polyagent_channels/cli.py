@@ -416,6 +416,10 @@ def session_name(options):
     return recorded_bindings(manifest_data(root), project, adapter)[0].get('name')
 
 
+def session_reader(options):
+    return {'session_id': options.session_id, 'name': session_name(options)}
+
+
 def presence_payload(options, state='connected', ttl_seconds=600):
     adapter = selected_adapter(options)
     topics = [exchange.read_state(path) for path in live_topic_paths(options)[0]]
@@ -722,7 +726,7 @@ def watch_once(options, key):
     record_hook(options, 'notify_failed' if getattr(options, 'notice_failed', False) else 'waiting')
     async def wait():
         async with exchange_client(options, key) as client:
-            return await exchange.watch_topics(client, live, options.session_id, name=session_name(options))
+            return await exchange.watch_topics(client, live, session_reader(options))
     return asyncio.run(wait()), True
 
 
@@ -962,20 +966,21 @@ def report_page(options, key, default_read):
 
 async def read_details(options, key, rows, state):
     """Mark who each row is for and notice pending work that retention removed before it was confirmed."""
+    reader = session_reader(options)
     async with exchange_client(options, key) as client:
         marked = [addressed_row(row, await exchange.reply_target(
             client, {'channel': options.channel, 'conversation_id': row.get('conversation_id') or 'main'}, row),
-            options.session_id, session_name(options)) for row in rows]
+            reader) for row in rows]
         shown = {row['id'] for row in rows}
         evicted = [message_id for message_id in (state['pending'] if state else []) if message_id not in shown
                    and await exchange.retained_message(client, state, message_id) is None]
         return marked, evicted
 
 
-def addressed_row(row, answered, session_id, name=None):
+def addressed_row(row, answered, reader):
     """Tell the reader at the point of decision whether this row is for it and what closes the exchange."""
-    mine = answered is not None and answered.get('session_id') == session_id
-    marked = {**row, 'for_you': exchange.message_for_session(row, answered, session_id, name)}
+    mine = answered is not None and answered.get('session_id') == reader['session_id']
+    marked = {**row, 'for_you': exchange.message_for_session(row, answered, reader)}
     if mine and not answered.get('reply_to'):
         marked['expected'] = CONFIRMATION_HINT
     return marked
