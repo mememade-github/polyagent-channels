@@ -7,7 +7,7 @@ import re
 import time
 from importlib.resources import files
 
-from polyagent_channels.identity import (is_cursor_form, is_identifier, validate_sender, validate_session_id, validate_topics,
+from polyagent_channels.identity import (is_cursor_form, is_identifier, validate_member_label, validate_sender, validate_session_id, validate_topics,
                                          within_cursor_range)
 
 from redis.asyncio import Redis
@@ -211,12 +211,14 @@ async def list_sessions() -> dict:
 
 
 async def publish(channel: str, text: str, session_id: str, reply_to: str | None = None,
-                  conversation_id: str = 'main', sender: str | None = None) -> dict:
+                  conversation_id: str = 'main', sender: str | None = None, to: str | None = None) -> dict:
     """Publish with an asserted routing session, not a verified person identity."""
     validate_session_id(session_id)
     if sender is None:
         sender = session_id
     validate_sender(sender)
+    if to is not None:
+        validate_member_label(to, 'to')
     key = channel_key(channel)
     validate_conversation(conversation_id)
     if not isinstance(text, str) or not text:
@@ -228,6 +230,8 @@ async def publish(channel: str, text: str, session_id: str, reply_to: str | None
     fields = {'session_id': session_id, 'sender': sender, 'channel': channel, 'conversation_id': conversation_id, 'text': text}
     if reply_to is not None:
         fields['reply_to'] = reply_to
+    if to is not None:
+        fields['to'] = to
     message_id = await lifecycle(key, fields, reply_to, conversation_id)
     return {**fields, 'reply_to': reply_to, 'id': message_id, 'cursor': message_id}
 
@@ -251,7 +255,7 @@ async def receive(channel: str, cursor: str = '0-0', timeout: int = 0, limit: in
             if int(message_id.split('-')[0]) < cutoff:
                 continue
             message = {**fields, 'session_id': fields.get('session_id'), 'agent_id': fields.get('agent_id'),
-                       'conversation_id': fields.get('conversation_id'),
+                       'conversation_id': fields.get('conversation_id'), 'to': fields.get('to'),
                        'id': message_id, 'cursor': message_id, 'reply_to': fields.get('reply_to')}
             if conversation_id is None or message['conversation_id'] == conversation_id:
                 messages.append(message)

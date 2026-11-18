@@ -112,6 +112,7 @@ def command_parser():
     source.add_argument('--file')
     publisher.add_argument('--reply-to')
     publisher.add_argument('--sender')
+    publisher.add_argument('--to')
     for name in ('receive', 'listen'):
         reader = commands.add_parser(name, help='Read after cursor' if name == 'receive' else 'Active WebSocket notifications')
         reader.add_argument('channel', nargs='?', default='general')
@@ -163,9 +164,20 @@ def publish_payload(options):
     sender = options.sender
     if sender is None:
         sender = session_name(options) or options.session_id
-    if not sender.strip() or len(sender.encode('utf-8')) > 256:
-        raise ValueError('sender_invalid')
-    return {'session_id': options.session_id, 'sender': sender, 'text': text, 'reply_to': options.reply_to, 'conversation_id': options.conversation_id}
+    validate_message_label(sender, 'sender')
+    payload = {'session_id': options.session_id, 'sender': sender, 'text': text, 'reply_to': options.reply_to,
+               'conversation_id': options.conversation_id}
+    if options.to is not None:
+        validate_message_label(options.to, 'recipient')
+        payload['to'] = options.to
+    return payload
+
+
+def validate_message_label(value, field):
+    try:
+        identity.validate_member_label(value, field)
+    except ValueError:
+        raise ValueError(field + '_invalid') from None
 
 
 def channel_address(options):
@@ -174,7 +186,21 @@ def channel_address(options):
 
 def post_message(options, channel_url, headers):
     with httpx.Client(timeout=70) as client:
+        require_recipient(options, client, headers)
         return client.post(channel_url + '/messages', headers=headers, json=publish_payload(options))
+
+
+def require_recipient(options, client, headers):
+    if options.to is None:
+        return
+    validate_message_label(options.to, 'recipient')
+    response = client.get(options.url.rstrip('/') + '/sessions', headers=headers)
+    response.raise_for_status()
+    label = identity.topic_label(options.channel, options.conversation_id)
+    peers = response.json()['sessions']
+    if not any(peer.get('session_id') != options.session_id and options.to in (peer.get('name'), peer.get('session_id'))
+               and label in (peer.get('topics') or []) for peer in peers):
+        raise ValueError('recipient_unknown')
 
 
 def service_error(response):
@@ -653,7 +679,7 @@ def watch_once(options, key):
     record_hook(options, 'notify_failed' if getattr(options, 'notice_failed', False) else 'waiting')
     async def wait():
         async with exchange_client(options, key) as client:
-            return await exchange.watch_topics(client, live, options.session_id)
+            return await exchange.watch_topics(client, live, options.session_id, name=session_name(options))
     return asyncio.run(wait()), True
 
 
@@ -894,17 +920,17 @@ async def read_details(options, key, rows, state):
     async with exchange_client(options, key) as client:
         marked = [addressed_row(row, await exchange.reply_target(
             client, {'channel': options.channel, 'conversation_id': row.get('conversation_id') or 'main'}, row),
-            options.session_id) for row in rows]
+            options.session_id, session_name(options)) for row in rows]
         shown = {row['id'] for row in rows}
         evicted = [message_id for message_id in (state['pending'] if state else []) if message_id not in shown
                    and await exchange.retained_message(client, state, message_id) is None]
         return marked, evicted
 
 
-def addressed_row(row, answered, session_id):
+def addressed_row(row, answered, session_id, name=None):
     """Tell the reader at the point of decision whether this row is for it and what closes the exchange."""
     mine = answered is not None and answered.get('session_id') == session_id
-    marked = {**row, 'for_you': exchange.message_for_session(row, answered, session_id)}
+    marked = {**row, 'for_you': exchange.message_for_session(row, answered, session_id, name)}
     if mine and not answered.get('reply_to'):
         marked['expected'] = CONFIRMATION_HINT
     return marked
@@ -1003,7 +1029,7 @@ def main():
         sys.exit(1)
     except ValueError as error:
         safe = str(error)
-        allowed = ('key_', 'session_', 'sender_', 'status_', 'unauthorized401', 'HTTP ')
+        allowed = ('key_', 'session_', 'sender_', 'recipient_', 'status_', 'unauthorized401', 'HTTP ')
         print('channel client failed: ' + (safe if safe.startswith(allowed) else 'invalid_input_or_state'), file=sys.stderr)
         sys.exit(1)
     except Exception:

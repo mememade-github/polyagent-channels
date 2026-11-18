@@ -504,18 +504,20 @@ async def reply_target(client, target, message):
     return await retained_message(client, target, reply_to) if reply_to else None
 
 
-async def addressed_to(client, target, message, session_id):
+async def addressed_to(client, target, message, session_id, name=None):
     """A reply wakes only the author of its target; unknown or evicted targets still wake."""
     answered = await reply_target(client, target, message)
-    return message_for_session(message, answered, session_id)
+    return message_for_session(message, answered, session_id, name)
 
 
-def message_for_session(message, answered, session_id):
+def message_for_session(message, answered, session_id, name=None):
     """A reply is for the author of its target; new or evicted targets are for everyone."""
+    if message.get('to') is not None:
+        return message['to'] in (session_id, name)
     return answered is None or answered.get('session_id') == session_id
 
 
-async def next_notice(client, path, session_id, duration):
+async def next_notice(client, path, session_id, duration, name=None):
     """Long-poll one topic. Peer work is returned unrecorded so a failed notice stays due; a quiet page is recorded."""
     state = read_state(path)
     page = await read_page(client, state, state['notified'], duration)
@@ -526,15 +528,16 @@ async def next_notice(client, path, session_id, duration):
     for message in page['messages']:
         validate_cursor(message['id'])
         unseen = cursor_order(message['id']) > cursor_order(current['notified'])
-        if unseen and first_peer([message], session_id) and await addressed_to(client, state, message, session_id):
+        if unseen and first_peer([message], session_id) and await addressed_to(client, state, message, session_id, name):
             return {'path': path, 'channel': state['channel'], 'conversation_id': state['conversation_id'], 'through': page['cursor']}
     mark_notified(path, page['cursor'])
     return None
 
 
-async def watch_topics(client, paths, session_id, duration=WATCH_POLL):
+async def watch_topics(client, paths, session_id, duration=WATCH_POLL, name=None):
     """Wait on every open topic at once so a quiet topic never delays another; return all topics now due."""
-    tasks = {asyncio.create_task(next_notice(client, path, session_id, duration)) for path in paths}
+    identities = {'name': name} if name is not None else {}
+    tasks = {asyncio.create_task(next_notice(client, path, session_id, duration, **identities)) for path in paths}
     all_tasks = set(tasks)
     try:
         while tasks:

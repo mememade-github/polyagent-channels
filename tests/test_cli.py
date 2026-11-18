@@ -494,6 +494,44 @@ def test_publish_defaults_to_installed_name_with_an_explicit_override(named_conn
     assert (session.messages[-1]['sender'], session.messages[-1]['session_id']) == (sender, 'native-self')
 
 
+@pytest.mark.parametrize('peers', [[], [{'session_id': 'other', 'name': 'peer', 'topics': ['elsewhere/main']}],
+                                  [{'session_id': 'native-self', 'name': 'peer', 'topics': ['general/main']}]])
+def test_publish_refuses_unknown_or_nonmember_recipient(connection_client, peers):
+    session = connection_client
+    session.presence.extend(peers)
+    before = list(session.messages)
+    with pytest.raises(ValueError, match='recipient_unknown'):
+        session.invoke('publish', '--text', 'hello', '--to', 'peer')
+    assert session.messages == before
+
+
+@pytest.mark.parametrize('recipient', ['peer', 'one'])
+def test_publish_accepts_shared_name_or_session_id(connection_client, recipient):
+    session = connection_client
+    session.presence.extend({'session_id': name, 'name': 'peer', 'topics': ['general/main']} for name in ('one', 'two'))
+    result = session.invoke('publish', '--text', 'hello', '--to', recipient)
+    assert (session.messages[-1]['to'], 'to' in result) == (recipient, False)
+
+
+@pytest.mark.parametrize('recipient, for_you', [('native-self', True), ('검사 agent', True), ('someone else', False)])
+def test_recipient_controls_read_annotation_and_unconfirmed_work(named_connection_client, recipient, for_you):
+    session = named_connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'to': recipient, 'text': 'work'})
+    result = session.invoke('receive', '--timeout', '0')
+    assert (result['messages'][0]['for_you'], result['unconfirmed']) == (for_you, ['2-0'] if for_you else [])
+
+
+def test_receiver_uses_the_installed_name(named_connection_client):
+    session = named_connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'to': '검사 agent', 'text': 'work'})
+    selected = options('--config', str(session.root / 'config.json'), '--client', 'codex',
+                       '--session-id', 'native-self', 'watch')
+    notices, listening = cli.watch_once(selected, 'synthetic-connection-key')
+    assert (bool(notices), listening) == (True, True)
+
+
 def test_connect_name_overrides_the_installed_name(named_connection_client):
     session = named_connection_client
     session.invoke('connect', '--name', 'explicit name')

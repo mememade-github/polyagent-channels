@@ -21,6 +21,29 @@ def test_invalid_sender_rejected_before_storage(storage, sender):
     storage.eval.assert_not_awaited()
 
 
+@pytest.mark.parametrize('recipient', ['', '  ', '🙂' * 65, 123])
+def test_invalid_recipient_rejected_before_storage(storage, recipient):
+    with pytest.raises(ValueError, match='to must'):
+        asyncio.run(persistence.publish('general', 'hello', 'native:session', to=recipient))
+    storage.eval.assert_not_awaited()
+
+
+@pytest.mark.parametrize('recipient', ['peer', '🙂' * 64])
+def test_service_stores_and_returns_recipient(client, headers, storage, recipient):
+    response = client.post('/channels/general/messages', headers=headers,
+                           json={'session_id': 'native', 'text': 'hello', 'to': recipient})
+    fields = dict(zip(storage.eval.call_args.args[12::2], storage.eval.call_args.args[13::2]))
+    storage.xread.return_value = [('channel:general', [('1-0', fields)])]
+    received = client.get('/channels/general/messages', headers=headers)
+    assert (response.status_code, response.json()['to'], fields['to'], received.json()['messages'][0]['to']) == (
+        200, recipient, recipient, recipient)
+
+
+def test_read_without_recipient_returns_null(storage):
+    storage.xread.return_value = [('channel:general', [('1-0', {'text': 'old'})])]
+    assert asyncio.run(persistence.receive('general'))['messages'][0]['to'] is None
+
+
 @pytest.mark.parametrize('session_id', ['native:session._-42', 'a' * 256])
 def test_session_is_asserted_and_sender_defaults(client, headers, session_id):
     response = client.post('/channels/general/messages', headers=headers,

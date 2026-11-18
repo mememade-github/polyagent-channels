@@ -51,5 +51,9 @@ def validate_session_id(session_id):
 
 
 def validate_sender(sender):
-    if not isinstance(sender, str) or not sender.strip() or len(sender.encode('utf-8')) > 256:
-        raise ValueError('sender must be nonempty and <=256 UTF-8 bytes')
+    validate_member_label(sender, 'sender')
+
+
+def validate_member_label(value, field):
+    if not isinstance(value, str) or not value.strip() or len(value.encode('utf-8')) > 256:
+        raise ValueError(field + ' must be nonempty and <=256 UTF-8 bytes')

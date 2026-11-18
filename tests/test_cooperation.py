@@ -131,6 +131,25 @@ def test_unknown_reply_target_still_wakes(tmp_path):
     assert notice(path, [{'id': '5-0', 'session_id': 'native-b', 'reply_to': '3-0', 'text': 'evicted target'}]) is not None
 
 
+@pytest.mark.parametrize('recipient, wakes', [('native-a', True), ('member-a', True), ('member-b', False)])
+def test_recipient_selects_the_receiver(tmp_path, recipient, wakes):
+    path = opened(tmp_path)
+    rows = [{'id': '1-0', 'session_id': 'peer', 'to': recipient, 'text': 'work'}]
+
+    async def watch():
+        async with client_for(rows) as client:
+            return await exchange.watch_topics(client, [path], 'native-a', duration=0, name='member-a')
+
+    assert bool(asyncio.run(watch())) is wakes
+
+
+def test_explicit_recipient_takes_priority_over_reply_target(tmp_path):
+    path = opened(tmp_path)
+    rows = [{'id': '1-0', 'session_id': 'native-a', 'text': 'request'},
+            {'id': '2-0', 'session_id': 'peer', 'to': 'someone-else', 'reply_to': '1-0', 'text': 'forwarded'}]
+    assert (notice(path, rows), cli.addressed_row(rows[1], rows[0], 'native-a')['for_you']) == (None, False)
+
+
 @pytest.mark.parametrize('message_id,before', [('5-3', '5-2'), ('5-0', '4-18446744073709551615'), ('0-0', '0-0')])
 def test_preceding_cursor_reads_exactly_the_target(message_id, before):
     assert exchange.preceding_cursor(message_id) == before

@@ -94,6 +94,11 @@ def test_display_name_cannot_become_an_option(tmp_path, monkeypatch, executed):
     assert executed[0][0][-1] == '--name=--client=codex'
 
 
+def test_publish_tool_maps_recipient_to_one_cli_argument():
+    arguments, text = stdio_tools.cli_arguments('publish', {'text': 'hello', 'to': 'member name'})
+    assert (arguments[-1], text) == ('--to=member name', 'hello')
+
+
 @pytest.mark.parametrize('identifier', ['general', '_', 'a-b', 'x' * 128])
 def test_tool_identifier_pattern_accepts_exchange_identifiers(identifier):
     assert re.fullmatch(stdio_tools.IDENTIFIER['pattern'], identifier)

@@ -368,7 +368,7 @@ session ID.
 
 | Tool | Purpose |
 |------|---------|
-| `publish` | Send text to a channel and conversation, optionally `reply_to` a message. Defaults are `general` and `main`. Returns at once |
+| `publish` | Send text to a channel and conversation, optionally `reply_to` a message or `to` a member name or session ID. Defaults are `general` and `main`. Returns at once |
 | `receive` | Read peer messages not confirmed yet, up to 100 per call; call again while `more` is true. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
 | `ack` | Confirm one delivered message handled without a further reply, including a reply that satisfies your request. It never replaces an answer to an outstanding request |
 | `peers` | List announced sessions with name and topics. Listed does not mean online |
@@ -412,10 +412,13 @@ answer a confirmation; `ack` it with its ID.
 If the body names another recipient and asks nothing of this session, do not
 reply; `ack` it with its ID.
 
-**Who wakes.** A session never wakes itself. A new message wakes every other
-session on the topic. A reply wakes only the author of the message it answers,
-so same-vendor sessions on a topic stay separate. Each session keeps its own
-position, so one session reading consumes nothing for another.
+**Who wakes.** A session never wakes itself. With `to`, only sessions whose
+installed display name or session ID matches the recipient wake. Without `to`,
+a new message wakes every other session on the topic and a reply wakes only the
+author of the message it answers. Other recipients can read the row later with
+`for_you: false`; it never becomes their unconfirmed work. Each session keeps its own
+position, so one session reading consumes nothing for another. A client installed
+from an earlier release ignores `to` and still wakes for every new message.
 
 **Confirmation.** Reading is not finishing. A message stays unconfirmed until a
 `publish` with `reply_to` its ID or an `ack` with its ID. Until then `receive`
@@ -486,10 +489,10 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 
 | Command | Behavior |
 |---------|----------|
-| `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. `--name` overrides the installed name for this announcement. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
+| `connect [--name LABEL] [--timeout SECONDS]` | Join a topic and announce the session with an expiring lease. `--name` changes only the announced label and is not an address; the receiver restores the installed name on its next cycle. A new topic starts at the current cursor; rejoining keeps the saved position. Listening time is up to seven days |
 | `open [--cursor ID] [--timeout SECONDS]` | Join a topic from the saved position, or the current cursor for a new topic. `--cursor` chooses the position instead and moves one saved earlier, for example by `publish`; `0-0` starts from retained history, and it is refused while the topic has unconfirmed messages. `open` is refused while the topic is listening. A `receive` still waiting on the topic can move a chosen position on again. Listening time is up to seven days |
 | `peers` | List announced sessions |
-| `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: installed name, else session ID). `--reply-to ID` names the message answered in that topic. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
+| `publish --text TEXT` or `--file PATH` | `--file -` reads UTF-8 from stdin. `--sender` sets the stored label (default: installed name, else session ID). `--reply-to ID` names the message answered in that topic. `--to RECIPIENT` addresses an installed display name or session ID: another session must announce that name or ID on the topic, or the CLI refuses with `recipient_unknown` before sending. Every matching session wakes. Remembers its position, so a later `connect` or `receive` still sees a reply that arrived in between |
 | `receive [--timeout SECONDS]` | Waits up to 30 seconds by default (at most 60) when nothing is new; `--timeout 0` returns at once. Records what it delivered. Returns up to 100 messages, reading past other conversations and its own messages for up to 5,000 records; `more: true` means it stopped short of the stream end it saw when it started, so run it again. Unconfirmed messages can hold newer ones back (see Confirmation). `--cursor ID` only reads history. `--all-conversations` reads across conversations |
 | `ack --message-id ID` | Confirm one message. The position moves once none is left |
 | `close` | Leave a topic |
@@ -530,7 +533,7 @@ handshakes and each MCP request.
 | `GET /health` | public | Service health |
 | `GET /harness`, `/harness.sha256` | public | Installer and checksum; 503 when missing |
 | `GET /status` | key | `{"status":"ready"}` when Redis answers |
-| `POST /channels/{channel}/messages` | key | Publish. JSON `{"session_id":"native-session-1","text":"Hello","conversation_id":"work"}` with optional `sender` and `reply_to` |
+| `POST /channels/{channel}/messages` | key | Publish. JSON `{"session_id":"native-session-1","text":"Hello","conversation_id":"work"}` with optional `sender`, `reply_to` and `to` |
 | `GET /channels/{channel}/messages` | key | Read. Query `cursor=0-0&timeout=30&limit=100&conversation_id=work` |
 | `GET /channels/{channel}/cursor` | key | Latest stream cursor (or `0-0`) and Redis `time_ms` |
 | `POST /sessions` | key | Announce `session_id`, `state`, `ttl_seconds` and optional `client`, `name`, `topics`; omitted `topics` keeps its stored list, and a missing stored list returns null |
@@ -546,7 +549,7 @@ do not verify identity or guarantee a live receiver.
 |-------|-------|
 | `session_id` | 1 to 256 ASCII letters, digits or `._:-` |
 | `channel`, `conversation_id` | 1 to 128 ASCII letters, digits or `_-`. Agent tools refuse a leading `-`, which the CLI would read as an option |
-| `sender` | Non-whitespace text, up to 256 UTF-8 bytes |
+| `sender`, `to` | Non-whitespace text, up to 256 UTF-8 bytes |
 | `client`, `name` | Nonblank, up to 64 and 256 UTF-8 bytes |
 | Announcement `topics` | List of at most 16 `channel/conversation_id` labels |
 | `text` | Nonempty, up to 8 MiB UTF-8 |

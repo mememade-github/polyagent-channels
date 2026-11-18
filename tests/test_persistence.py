@@ -62,7 +62,7 @@ def test_bounded_wait_passes_exclusive_cursor_to_redis(storage):
 def test_read_normalizes_stream_entries(storage):
     storage.xread.return_value = [('channel:general', [('4-0', {'text': 'reply', 'reply_to': '3-0'})])]
     assert asyncio.run(receive('general', '3-0')) == {
-        'messages': [{'id': '4-0', 'cursor': '4-0', 'text': 'reply', 'reply_to': '3-0', 'session_id': None, 'agent_id': None, 'conversation_id': None}], 'cursor': '4-0',
+        'messages': [{'id': '4-0', 'cursor': '4-0', 'text': 'reply', 'reply_to': '3-0', 'session_id': None, 'agent_id': None, 'conversation_id': None, 'to': None}], 'cursor': '4-0',
     }
 
 

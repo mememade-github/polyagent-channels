@@ -55,9 +55,11 @@ POST /channels/{channel}/messages accepts JSON:
 {"session_id":"native-session-id","text":"Hello","conversation_id":"work"}
 session_id is required: 1..256 ASCII letters/digits/._:- (no slash). Optional sender
 defaults to session_id and must be non-whitespace, <=256 UTF-8 bytes. Optional
-reply_to references retained history in this channel/conversation. conversation_id
+to names a recipient and has the same limit as sender. Optional reply_to references
+retained history in this channel/conversation. conversation_id
 defaults to main. Message fields are session_id,sender,channel,
-conversation_id,text,reply_to,id,cursor. Existing agent_id/history stay readable.
+conversation_id,text,reply_to,to,id,cursor; absent to is null when reading.
+Existing agent_id/history stay readable.
 Rows missing identity/conversation fields remain readable without a conversation
 filter; absent session_id,agent_id,conversation_id are null. Missing conversation_id
 excludes a row from filtered reads and reply targets; missing identity alone does
@@ -77,7 +79,7 @@ Redis time_ms. It does not read messages or prove peer presence.
 WS /channels/{channel}/subscribe accepts cursor and conversation_id. Save message
 and heartbeat cursors, then reconnect from the saved cursor.
 MCP Streamable HTTP: /mcp. Tools:
-publish(channel,text,session_id,reply_to?,conversation_id="main",sender?)
+publish(channel,text,session_id,reply_to?,conversation_id="main",sender?,to?)
 receive(channel,cursor="0-0",timeout=0,limit=100,conversation_id?).
 POST /mcp requires Content-Length; oversize checks precede authentication.
 
@@ -106,8 +108,10 @@ tools: start a new session or resume with install's resume_command.
 Reception: one background receiver per session waits on HTTP and never holds a turn.
 On a peer message it notifies the open session with a fixed notice that carries no
 peer text: Claude through asyncRewake (exit code 2), Codex through codex queue. The
-session then reads with receive. Replies wake only the author of their target; other
-peer messages wake every session on that topic. A session never wakes itself. Claude
+session then reads with receive. A message with to wakes only sessions whose
+installed name or session ID matches it. Without to, replies wake only the author
+of their target; other peer messages wake every session on that topic. A session
+never wakes itself. Claude
 joins general/main at session start and Codex on its first channels tool call.
 connect or open joins another topic; close leaves it. Publish and receive never join
 a topic. Publish remembers the position, so a later connect still sees the reply; at
@@ -180,9 +184,9 @@ async def read_json(request):
 async def read_message(request):
     message = await read_json(request)
     if not isinstance(message, dict):
-        raise ValueError('Expected session_id, text and optional sender, reply_to, conversation_id')
-    if set(message) - {'session_id', 'sender', 'text', 'reply_to', 'conversation_id'} or not {'session_id', 'text'} <= message.keys():
-        raise ValueError('Expected session_id, text and optional sender, reply_to, conversation_id')
+        raise ValueError('Expected session_id, text and optional sender, reply_to, conversation_id, to')
+    if set(message) - {'session_id', 'sender', 'text', 'reply_to', 'conversation_id', 'to'} or not {'session_id', 'text'} <= message.keys():
+        raise ValueError('Expected session_id, text and optional sender, reply_to, conversation_id, to')
     return message
 
 

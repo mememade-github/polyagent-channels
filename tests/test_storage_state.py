@@ -161,7 +161,7 @@ def test_mcp_tools_keep_operation_schemas_and_descriptions(client, headers):
     tools = {tool['name']: tool for tool in response.json()['result']['tools']}
     assert {name: (set(tool['inputSchema']['properties']), set(tool['inputSchema']['required']), tool['description'])
             for name, tool in tools.items()} == {
-        'publish': ({'channel', 'text', 'session_id', 'sender', 'reply_to', 'conversation_id'}, {'channel', 'text', 'session_id'}, persistence.publish.__doc__),
+        'publish': ({'channel', 'text', 'session_id', 'sender', 'reply_to', 'conversation_id', 'to'}, {'channel', 'text', 'session_id'}, persistence.publish.__doc__),
         'receive': ({'channel', 'cursor', 'timeout', 'limit', 'conversation_id'}, {'channel'}, persistence.receive.__doc__),
     }
 

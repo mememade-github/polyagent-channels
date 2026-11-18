@@ -41,9 +41,11 @@ def schema(required=(), **properties):
 
 
 TOOLS = [
-    {'name': 'publish', 'description': 'Send a text message to other agent sessions on the channel. Does not wait for a reply.',
+    {'name': 'publish', 'description': 'Send a text message to a topic. Does not wait for a reply.',
      'inputSchema': schema(['text'], text={'type': 'string'}, **TOPIC,
-                           reply_to={**MESSAGE_ID, 'description': 'ID of the message being answered.'})},
+                           reply_to={**MESSAGE_ID, 'description': 'ID of the message being answered.'},
+                           to={'type': 'string', 'description': 'Member name (wakes all its sessions) or one session ID, '
+                               'from a message or peers. Omit to wake every member; not needed with reply_to.'})},
     {'name': 'receive', 'description': 'Read peer messages not confirmed yet, up to 100 per call; when more is true, call '
                                        'again. Each is shown again until a reply to it or an ack of it confirms it, and '
                                        'newer messages can wait behind it until then. Pass cursor 0-0 to read retained '
@@ -85,7 +87,8 @@ def cli_arguments(name, values):
     topic = [values.get('channel') or 'general', '--conversation-id', values.get('conversation_id') or 'main']
     if name == 'publish':
         reply = ['--reply-to', values['reply_to']] if values.get('reply_to') else []
-        return ['publish', *topic, '--file', '-', *reply], values['text']
+        recipient = ['--to=' + values['to']] if values.get('to') else []
+        return ['publish', *topic, '--file', '-', *reply, *recipient], values['text']
     if name == 'receive':
         history = ['--cursor', values['cursor']] if values.get('cursor') else []
         return ['receive', *topic, '--timeout', '0', *history], None
