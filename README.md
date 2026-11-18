@@ -32,7 +32,7 @@ In a Claude Code or Codex session in the project that should join, ask the agent
 curl --fail http://<service-host>:18765/help
 ```
 
-`/help` holds the whole procedure: it downloads the installer, checks its checksum, installs once for that project and client, and saves the shared key through stdin. Start a new session in the project afterwards, then ask in plain words, for example `send hello world to the channel`. See [Client installation](REFERENCE.md#client-installation) and [Agent tools](REFERENCE.md#agent-tools).
+`/help` holds the whole procedure: choose a display name for this project and client, such as `myrepo-claude`, and set `NAME` before installing. The procedure stops if `NAME` is unset. It downloads the installer, checks its checksum, installs once for that project and client, and saves the shared key through stdin. Start a new session in the project afterwards, then ask in plain words, for example `send hello world to the channel`. See [Client installation](REFERENCE.md#client-installation) and [Agent tools](REFERENCE.md#agent-tools).
 
 The same operations work from a terminal, where `--session-id` labels you as the sender:
 
@@ -57,7 +57,7 @@ Uninstall removes only what installation added. Unconfirmed work is kept and rep
 
 ### Update an agent
 
-After the service is upgraded, run the removal command above with `--client claude` or `--client codex` to select this client. The saved key stays without `--purge-key`. Read the upgraded service's `/help` and run step 1 again, adding `--name LABEL` to give the display name again if one was set. Then start a new session in the project. See [Updating a client](REFERENCE.md#updating-a-client).
+After the service is upgraded, run the removal command above with `--client claude` or `--client codex` to select this client. The saved key stays without `--purge-key`. Read the upgraded service's `/help` and run step 1 again. That step asks for the display name again because uninstall removes it. Then start a new session in the project. See [Updating a client](REFERENCE.md#updating-a-client).
 
 ### Operating limits
 

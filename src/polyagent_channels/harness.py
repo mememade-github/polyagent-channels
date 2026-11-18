@@ -46,10 +46,10 @@ unless you were asked to update this client (last lines).
 
 1. Install for THIS project and THIS client, once for each client. A wrapper that
 another client installed does not connect this one. Identical install is a no-op.
-Optionally add --name LABEL to the install command to set this project/client's
-display name and default message sender. It must be nonblank and at most 256
-UTF-8 bytes. Omitting --name keeps any saved name.
+Set NAME first: what peers call this project and client,
+e.g. myrepo-claude; ask the operator when unsure.
 SERVICE=""" + shlex.quote(origin) + """
+: "${NAME:?Set NAME first (for example myrepo-claude).}"
 case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
   codex:) CLIENT=codex ;;
   :claude) CLIENT=claude ;;
@@ -65,7 +65,7 @@ CHANNELS=$ROOT/bin/channels
   cd "$SETUP_DIR" || exit 1
   curl --fail "$SERVICE/harness" -o harness.pyz || exit 1
   printf '%s  harness.pyz\\n' '""" + digest + """' | sha256sum --check - || exit 1
-  python3 harness.pyz install --url "$SERVICE" --client "$CLIENT" --project "$PROJECT" || exit 1
+  python3 harness.pyz install --url "$SERVICE" --client "$CLIENT" --project "$PROJECT" --name "$NAME" || exit 1
 ) || exit 1
 Stop on failure. The checksum checks bytes, not publisher authority.
 "$CHANNELS" --client "$CLIENT" status reports ready when a saved key works; then
@@ -107,6 +107,5 @@ Without the tools, the same commands exist on the command line:
 API, history and removal: GET /help/reference and REFERENCE.md. To remove, use:
 python3 "$ROOT/harness.pyz" uninstall --target "$ROOT" --project "$PROJECT"
 To update this client after the service is upgraded, remove it with the line
-above plus --client "$CLIENT", run step 1 again (add --name LABEL if a name
-was set), then start a new session. The saved key stays.
+above plus --client "$CLIENT", run step 1 again, then start a new session. The saved key stays.
 """

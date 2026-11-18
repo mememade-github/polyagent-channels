@@ -1011,8 +1011,7 @@ def test_help_states_how_to_run_claude_headless_in_an_installed_project(monkeypa
     'unless you were asked to update this client (last lines).',
     'python3 "$ROOT/harness.pyz" uninstall --target "$ROOT" --project "$PROJECT" '
     'To update this client after the service is upgraded, remove it with the line '
-    'above plus --client "$CLIENT", run step 1 again (add --name LABEL if a name '
-    'was set), then start a new session. The saved key stays.',
+    'above plus --client "$CLIENT", run step 1 again, then start a new session. The saved key stays.',
 ])
 def test_help_guides_an_installed_client_through_an_update(monkeypatch, phrase):
     from polyagent_channels import harness
@@ -1035,11 +1034,27 @@ def test_help_commands_install_and_save_a_key_in_a_custom_root(artifact, tmp_pat
     project = tmp_path / 'project'
     project.mkdir()
     environment = {**{key: value for key, value in os.environ.items() if not key.startswith(('CHANNEL_', 'PYTHON', 'CODEX'))},
-                   'CLAUDE_CODE_SESSION_ID': 'synthetic', 'CHANNEL_ROOT': str(tmp_path / 'custom')}
+                   'CLAUDE_CODE_SESSION_ID': 'synthetic', 'CHANNEL_ROOT': str(tmp_path / 'custom'), 'NAME': 'myrepo-claude'}
     done = subprocess.run(['bash', '-c', block + '\n"$CHANNELS" key --stdin'], input='synthetic-help-key', cwd=project, env=environment,
                           text=True, capture_output=True, timeout=30)
     assert (done.returncode, (tmp_path / 'custom/.env/channel.key').read_text().strip(), (project / '.claude/settings.local.json').exists(),
-            'synthetic-help-key' in done.stdout + done.stderr) == (0, 'synthetic-help-key', True, False)
+            'synthetic-help-key' in done.stdout + done.stderr,
+            json.loads((tmp_path / 'custom/install-manifest.json').read_text())['hooks'][0]['name']) == (
+        0, 'synthetic-help-key', True, False, 'myrepo-claude')
+
+
+def test_help_stops_before_installation_when_name_is_unset(monkeypatch, tmp_path):
+    from polyagent_channels import harness
+
+    monkeypatch.setattr(harness, 'artifact_bytes', lambda: b'synthetic-artifact')
+    text = harness.setup_help('http://localhost:18765')
+    lines = text.splitlines()
+    start = next(index for index, line in enumerate(lines) if line.startswith('SERVICE='))
+    block = '\n'.join(lines[start:lines.index(') || exit 1') + 1])
+    environment = {key: value for key, value in os.environ.items() if key != 'NAME'}
+    result = subprocess.run(['bash', '-c', block], cwd=tmp_path, env=environment,
+                            capture_output=True, text=True, timeout=10)
+    assert (result.returncode != 0, 'Set NAME first' in result.stderr, '--name "$NAME"' in block) == (True, True, True)
 
 
 def test_busy_closed_session_lock_refuses_uninstall(artifact, tmp_path):

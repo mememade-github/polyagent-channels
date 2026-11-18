@@ -196,10 +196,11 @@ agent can follow it after the operator approves the connection once. By hand:
 ```bash
 cd "$(mktemp -d)"
 SERVICE=http://<service-host>:18765
+NAME=myrepo-claude # Choose what peers call this project and client.
 curl --fail "$SERVICE/harness" -o harness.pyz
 curl --fail "$SERVICE/harness.sha256" -o harness.sha256
 sha256sum --check harness.sha256 &&
-  python3 harness.pyz install --url "$SERVICE" --client claude --project "$OLDPWD"
+  python3 harness.pyz install --url "$SERVICE" --client claude --project "$OLDPWD" --name "$NAME"
 ```
 
 This installs for Claude Code; for Codex, use `--client codex`. The checksum
@@ -207,13 +208,13 @@ verifies bytes, not publisher authority. Installation contacts
 no channel service. The default root is `~/.local/share/polyagent-channels`;
 set `CHANNEL_ROOT` or pass `--target` for another.
 
-Add `--name LABEL` to the install command to set a display name for this project
-and client. It must be nonblank and at most 256 UTF-8 bytes. The name is used in
+`/help` requires choosing `NAME` for this project and client and passes it as
+`--name`; its script stops if `NAME` is unset. It must be nonblank and at most 256 UTF-8 bytes. The name is used in
 session announcements and as the default message sender; it is an asserted
 label, not a verified identity. Reinstalling without `--name` keeps the saved
 name while the installation record remains, and an otherwise identical install
-remains a no-op. Supply `--name` again to change it. Installations without a name
-keep the session ID as sender.
+remains a no-op. Supply `--name` again to change it. The installer still accepts
+a direct install without `--name`; those installations keep the session ID as sender.
 
 A running client does not load new tools. Start a new session in the project,
 or resume with the `resume_command` from the installation output. Accept the
@@ -235,8 +236,8 @@ python3 ~/.local/share/polyagent-channels/harness.pyz uninstall --client claude
 
 Use `--target ROOT` for a custom installation root and run its `harness.pyz`.
 The saved key stays without `--purge-key`. Read the upgraded service's `/help`
-and run step 1 again, adding `--name LABEL` to give the display name again if
-one was set; uninstall removes the saved name. Then start a new session in
+and run step 1 again; that step asks for the display name because uninstall
+removes the saved name. Then start a new session in
 the project.
 
 ### Changing the service address
@@ -730,8 +731,8 @@ Then confirm (in Windows PowerShell, use `curl.exe` for `curl`):
   `docker exec polyagent-channels-redis-1 redis-cli INFO server` reports the
   Redis version of the compose file.
 - A client updated by [removing it with the installed file and repeating
-  `/help` step 1](#updating-a-client), with `--client` on removal and `--name LABEL`
-  again if a name was set, is woken once in a new session by a peer message, and
+  `/help` step 1](#updating-a-client), with `--client` on removal and a display name
+  chosen in step 1, is woken once in a new session by a peer message, and
   messages from before the upgrade stay readable with `receive --cursor 0-0`.
 
 To roll back the service, point the image back and recreate only that
