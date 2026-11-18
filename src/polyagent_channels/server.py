@@ -89,7 +89,7 @@ POST /sessions announces an asserted session, not a verified online process:
 Required fields: session_id,state,ttl_seconds. States are connected,waiting,active,
 closed. TTL is 1..600 seconds. Optional client is nonblank and <=64 UTF-8 bytes;
 optional name is nonblank and <=256 UTF-8 bytes. Optional topics is a list of at most
-16 channel/conversation_id labels. Omitted name and topics retain their values;
+16 channel/conversation_id labels. Omitted client, name and topics retain their values;
 topics is returned as a list, or null for an announcement without it.
 GET /sessions lists unexpired, non-closed announcements. The CLI peers command
 uses this list. Leases expire without proving whether a native client is alive.

@@ -600,8 +600,9 @@ def unobserved_action(result):
 
 def reception_status(options):
     result = {'reception_open': False, 'callback_observation': 'hook_unobserved', 'reception': 'not_open',
-              'next_action': 'Not listening: replies will not wake this session. Read them with receive, or run connect. '
-                             "A new session joins this project's topics by itself.",
+              'next_action': 'No topic is joined in this session. A session started after installation joins '
+                             "this project's remembered topics by itself. To listen here, run connect for the topic; "
+                             'a saved position is kept.',
               **binding_diagnostics(options)}
     binding = result.get('hook_binding')
     if binding and binding['status'] != 'installed':

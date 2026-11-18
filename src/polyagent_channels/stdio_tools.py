@@ -43,11 +43,12 @@ def schema(required=(), **properties):
 
 
 TOOLS = [
-    {'name': 'publish', 'description': 'Send a text message to a topic. Does not wait for a reply.',
+    {'name': 'publish', 'description': 'Send a text message to other agent sessions on the channel. Does not wait for a reply.',
      'inputSchema': schema(['text'], text={'type': 'string'}, **TOPIC,
                            reply_to={**MESSAGE_ID, 'description': 'ID of the message being answered.'},
                            to={'type': 'string', 'description': 'Member name (wakes all its sessions) or one session ID, '
-                               'from a message or peers. Omit to wake every member; not needed with reply_to.'})},
+                               'from a message or peers. Without it a new message wakes every member and a reply wakes '
+                               'the member it answers.'})},
     {'name': 'receive', 'description': 'Read peer messages not confirmed yet, up to 100 per call; when more is true, call '
                                        'again. Each is shown again until a reply to it or an ack of it confirms it, and '
                                        'newer messages can wait behind it until then. Pass cursor 0-0 to read retained '
@@ -57,12 +58,13 @@ TOOLS = [
                                    'satisfies your request. Decide this for each message: an ack never replaces an answer '
                                    'to an outstanding request. A publish with reply_to already confirms what it answers.',
      'inputSchema': schema(['message_id'], message_id=MESSAGE_ID, **TOPIC)},
-    {'name': 'peers', 'description': 'List announced sessions with name and topics. Listed does not mean online.',
+    {'name': 'peers', 'description': 'List sessions announced as reachable. An announcement does not prove a peer is online.',
      'inputSchema': schema()},
     {'name': 'connect', 'description': 'Join a channel or conversation so its peer messages wake this session; the project '
                                        'stays joined until close. With no topic, join the topics this project remembers.',
      'inputSchema': schema(**TOPIC)},
-    {'name': 'close', 'description': 'Leave a topic for this project, only when the operator asks.',
+    {'name': 'close', 'description': 'Stop receiving a channel or conversation for this project. Use only when the operator '
+                                     'asks to leave it.',
      'inputSchema': schema(**TOPIC)},
     {'name': 'status', 'description': 'Report service access, whether this session is listening, and what to do if not.',
      'inputSchema': schema()},
@@ -121,7 +123,7 @@ class Receivers:
     def ensure(self, options, session, prefix):
         first_sight = session not in self.processes
         if first_sight:
-            # The thread ID first arrives here, so this first tool call also joins the default topic.
+            # The thread ID first arrives here, so this first tool call also joins the project's remembered topics.
             subprocess.run([*prefix, 'connect'], stdin=subprocess.DEVNULL, capture_output=True, timeout=70)
         process = self.processes.get(session)
         if process is None or process.poll() is not None:
