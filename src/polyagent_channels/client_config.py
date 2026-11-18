@@ -4,9 +4,14 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
+DEFAULT_ROOT = '.local/share/polyagent-channels'
+TRANSPORT_TRUST = 'Use a trusted network or TLS.'
+SESSION_RESTART = 'Start a new session in this project'
+
+
 def default_root():
     """The client root, read when a command runs: CHANNEL_ROOT, else ~/.local/share/polyagent-channels."""
-    return Path(os.environ.get('CHANNEL_ROOT') or Path.home() / '.local/share/polyagent-channels').expanduser().absolute()
+    return Path(os.environ.get('CHANNEL_ROOT') or Path.home() / DEFAULT_ROOT).expanduser().absolute()
 
 
 class ConfigError(ValueError):

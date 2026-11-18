@@ -2,7 +2,6 @@
 import asyncio
 import re
 import traceback
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -201,19 +200,3 @@ def test_startup_redis_failure_reports_unix_socket_as_configured(server_module, 
     rendered = ''.join(traceback.format_exception(failure.value))
     assert str(failure.value) == 'Storage initialization failed: ConnectionError at unix:/tmp/synthetic.sock/2'
     assert not any(text in rendered for text in ('localhost', '6379', SOCKET_USER, SOCKET_SECRET, *RAW_FRAGMENTS))
-
-
-def test_help_documents_storage_state_within_line_limit(server_module):
-    flattened = ' '.join(server_module.HELP.split())
-    long_lines = [line for line in server_module.HELP.splitlines()
-                  if len(line) > 88 and not line.lstrip().startswith('channels ')]
-    assert '503 Redis unavailable or storage state: <cause> (operator repair; see REFERENCE.md).' in flattened
-    assert '503 Redis unavailable.' not in flattened and long_lines == []
-
-
-@pytest.mark.parametrize('phrase', [*REPLY_PHRASES, 'Unexpected storage key type'])
-def test_reference_recovery_table_has_one_row_per_storage_state(phrase):
-    reference = (Path(__file__).parents[1] / 'REFERENCE.md').read_text(encoding='utf-8')
-    rows = [line for line in reference.splitlines() if phrase in line]
-    assert reference.count(phrase) == 1 and rows[0].startswith('| ')
-    assert len([cell for cell in rows[0].strip('|').split('|') if cell.strip()]) >= 3

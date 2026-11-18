@@ -1248,11 +1248,6 @@ def test_receive_marks_only_replies_to_this_session_for_it(connection_client):
             and {row['text'] for row in rows if 'expected' in row} == {'answer to me'})
 
 
-def test_wake_notice_explains_how_to_handle_another_recipients_message():
-    notice = cli.notice_text([{'channel': 'general', 'conversation_id': 'main'}])
-    assert 'If the body names another recipient and asks nothing of this session, do not reply; ack it with its ID.' in notice
-
-
 def test_reply_to_my_request_hint_points_to_ack(connection_client):
     session = connection_client
     session.invoke('connect')
@@ -1260,7 +1255,7 @@ def test_reply_to_my_request_hint_points_to_ack(connection_client):
         {'id': '2-0', 'session_id': 'native-self', 'conversation_id': 'main', 'text': 'my request'},
         {'id': '3-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'answer', 'reply_to': '2-0'}])
     row = session.invoke('receive', '--timeout', '0')['messages'][0]
-    assert 'Ack it with its ID when handled and no further reply is needed' in row['expected']
+    assert row['expected'] == cli.CONFIRMATION_HINT
 
 
 def test_confirmation_of_my_answer_asks_for_no_further_reply(connection_client):

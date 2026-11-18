@@ -7,7 +7,7 @@ import re
 import time
 from importlib.resources import files
 
-from polyagent_channels.identity import (MAX_SESSION_TOPICS, is_cursor_form, is_identifier, validate_member_label,
+from polyagent_channels.identity import (DEFAULT_CONVERSATION, MAX_IDENTIFIER_LENGTH, MAX_MEMBER_LABEL_BYTES, MAX_SESSION_TOPICS, is_cursor_form, is_identifier, validate_member_label,
                                          validate_sender, validate_session_id, validate_topics, within_cursor_range)
 
 from redis.asyncio import Redis
@@ -42,6 +42,13 @@ STORAGE_KEYS = ('channels:heads', 'channels:bytes', 'channels:version', 'channel
 RETENTION_DAYS = DEFAULT_RETENTION_DAYS
 RETENTION_SWEEP_SECONDS = 60
 MAX_TEXT = 8 * 1024 * 1024
+READ_CURSOR = '0-0'
+READ_TIMEOUT = 0
+MAX_READ_TIMEOUT = 60
+MAX_READ_LIMIT = 100
+SESSION_STATES = ('connected', 'waiting', 'active', 'closed')
+MAX_SESSION_TTL = 600
+MAX_CLIENT_LABEL_BYTES = 64
 STORAGE_STATE_REPLIES = frozenset({
     'Invalid message lifecycle arguments', 'Unsupported message storage version', 'Message clock must be empty',
     'Invalid message byte counter', 'Missing message clock', 'Stream ID exhausted',
@@ -122,13 +129,13 @@ async def sweep_history():
         except RedisError as error:
             # Only canonical storage states carry text; other Redis errors log their class alone.
             reason = error if isinstance(error, StorageStateError) else type(error).__name__
-            logging.getLogger(__name__).error('Message retention sweep failed: %s; retry in 60 seconds', reason)
+            logging.getLogger(__name__).error('Message retention sweep failed: %s; retry in %s seconds', reason, RETENTION_SWEEP_SECONDS)
         await asyncio.sleep(RETENTION_SWEEP_SECONDS)
 
 
 def channel_key(channel):
     if not is_identifier(channel):
-        raise ValueError('Invalid channel: use 1..128 ASCII letters, digits, _ or -')
+        raise ValueError(f'Invalid channel: use 1..{MAX_IDENTIFIER_LENGTH} ASCII letters, digits, _ or -')
     return 'channel:' + channel
 
 
@@ -158,11 +165,11 @@ async def lease_session(session_id: str, state: str, ttl_seconds: int,
                         client: str | None = None, name: str | None = None, topics: list[str] | None = None) -> dict:
     """Record a bounded, asserted observation, not model liveness or verified identity."""
     validate_session_id(session_id)
-    if not isinstance(state, str) or state not in {'connected', 'waiting', 'active', 'closed'}:
-        raise ValueError('state must be connected, waiting, active or closed')
-    if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 600:
-        raise ValueError('ttl_seconds must be an integer in 1..600')
-    for field, value, limit in (('client', client, 64), ('name', name, 256)):
+    if not isinstance(state, str) or state not in SESSION_STATES:
+        raise ValueError('state must be ' + ', '.join(SESSION_STATES[:-1]) + ' or ' + SESSION_STATES[-1])
+    if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= MAX_SESSION_TTL:
+        raise ValueError(f'ttl_seconds must be an integer in 1..{MAX_SESSION_TTL}')
+    for field, value, limit in (('client', client, MAX_CLIENT_LABEL_BYTES), ('name', name, MAX_MEMBER_LABEL_BYTES)):
         if value is not None and (not isinstance(value, str) or not value.strip()
                                   or len(value.encode('utf-8')) > limit):
             raise ValueError(f'{field} must be nonempty and <={limit} UTF-8 bytes')
@@ -213,7 +220,7 @@ async def list_sessions() -> dict:
 
 
 async def publish(channel: str, text: str, session_id: str, reply_to: str | None = None,
-                  conversation_id: str = 'main', sender: str | None = None, to: str | None = None) -> dict:
+                  conversation_id: str = DEFAULT_CONVERSATION, sender: str | None = None, to: str | None = None) -> dict:
     """Publish with an asserted routing session, not a verified person identity."""
     validate_session_id(session_id)
     if sender is None:
@@ -226,7 +233,7 @@ async def publish(channel: str, text: str, session_id: str, reply_to: str | None
     if not isinstance(text, str) or not text:
         raise ValueError('text must be a nonempty string')
     if len(text.encode('utf-8')) > MAX_TEXT:
-        raise ValueError('text exceeds 8 MiB UTF-8 limit')
+        raise ValueError(f'text exceeds {MAX_TEXT // (1024 * 1024)} MiB UTF-8 limit')
     if reply_to is not None:
         validate_cursor(reply_to)
     fields = {'session_id': session_id, 'sender': sender, 'channel': channel, 'conversation_id': conversation_id, 'text': text}
@@ -238,15 +245,15 @@ async def publish(channel: str, text: str, session_id: str, reply_to: str | None
     return {**fields, 'reply_to': reply_to, 'id': message_id, 'cursor': message_id}
 
 
-async def receive(channel: str, cursor: str = '0-0', timeout: int = 0, limit: int = 100,
+async def receive(channel: str, cursor: str = READ_CURSOR, timeout: int = READ_TIMEOUT, limit: int = MAX_READ_LIMIT,
                   conversation_id: str | None = None) -> dict:
     """Read one bounded stream page, optionally filtered; cursor includes skipped rows."""
     key = channel_key(channel)
     validate_cursor(cursor)
     if conversation_id is not None:
         validate_conversation(conversation_id)
-    if not 0 <= timeout <= 60 or not 1 <= limit <= 100:
-        raise ValueError('timeout must be 0..60; limit must be 1..100')
+    if not 0 <= timeout <= MAX_READ_TIMEOUT or not 1 <= limit <= MAX_READ_LIMIT:
+        raise ValueError(f'timeout must be 0..{MAX_READ_TIMEOUT}; limit must be 1..{MAX_READ_LIMIT}')
     await lifecycle(key)
     rows = await redis.xread({key: cursor}, count=limit, block=timeout * 1000 if timeout else None)
     cutoff = retention_cutoff()

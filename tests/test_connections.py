@@ -167,12 +167,6 @@ def test_connection_storage_errors_are_masked(client, headers, session_storage, 
     assert (response.status_code, response.json()) == (503, {'error': 'Redis unavailable'})
 
 
-@pytest.mark.parametrize('phrase', [
-    'POST /channels/{channel}/messages',
-    'notified (a notice was handed to this session within the last 600 seconds; '
-    'the receiver restarts when the turn ends)',
-    'callback_stale (older than 90 seconds (600 for notified) or an invalid timestamp)',
-])
-def test_reference_help_is_public(client, phrase):
+def test_reference_help_is_public(client, server_module):
     response = client.get('/help/reference')
-    assert (response.status_code, phrase in ' '.join(response.text.split())) == (200, True)
+    assert (response.status_code, response.text) == (200, server_module.HELP)

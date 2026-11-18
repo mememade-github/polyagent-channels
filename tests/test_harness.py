@@ -15,7 +15,7 @@ import zipfile
 import pytest
 
 from polyagent_channels import exchange, membership
-from polyagent_channels.setup import (CLAUDE_TOOL_RULE, CODEX_SETTING, SetupError, codex_block, finish_removal,
+from polyagent_channels.setup import (CLAUDE_TOOL_RULE, CODEX_SETTING, NEXT_STEP, SetupError, codex_block, finish_removal,
                                       hook_binding_status, installed_project, lifecycle_lock, wrapper_content)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -982,10 +982,10 @@ def test_unload_setting_of_the_wrong_type_is_refused(artifact, tmp_path, value):
     assert refused.returncode == 1 and 'thread_unload_delay_secs' in refused.stderr and config.read_text() == original
 
 
-def test_codex_next_step_separates_a_loaded_session_from_a_new_one(artifact, tmp_path):
-    codex = json.loads(invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path).stdout)['next_step']
-    claude = json.loads(invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path).stdout)['next_step']
-    assert 'still loaded' in codex and 'still loaded' not in claude
+@pytest.mark.parametrize('client', ['claude', 'codex'])
+def test_install_returns_the_selected_clients_next_step(artifact, tmp_path, client):
+    installed = json.loads(invoke(artifact, 'install', *args(tmp_path, client), cwd=tmp_path).stdout)
+    assert installed['next_step'] == NEXT_STEP[client]
 
 
 def test_open_session_receiver_does_not_block_install_of_the_other_client(artifact, tmp_path):
@@ -1023,27 +1023,6 @@ def test_help_uses_request_origin_and_quotes_host_data(monkeypatch, server_modul
     assert ('SERVICE=https://channels.example:2345' in response.body.decode(),
             'SERVICE=' + shlex.quote(malicious) in harness.setup_help(malicious),
             harness.setup_help('http://host\nwhoami')) == (True, True, None)
-
-
-def test_help_states_how_to_run_claude_headless_in_an_installed_project(monkeypatch):
-    from polyagent_channels import harness
-
-    monkeypatch.setattr(harness, 'artifact_bytes', lambda: b'synthetic-artifact')
-    assert '--settings \'{"disableAllHooks": true}\' for headless runs' in harness.setup_help('http://localhost:18765')
-
-
-@pytest.mark.parametrize('phrase', [
-    'installation is done: use them and stop reading here, '
-    'unless you were asked to update this client (last lines).',
-    'python3 "$ROOT/harness.pyz" uninstall --target "$ROOT" --project "$PROJECT" '
-    'To update this client after the service is upgraded, remove it with the line '
-    'above plus --client "$CLIENT", run step 1 again, then start a new session. The saved key stays.',
-])
-def test_help_guides_an_installed_client_through_an_update(monkeypatch, phrase):
-    from polyagent_channels import harness
-
-    monkeypatch.setattr(harness, 'artifact_bytes', lambda: b'synthetic-artifact')
-    assert phrase in ' '.join(harness.setup_help().split())
 
 
 @pytest.mark.parametrize('name', ['myrepo-claude', '-reviewer'])

@@ -15,20 +15,24 @@ import re
 import zipfile
 from pathlib import Path
 
-from polyagent_channels.client_config import ConfigError, default_root, read_config, service_url
+from polyagent_channels.client_config import SESSION_RESTART, ConfigError, default_root, read_config, service_url
 from polyagent_channels.exchange import RECEPTION_TIMEOUT
-from polyagent_channels.identity import is_identifier
+from polyagent_channels.identity import MAX_MEMBER_LABEL_BYTES, is_identifier
 
 try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib
 
-NEXT_STEP = {'claude': ('Start a new session in this project, or resume this one. That session finds the channels tools by name '
-                        'and needs no further setup. Native folder trust stays with the client.'),
-             'codex': ('Start a new session in this project. Codex applies project settings when it loads a session, so a session '
+NATIVE_TRUST = "Accept the client's own folder trust prompt. Never write native trust records yourself."
+TOOLS_READY = 'That session finds the channels tools by name and needs no further setup. A running client does not load new tools. '
+NEXT_STEP = {'claude': (SESSION_RESTART + ', or resume this one. ' + TOOLS_READY + NATIVE_TRUST),
+             'codex': (SESSION_RESTART + '. Codex applies project settings when it loads a session, so a session '
                        'still loaded on its shared server can keep its old settings: close it and wait about a minute before '
-                       'resuming it. The new session finds the channels tools by name. Native folder trust stays with the client.')}
+                       'resuming it. ' + TOOLS_READY + NATIVE_TRUST)}
+UNINSTALL_NOTICE = ('Open sessions stop listening after their current receive or notice attempt ends; '
+                    'their channels tools then report the removal. Unconfirmed messages stay recorded under '
+                    'unconfirmed: reinstalling and resuming that session continues them.')
 NATIVE_BINDING_PATHS = {'claude': '.claude/settings.local.json', 'codex': '.codex/config.toml'}
 LEGACY_CODEX_HOOKS = '.codex/hooks.json'
 RECEIVER_EVENTS = ('SessionStart', 'Stop')
@@ -383,8 +387,8 @@ def lifecycle_lock(root, exclusive=False):
 
 
 def installation_name(value):
-    if not value.strip() or len(value.encode('utf-8')) > 256:
-        raise argparse.ArgumentTypeError('name must be nonblank and <=256 UTF-8 bytes')
+    if not value.strip() or len(value.encode('utf-8')) > MAX_MEMBER_LABEL_BYTES:
+        raise argparse.ArgumentTypeError(f'name must be nonblank and <={MAX_MEMBER_LABEL_BYTES} UTF-8 bytes')
     return value
 
 
@@ -822,8 +826,7 @@ def uninstall(options, root, project, clients):
                       'removed': removed, 'kept': kept + remaining_paths(root), 'purge_key_command': follow_up,
                       'unconfirmed': unconfirmed,
                       'discard_unconfirmed_command': discard_command(root, unconfirmed) if not manifest['hooks'] else None,
-                      'note': 'Open sessions stop listening within a minute; their channels tools then report the removal. '
-                              'Unconfirmed messages stay recorded under unconfirmed: reinstalling and resuming that session continues them.'}))
+                      'note': UNINSTALL_NOTICE}))
 
 
 def purge_joined_topics(root, removed):

@@ -4,9 +4,14 @@ The service and the client installer both use these formats, so each rule is wri
 own error messages, which belong to their interfaces."""
 import re
 
-IDENTIFIER_PATTERN = '[A-Za-z0-9_-]{1,128}'
+DEFAULT_CHANNEL = 'general'
+DEFAULT_CONVERSATION = 'main'
+MAX_IDENTIFIER_LENGTH = 128
+MAX_MEMBER_LABEL_BYTES = 256
+MAX_SESSION_ID_LENGTH = 256
+IDENTIFIER_PATTERN = rf'[A-Za-z0-9_-]{{1,{MAX_IDENTIFIER_LENGTH}}}'
 CURSOR_PATTERN = '[0-9]{1,20}-[0-9]{1,20}'
-SESSION_ID_PATTERN = '[A-Za-z0-9._:-]{1,256}'
+SESSION_ID_PATTERN = rf'[A-Za-z0-9._:-]{{1,{MAX_SESSION_ID_LENGTH}}}'
 CURSOR_PART_MAX = 2**64 - 1
 MAX_SESSION_TOPICS = 16
 
@@ -47,7 +52,7 @@ def is_session_id(value):
 
 def validate_session_id(session_id):
     if not is_session_id(session_id):
-        raise ValueError('session_id must use 1..256 ASCII letters, digits, . _ : or -')
+        raise ValueError(f'session_id must use 1..{MAX_SESSION_ID_LENGTH} ASCII letters, digits, . _ : or -')
 
 
 def validate_sender(sender):
@@ -55,5 +60,5 @@ def validate_sender(sender):
 
 
 def validate_member_label(value, field):
-    if not isinstance(value, str) or not value.strip() or len(value.encode('utf-8')) > 256:
-        raise ValueError(field + ' must be nonempty and <=256 UTF-8 bytes')
+    if not isinstance(value, str) or not value.strip() or len(value.encode('utf-8')) > MAX_MEMBER_LABEL_BYTES:
+        raise ValueError(f'{field} must be nonempty and <={MAX_MEMBER_LABEL_BYTES} UTF-8 bytes')

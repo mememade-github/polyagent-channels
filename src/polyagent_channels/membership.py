@@ -5,7 +5,7 @@ from polyagent_channels import exchange, identity
 from polyagent_channels.setup import atomic_write
 
 
-DEFAULT_TOPIC = 'general/main'
+DEFAULT_TOPIC = identity.topic_label(identity.DEFAULT_CHANNEL, identity.DEFAULT_CONVERSATION)
 
 
 def read_memberships(root):

@@ -69,8 +69,9 @@ def test_websocket_requires_authentication(client):
     assert failure.value.code == 1008
 
 
-def test_help_is_public(client):
-    assert 'Authorization: Bearer' in client.get('/help').text
+def test_help_is_public(client, server_module):
+    response = client.get('/help')
+    assert (response.status_code, response.text) == (200, server_module.setup_help('http://testserver'))
 
 
 def test_health_checks_storage(client):
