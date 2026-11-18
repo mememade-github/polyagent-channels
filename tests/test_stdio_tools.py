@@ -100,6 +100,25 @@ def test_publish_tool_maps_recipient_to_one_cli_argument():
     assert (arguments[-1], text) == ('--to=member name', 'hello')
 
 
+def test_publish_tool_refuses_an_empty_recipient(tmp_path, monkeypatch, installed_archive):
+    monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'session')
+    (tmp_path / 'config.json').write_text('{"url":"http://synthetic-service"}')
+    key = tmp_path / '.env/channel.key'
+    key.parent.mkdir(mode=0o700)
+    key.write_text('synthetic-key')
+    key.chmod(0o600)
+    installed_archive.write_text(
+        'import httpx\n'
+        'from polyagent_channels import cli\n'
+        'original = httpx.Client\n'
+        'transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"id": "1-0"}))\n'
+        'cli.httpx.Client = lambda **settings: original(transport=transport, **settings)\n'
+        'cli.main()\n')
+    result = stdio_tools.call(adapter_options(tmp_path, 'claude'),
+                              {'name': 'publish', 'arguments': {'text': 'hello', 'to': ''}}, None)
+    assert (result['isError'], result['content'][0]['text'].strip()) == (True, 'channel client failed: recipient_invalid')
+
+
 @pytest.mark.parametrize('identifier', ['general', '_', 'a-b', 'x' * 128])
 def test_tool_identifier_pattern_accepts_exchange_identifiers(identifier):
     assert re.fullmatch(stdio_tools.IDENTIFIER['pattern'], identifier)

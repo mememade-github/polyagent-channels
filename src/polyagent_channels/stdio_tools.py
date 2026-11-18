@@ -89,7 +89,7 @@ def cli_arguments(name, values):
     topic = [values.get('channel') or 'general', '--conversation-id', values.get('conversation_id') or 'main']
     if name == 'publish':
         reply = ['--reply-to', values['reply_to']] if values.get('reply_to') else []
-        recipient = ['--to=' + values['to']] if values.get('to') else []
+        recipient = ['--to=' + values['to']] if 'to' in values else []
         return ['publish', *topic, '--file', '-', *reply, *recipient], values['text']
     if name == 'receive':
         history = ['--cursor', values['cursor']] if values.get('cursor') else []
