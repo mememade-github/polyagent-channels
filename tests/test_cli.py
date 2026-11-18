@@ -5,6 +5,7 @@ import json
 import shlex
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import sys
 from pathlib import Path
@@ -603,6 +604,37 @@ def test_left_topic_keeps_work_recorded_before_its_lock_is_acquired(connection_c
     cli.watch_once(selected, 'synthetic-connection-key')
     assert (exchange.read_state(path)['pending'], sorted(cli.presence_payload(selected)['topics'])) == (
         ['2-0'], ['general/main', 'review/main'])
+
+
+@pytest.mark.parametrize('join_topics', [cli.join_missing_topics, cli.join_remembered_topics])
+def test_receiver_keeps_topic_joined_after_membership_snapshot(connection_client, monkeypatch, join_topics):
+    session = connection_client
+    selected = member_options(session, 'native-self')
+    snapshot, connected = threading.Event(), threading.Event()
+    original = cli.close_left_topics
+    def close_after_connect(options, labels):
+        snapshot.set()
+        if not connected.wait(5):
+            raise TimeoutError('connect did not finish')
+        original(options, labels)
+    monkeypatch.setattr(cli, 'close_left_topics', close_after_connect)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        receiver = workers.submit(join_topics, selected, 'synthetic-connection-key')
+        try:
+            if not snapshot.wait(5):
+                raise TimeoutError('receiver did not read membership')
+            session.invoke('connect', 'review')
+            path = exchange.owned_state(session.directory, 'native-self', {'channel': 'review', 'conversation_id': 'main'})
+            saved = exchange.read_state(path)
+            session.messages.append({'id': '2-0', 'session_id': 'peer', 'conversation_id': 'main', 'text': 'new work'})
+        finally:
+            connected.set()
+        receiver.result(timeout=5)
+    retained = exchange.saved_state(path)
+    cli.join_missing_topics(selected, 'synthetic-connection-key')
+    cursor = exchange.read_state(path)['cursor']
+    received = session.invoke('receive', 'review')
+    assert (retained, cursor, [row['id'] for row in received['messages']]) == (saved, '1-0', ['2-0'])
 
 
 def test_connect_without_topic_returns_all_remembered_topics(connection_client):

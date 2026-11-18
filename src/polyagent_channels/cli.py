@@ -509,7 +509,12 @@ def close_left_topics(options, labels):
     if labels is None:
         return
     for path in exchange.list_states(options.state_dir, options.session_id):
-        exchange.close_unremembered_topic(path, labels)
+        close_left_topic(options, path)
+
+
+def close_left_topic(options, path):
+    with exchange.locked_state(path):
+        exchange.close_unremembered_topic(path, remembered_topics(options))
 
 
 def join_missing_topic(options, key):
