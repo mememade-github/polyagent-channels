@@ -725,6 +725,27 @@ def test_closing_general_is_remembered_by_new_sessions(connection_client):
     assert (cli.presence_payload(selected)['topics'], remembered := cli.remembered_topics(selected)) == ([], [])
 
 
+def test_close_forgets_a_remembered_topic_without_state_in_this_session(connection_client, capsys):
+    session = connection_client
+    session.invoke('connect', 'review')
+    target = {'channel': 'review', 'conversation_id': 'main'}
+    other_path = exchange.owned_state(session.directory, 'native-self', target)
+    saved = exchange.read_state(other_path)
+    selected = cli.topic_options(member_options(session, 'other-session', 'close'), 'review/main')
+    cli.run(selected)
+    result = json.loads(capsys.readouterr().out)
+    assert (result['type'], result['channel'], cli.remembered_topics(selected),
+            exchange.owned_state(session.directory, selected.session_id, target), exchange.read_state(other_path)) == (
+        'closed', 'review', ['general/main'], None, saved)
+
+
+def test_close_refuses_a_topic_without_session_state_or_project_membership(connection_client):
+    session = connection_client
+    with pytest.raises(exchange.ExchangeMismatch):
+        session.invoke('close', 'review')
+    assert membership.topics(session.root, session.root, 'codex') == ['general/main']
+
+
 def test_open_remembers_the_topic(connection_client):
     session = connection_client
     session.invoke('open', 'review')

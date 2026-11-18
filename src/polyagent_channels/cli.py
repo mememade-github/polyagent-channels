@@ -815,6 +815,16 @@ def open_topic(options, target):
     return exchange.open_exchange(options.state_dir, options.session_id, state)
 
 
+def close_topic(options, target):
+    path = exchange.owned_state(options.state_dir, options.session_id, target)
+    label = identity.topic_label(target['channel'], target['conversation_id'])
+    if path is None and label not in (remembered_topics(options) or []):
+        raise exchange.ExchangeMismatch()
+    if path is not None:
+        exchange.close_exchange(options.state_dir, options.session_id, target)
+    membership.forget(*membership_owner(options), label)
+
+
 async def run_exchange(options, key):
     target = {**exchange_target(options), 'session_id': options.session_id}
     if options.command == 'ack':
@@ -842,8 +852,7 @@ async def run_exchange(options, key):
         state = open_topic(options, target)
         print(json.dumps({'type': 'open', **state, **reception_status(options)}))
         return 0
-    exchange.close_exchange(options.state_dir, options.session_id, target)
-    membership.forget(*membership_owner(options), identity.topic_label(target['channel'], target['conversation_id']))
+    close_topic(options, target)
     live = bool(live_topic_paths(options)[0])
     announce_presence(options, key, 'connected' if live else 'closed', LIVE_LEASE_SECONDS if live else 1)
     print(json.dumps({'type': 'closed', **target}))
