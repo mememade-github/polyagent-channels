@@ -902,7 +902,7 @@ async def read_details(options, key, rows, state):
 def addressed_row(row, answered, session_id):
     """Tell the reader at the point of decision whether this row is for it and what closes the exchange."""
     mine = answered is not None and answered.get('session_id') == session_id
-    marked = {**row, 'for_you': answered is None or mine}
+    marked = {**row, 'for_you': exchange.message_for_session(row, answered, session_id)}
     if mine and not answered.get('reply_to'):
         marked['expected'] = CONFIRMATION_HINT
     return marked

@@ -508,6 +508,11 @@ async def reply_target(client, target, message):
 async def addressed_to(client, target, message, session_id):
     """A reply wakes only the author of its target; unknown or evicted targets still wake."""
     answered = await reply_target(client, target, message)
+    return message_for_session(message, answered, session_id)
+
+
+def message_for_session(message, answered, session_id):
+    """A reply is for the author of its target; new or evicted targets are for everyone."""
     return answered is None or answered.get('session_id') == session_id
 
 
