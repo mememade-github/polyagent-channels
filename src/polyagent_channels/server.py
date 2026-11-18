@@ -151,10 +151,12 @@ HTTP errors: 400 invalid input, 401 unauthorized, 411 missing MCP Content-Length
 error then close 1008/1011; unauthorized handshakes are refused. MCP failures
 are tool errors. Raw Redis details and keys are not returned.
 
-Each service process shares one Redis pool of at most 256 connections. Blocking
-receives/subscriptions hold a connection while waiting; 256 is not a supported-user
-limit. Pool exhaustion gives HTTP 503 Redis unavailable, a subscription error then
-close 1011, or an MCP error. Background cleanup logs failures and retries.
+Each service process shares one Redis pool of at most 4096 connections, filled by
+256 sessions listening on all 16 topics. A listening session holds one connection
+per joined topic while waiting; each WebSocket subscription holds one.
+Pool exhaustion gives HTTP 503 Redis unavailable, a subscription error then close
+1011, or an MCP error, and refuses publishes until a read ends.
+Background cleanup logs failures and retries.
 Subscriptions notice disconnects on their next send. Idle reads normally wait up
 to 30 seconds before a heartbeat; storage/scheduling/transport can delay this.
 Retention/quota are global: CHANNEL_RETENTION_DAYS defaults to 7 (0 disables age

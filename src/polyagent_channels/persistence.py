@@ -7,8 +7,8 @@ import re
 import time
 from importlib.resources import files
 
-from polyagent_channels.identity import (is_cursor_form, is_identifier, validate_member_label, validate_sender, validate_session_id, validate_topics,
-                                         within_cursor_range)
+from polyagent_channels.identity import (MAX_SESSION_TOPICS, is_cursor_form, is_identifier, validate_member_label,
+                                         validate_sender, validate_session_id, validate_topics, within_cursor_range)
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ResponseError
@@ -17,6 +17,8 @@ from redis.exceptions import RedisError, ResponseError
 DEFAULT_REDIS_URL = 'redis://127.0.0.1:6379/0'
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_MAX_STORAGE_BYTES = 1073741824
+LISTENING_SESSION_CAPACITY = 256
+REDIS_POOL_CONNECTIONS = LISTENING_SESSION_CAPACITY * MAX_SESSION_TOPICS
 
 
 def retention_days():
@@ -55,7 +57,7 @@ def configure_storage():
     global redis, RETENTION_DAYS, MAX_STORAGE_BYTES
     RETENTION_DAYS, MAX_STORAGE_BYTES = retention_days(), max_storage_bytes()
     redis = Redis.from_url(os.environ.get('REDIS_URL', DEFAULT_REDIS_URL), decode_responses=True,
-                           max_connections=256, socket_connect_timeout=3, socket_timeout=65)
+                           max_connections=REDIS_POOL_CONNECTIONS, socket_connect_timeout=3, socket_timeout=65)
 
 
 def storage_address():

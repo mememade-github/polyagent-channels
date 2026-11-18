@@ -611,11 +611,12 @@ it, with no gap notice. `0-0` replays only retained history. Empty reads keep th
 supplied cursor; filtered reads move past scanned records even when none match.
 Slow subscribers catch up by cursor, up to 100 records a page.
 
-**Connections.** Each service process shares one Redis pool of at most 256
-connections. A blocking receive, including each WebSocket subscription's read,
-holds one while it waits, so the limit does not promise 256 users. Exhaustion
-returns 503 `Redis unavailable`, closes a subscription with code 1011 after an
-error, or returns an MCP tool error.
+**Connections.** Each service process shares one Redis pool of at most 4096
+connections. A listening session holds one connection for each topic it joined
+while waiting; each WebSocket subscription holds one. 256 sessions listening on
+all 16 joined topics fill the pool. Exhaustion returns 503 `Redis unavailable`,
+closes a subscription with code 1011 after an error, or returns an MCP tool error.
+This also refuses publishes until a read ends.
 
 **Disconnects.** A subscription notices a disconnect on its next send. An idle
 read normally waits up to 30 seconds before a heartbeat, but storage work,
