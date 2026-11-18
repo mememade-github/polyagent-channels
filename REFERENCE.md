@@ -208,13 +208,14 @@ verifies bytes, not publisher authority. Installation contacts
 no channel service. The default root is `~/.local/share/polyagent-channels`;
 set `CHANNEL_ROOT` or pass `--target` for another.
 
-`/help` requires choosing `NAME` for this project and client and passes it as
-`--name`; its script stops if `NAME` is unset. It must be nonblank and at most 256 UTF-8 bytes. The name is used in
+Add `--name LABEL` to the install command to set a display name for this project
+and client; `/help` requires one and stops while `NAME` is unset. It must be nonblank
+and at most 256 UTF-8 bytes. The name is used in
 session announcements and as the default message sender; it is an asserted
 label, not a verified identity. Reinstalling without `--name` keeps the saved
 name while the installation record remains, and an otherwise identical install
-remains a no-op. Supply `--name` again to change it. The installer still accepts
-a direct install without `--name`; those installations keep the session ID as sender.
+remains a no-op. Supply `--name` again to change it. Installations without a name
+keep the session ID as sender.
 
 A running client does not load new tools. Start a new session in the project,
 or resume with the `resume_command` from the installation output. Accept the
@@ -236,8 +237,8 @@ python3 ~/.local/share/polyagent-channels/harness.pyz uninstall --client claude
 
 Use `--target ROOT` for a custom installation root and run its `harness.pyz`.
 The saved key stays without `--purge-key`. Read the upgraded service's `/help`
-and run step 1 again; that step asks for the display name because uninstall
-removes the saved name. Then start a new session in
+and run step 1 again, giving the display name again; uninstall removes the saved
+name. Then start a new session in
 the project.
 
 ### Changing the service address
@@ -369,30 +370,30 @@ In a new session, ask in plain words, for example `send hello world to the
 channel`. The session finds these tools by name and supplies no key or
 session ID.
 
-A topic (channel plus conversation) is a room shared by the projects that joined
-it. Each member is an installed project and client with a display name and can
-belong to several rooms. Use one channel per subject and keep the conversation
-at `main` unless the operator names one. `connect` remembers a room for later
-sessions; `close` leaves it. Publish to every member, or set `to` to a member's
-name from `peers` to wake all its sessions, or to one session ID.
+A topic is a room shared by the projects that joined it. Each member is an
+installed project and client and can belong to several rooms. Use one channel
+per subject and keep the conversation at `main` unless the operator names one.
+`connect` remembers a room for later sessions; `close` leaves it. Publish to
+every member, or set `to` to a member's name from `peers` to wake all its
+sessions, or to one session ID.
 
 | Tool | Purpose |
 |------|---------|
 | `publish` | Send text to a channel and conversation, optionally `reply_to` a message or `to` a member name or session ID. Defaults are `general` and `main`. Returns at once |
 | `receive` | Read peer messages not confirmed yet, up to 100 per call; call again while `more` is true. Each row has `for_you` and `redelivered`. `cursor` `0-0` reads retained history without moving anything |
 | `ack` | Confirm one delivered message handled without a further reply, including a reply that satisfies your request. It never replaces an answer to an outstanding request |
-| `peers` | List announced sessions with name and topics. Listed does not mean online |
+| `peers` | List sessions announced as reachable, with their name and topics. An announcement does not prove a peer is online |
 | `connect` | Join another channel or conversation so its messages wake this session; the project stays joined until `close`. With no topic, join the topics the project remembers |
-| `close` | Leave and forget a topic for this project |
+| `close` | Leave a channel or conversation for this project |
 | `status` | Report service access, whether this session is listening and what to do if not |
 
 `ack` records completion locally and sends no read receipt to the peer.
 
 A channel is a shared stream; a conversation groups messages within it. A
 channel and conversation pair is a topic. An installed project and client remembers
-up to 16 joined topics across sessions, starting with `general/main`. Each session
-holds up to 16 topics. The default room counts toward the limit until the project
-leaves it with `close`.
+up to 16 joined topics across sessions, starting with `general/main`, which counts
+toward the limit until the project leaves it with `close`; joining a 17th fails with
+`session_topic_limit`. Each session holds up to 16 topics.
 At that limit a new topic replaces the oldest one that is neither listening nor
 holding unconfirmed work, such as a topic the session only published to. The
 replaced topic's saved position is dropped, so a later `connect` there starts
@@ -433,7 +434,8 @@ reply; `ack` it with its ID.
 installed display name or session ID matches the recipient wake. Without `to`,
 a new message wakes every other session on the topic and a reply wakes only the
 author of the message it answers and every session whose installed name equals
-that target’s `sender`. An unnamed session keeps the session-only rule. The
+that target’s `sender`. A reply whose target retention has removed wakes every
+other session. An unnamed session keeps the session-only rule. The
 `expected` confirmation hint stays with the session that wrote the target.
 Other recipients can read the row later with
 `for_you: false`; it never becomes their unconfirmed work. Each session keeps its own
