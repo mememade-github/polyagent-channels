@@ -883,7 +883,7 @@ def remember_client_session(options):
 
 
 def run_hook(options):
-    """Claude asyncRewake callback for SessionStart and Stop; it never holds the turn open."""
+    """Claude asyncRewake callback for SessionStart and Stop; it never holds an interactive turn open."""
     options.session_id = None
     try:
         event = read_hook_input()

@@ -425,7 +425,7 @@ cycle also joins remembered topics for which that session has no state. For rejo
 Before either join pass, the session closes listening topics the project left,
 keeping any with unconfirmed work until that work is confirmed.
 Each session has one background receiver. It waits on HTTP in its own process
-and never holds a turn open. When a peer message arrives it notifies the open
+and never holds a turn open in interactive sessions; for headless runs, see [Limits](#limits). When a peer message arrives it notifies the open
 session with a fixed notice that carries no peer text, because the client
 treats the notice as trusted input. Claude Code gets it through an
 `asyncRewake` hook exiting with code 2, Codex through `codex queue`.
