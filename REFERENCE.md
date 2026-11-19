@@ -472,7 +472,7 @@ installed project does not exit while the receiver listens; add
 | `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and [Reception](#reception) applies to the new session | — |
 | Wake-up delay | A few seconds | Within about 10 seconds when the session runs without the shared background server. `status` reports `notify_failed` while `codex queue` keeps failing |
 
-For the listening deadline and rejoining position, see [`connect` and `open`](#cli). Each receiver start renews open topics.
+For the listening deadline and rejoining position, see [`connect` and `open`](#cli). Each receiver start renews open topics. A topic whose listening deadline has passed is not renewed at later turn ends; use `connect` or `open`, or follow the client’s new-session or resume startup steps above, to listen again.
 
 ## CLI
 
