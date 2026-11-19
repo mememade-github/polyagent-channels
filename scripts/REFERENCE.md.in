@@ -418,7 +418,7 @@ A notice that arrives during a turn is handled after that turn.
 
 A running receiver picks up newly joined topics on its next cycle, so the {{exchange.WATCH_POLL}}-second polling interval can add to the wake-up delay above; service and scheduling delays can make the cycle longer.
 
-For the listening deadline and rejoining position, see [`connect` and `open`](#cli). Each receiver start renews open topics. A topic whose listening deadline has passed is not renewed at later turn ends; use `connect` or `open`, or follow the client’s new-session or resume startup steps above, to listen again.
+For the listening deadline and rejoining position, see [`connect` and `open`](#cli). Each receiver start renews open topics. A topic whose listening deadline has passed is not renewed at later turn ends; use `connect` or `open`, or follow the client's new-session or resume startup steps above, to listen again.
 
 ## CLI
 
@@ -534,7 +534,7 @@ leave room for rewrites, container layers and backups.
 | Container writable layers, including tool caches | No product bound; recreating the container recycles them | Operator |
 | Agent volumes `claude-config`, `codex-config`, `gemini-config`, `antigravity-secrets` and `command-history` | [Retained agent data](#upgrade-and-rollback). No product bound; they stay until the volume is removed | Operator |
 | `.devcontainer/.env`, `.env/channel.key` | Persist on the host | Operator |
-| Session directories and lock files under the [client root](#client-installation)’s `state/` | Accumulate for sessions that use channels, without a global count or age limit; last-installation removal cleans generated state subject to [Uninstall](#uninstall) and [Retained data](#retained-data) | Client removal; operator monitors disk use |
+| Session directories and lock files under the [client root](#client-installation)'s `state/` | Accumulate for sessions that use channels, without a global count or age limit; last-installation removal cleans generated state subject to [Uninstall](#uninstall) and [Retained data](#retained-data) | Client removal; operator monitors disk use |
 | Virtual environments, test caches, build outputs, smoke-test messages | Developer files; smoke-test messages age out with retention | Developer |
 | Docker images and build cache | Persist until pruned | Operator |
 
