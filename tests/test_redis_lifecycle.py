@@ -338,3 +338,73 @@ def test_clock_exhaustion_and_wrong_type_precede_migration_deletion(database):
         run(5)
     assert connection.exists(channel)
     assert connection.get('channels:clock') == 'wrong'
+
+
+@pytest.mark.parametrize('fields', [None, {'text': 'retained', 'conversation_id': 'main'}], ids=['empty', 'retained'])
+def test_unchanged_reads_execute_no_set_or_del(database, monkeypatch, fields):
+    connection, key, run, _ = database
+    channel = key('unchanged')
+    run(1000, key=channel, fields=fields)
+    before = write_command_counts(connection)
+    pages = asyncio.run(read_unchanged_pages(monkeypatch, channel))
+    after = write_command_counts(connection)
+    assert (after, [len(page['messages']) for page in pages]) == (before, [int(fields is not None)] * 100)
+
+
+def write_command_counts(connection):
+    statistics = connection.info('commandstats')
+    return tuple(statistics.get('cmdstat_' + command, {}).get('calls', 0) for command in ('set', 'del'))
+
+
+async def read_unchanged_pages(monkeypatch, channel):
+    async with persistence.Redis.from_url(os.environ['REDIS_TEST_URL'], decode_responses=True) as storage:
+        monkeypatch.setattr(persistence, 'redis', storage)
+        monkeypatch.setattr(persistence, 'RETENTION_DAYS', 0)
+        monkeypatch.setattr(persistence, 'MAX_STORAGE_BYTES', 1000)
+        return [await persistence.receive(channel.removeprefix('channel:')) for _ in range(100)]
+
+
+def test_stored_zero_is_removed_but_absent_usage_stays_absent(database):
+    connection, _, run, _ = database
+    run(1000)
+    connection.set('channels:bytes', '0')
+    before = write_command_counts(connection)
+    run(1000)
+    after = write_command_counts(connection)
+    run(1000)
+    assert (connection.get('channels:bytes'), after, write_command_counts(connection)) == (
+        None, (before[0], before[1] + 1), after)
+
+
+def test_rebuild_restores_usage_even_when_previous_value_was_correct(database):
+    connection, key, run, _ = database
+    run(1000, key=key('rebuild'), fields={'text': 'kept'})
+    before = connection.get('channels:bytes')
+    connection.delete('channels:version')
+    run(1000)
+    assert (before, connection.get('channels:bytes'), connection.get('channels:version')) == ('8', '8', '2')
+
+
+def test_concurrent_readers_and_publishers_preserve_delivery_and_accounting(database, monkeypatch):
+    connection, key, run, _ = database
+    channels = [key(str(index)) for index in range(4)]
+    run(10000)
+    pages, published = asyncio.run(read_while_publishing(monkeypatch, channels))
+    expected = sum(len(name.encode()) + len(value.encode())
+                   for channel in channels for _, fields in connection.xrange(channel) for name, value in fields.items())
+    assert ([page['messages'][0]['id'] for page in pages], connection.get('channels:bytes'),
+            sum(connection.xlen(channel) for channel in channels)) == (
+        [row['id'] for row in published for _ in range(3)], str(expected), len(channels))
+
+
+async def read_while_publishing(monkeypatch, channels):
+    async with persistence.Redis.from_url(os.environ['REDIS_TEST_URL'], decode_responses=True) as storage:
+        monkeypatch.setattr(persistence, 'redis', storage)
+        monkeypatch.setattr(persistence, 'RETENTION_DAYS', 0)
+        monkeypatch.setattr(persistence, 'MAX_STORAGE_BYTES', 10000)
+        readers = [asyncio.create_task(persistence.receive(channel.removeprefix('channel:'), timeout=2))
+                   for channel in channels for _ in range(3)]
+        await asyncio.sleep(0.05)
+        published = await asyncio.gather(*[persistence.publish(channel.removeprefix('channel:'), 'concurrent', 'publisher')
+                                           for channel in channels])
+        return await asyncio.gather(*readers), published

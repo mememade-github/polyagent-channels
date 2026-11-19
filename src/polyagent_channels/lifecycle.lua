@@ -45,7 +45,8 @@ if operation == 'append' then
         if not valid then return {'reply'} end
     end
 end
-local total = tonumber(redis.call('GET', usage) or '0')
+local stored_usage = redis.call('GET', usage)
+local total = tonumber(stored_usage or '0')
 if not total or total < 0 then return redis.error_reply('Invalid message byte counter') end
 local function add_head(k)
     local row = redis.call('XRANGE', k, '-', '+', 'COUNT', 1)
@@ -89,6 +90,7 @@ if keys then
     redis.call('XSETID', clock, high)
     total = 0
     redis.call('DEL', heads, usage)
+    stored_usage = false
     for _, k in ipairs(keys) do
         for _, row in ipairs(redis.call('XRANGE', k, '-', '+')) do total = total + bytes(row[2]) end
         add_head(k)
@@ -115,7 +117,11 @@ while true do
     end
     add_head(oldest_key)
 end
-if total == 0 then redis.call('DEL', usage) else redis.call('SET', usage, string.format('%.0f', total)) end
+if total == 0 and stored_usage then redis.call('DEL', usage) end
+local updated_usage = string.format('%.0f', total)
+if total ~= 0 and stored_usage ~= updated_usage then
+    redis.call('SET', usage, updated_usage)
+end
 -- Commit migration version only after the lifecycle has completed.
-redis.call('SET', ready, '2')
+if version ~= '2' then redis.call('SET', ready, '2') end
 return {'ok', id or ''}
