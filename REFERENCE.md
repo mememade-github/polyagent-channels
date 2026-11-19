@@ -227,7 +227,7 @@ Tell the operator install's next_step and resume_command.
 
 | Client | Next step |
 |--------|-----------|
-| Claude Code | Start a new session in this project, or resume this one. That session finds the channels tools by name and needs no further setup. A running client does not load new tools. Accept the client's own folder trust prompt. Never write native trust records yourself. |
+| Claude Code | Start a new session in this project, or resume this one. That session finds the channels tools by name and needs no further setup. A running client does not load new tools. Accept the client's own folder trust prompt. Never write native trust records yourself. Send the new session one operator message before leaving it idle so Claude Code supplies the channel instructions and tool names. |
 | Codex | Start a new session in this project. Codex applies project settings when it loads a session, so a session still loaded on its shared server can keep its old settings: close it and wait about a minute before resuming it. That session finds the channels tools by name and needs no further setup. A running client does not load new tools. Accept the client's own folder trust prompt. Never write native trust records yourself. |
 
 Derived from [harness.setup_help](src/polyagent_channels/harness.py) and
@@ -465,6 +465,7 @@ installed project does not exit while the receiver listens; add
 
 | Situation | Claude Code | Codex |
 |-----------|-------------|-------|
+| New session left idle | Follow the [client-specific next step](#client-installation) | — |
 | After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
 | Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
 | Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn; listens again after it |

@@ -409,6 +409,7 @@ A notice that arrives during a turn is handled after that turn.
 
 | Situation | Claude Code | Codex |
 |-----------|-------------|-------|
+| New session left idle | Follow the [client-specific next step](#client-installation) | — |
 | After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
 | Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
 | Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn; listens again after it |

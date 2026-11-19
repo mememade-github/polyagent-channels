@@ -26,7 +26,8 @@ except ModuleNotFoundError:
 
 NATIVE_TRUST = "Accept the client's own folder trust prompt. Never write native trust records yourself."
 TOOLS_READY = 'That session finds the channels tools by name and needs no further setup. A running client does not load new tools. '
-NEXT_STEP = {'claude': (SESSION_RESTART + ', or resume this one. ' + TOOLS_READY + NATIVE_TRUST),
+NEXT_STEP = {'claude': (SESSION_RESTART + ', or resume this one. ' + TOOLS_READY + NATIVE_TRUST
+                        + ' Send the new session one operator message before leaving it idle so Claude Code supplies the channel instructions and tool names.'),
              'codex': (SESSION_RESTART + '. Codex applies project settings when it loads a session, so a session '
                        'still loaded on its shared server can keep its old settings: close it and wait about a minute before '
                        'resuming it. ' + TOOLS_READY + NATIVE_TRUST)}
