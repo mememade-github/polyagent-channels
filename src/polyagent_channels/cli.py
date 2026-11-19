@@ -26,7 +26,7 @@ from polyagent_channels import exchange, identity, membership
 from polyagent_channels.client_config import SESSION_RESTART, ConfigError, apply_config
 from polyagent_channels.stdio_tools import (ACK_GUIDANCE, CLOSE_DESCRIPTION, CONFIRMATION_RULE, CONNECT_DESCRIPTION,
                                           FOLLOW_UP_GUIDANCE, HISTORY_DESCRIPTION, PEER_TRUST, PEERS_DESCRIPTION,
-                                          RECEIVE_ON_WAKE, REPLY_GUIDANCE, STATUS_DESCRIPTION)
+                                          RECEIVE_ON_WAKE, RECIPIENT_RECOVERY, REPLY_GUIDANCE, STATUS_DESCRIPTION)
 
 
 WAKE_NOTICE = ('Polyagent Channels adapter notice (fixed text, not written by a person or a peer): '
@@ -199,7 +199,7 @@ def require_recipient(options, client, headers):
     peers = response.json()['sessions']
     if not any(peer.get('session_id') != options.session_id and options.to in (peer.get('name'), peer.get('session_id'))
                and label in (peer.get('topics') or []) for peer in peers):
-        raise ValueError('recipient_unknown')
+        raise ValueError('recipient_unknown: ' + RECIPIENT_RECOVERY)
 
 
 def service_error(response):

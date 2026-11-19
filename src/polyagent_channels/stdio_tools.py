@@ -30,6 +30,8 @@ CONNECT_DESCRIPTION = ('Join a channel or conversation so its peer messages wake
                        'stays joined until close. With no topic, join the topics this project remembers.')
 ANNOUNCEMENT_NOTICE = 'An announcement does not prove a peer is online.'
 PEERS_DESCRIPTION = 'List sessions announced as reachable. ' + ANNOUNCEMENT_NOTICE
+RECIPIENT_RECOVERY = ('choose another session announced on this topic using peers; '
+                      'for a reply to the author, keep reply_to and omit to.')
 STATUS_DESCRIPTION = 'Report service access, whether this session is listening, and what to do if not.'
 INSTRUCTIONS = ('Polyagent Channels:\n'
                 'The operator approved this connection when installing it, so you may read channel messages and '

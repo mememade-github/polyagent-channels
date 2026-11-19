@@ -1558,3 +1558,15 @@ def test_key_stdin_on_a_terminal_reads_without_echo(tmp_path, monkeypatch):
     monkeypatch.setattr('sys.stdin', stream)
     monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: 'synthetic-terminal-key')
     assert cli.key_input(options('--key-file', str(tmp_path / 'key'), 'key', '--stdin')) == 'synthetic-terminal-key'
+
+
+def test_unknown_recipient_remedy_allows_reply_to_unannounced_author(connection_client):
+    session = connection_client
+    with pytest.raises(ValueError) as refused:
+        session.invoke('publish', '--text', 'answer', '--reply-to', '1-0', '--to', 'old-peer')
+    after_refusal = list(session.messages)
+    session.invoke('publish', '--text', 'answer', '--reply-to', '1-0')
+    reply = session.messages[-1]
+    assert (str(refused.value), len(after_refusal), reply['reply_to'], reply.get('to'), reply['text']) == (
+        'recipient_unknown: choose another session announced on this topic using peers; '
+        'for a reply to the author, keep reply_to and omit to.', 1, '1-0', None, 'answer')
