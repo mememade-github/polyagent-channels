@@ -54,9 +54,14 @@ e.g. myrepo-claude; ask the operator when unsure.
 It must be nonblank and at most """ + str(MAX_MEMBER_LABEL_BYTES) + """ UTF-8 bytes.
 SERVICE=""" + shlex.quote(origin) + """
 : "${NAME:?Set NAME first (for example myrepo-claude).}"
-case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
-  codex:) CLIENT=codex ;;
-  :claude) CLIENT=claude ;;
+case "${CLIENT-}" in
+  codex|claude) ;;
+  *) CLIENT= ;;
+esac
+case "${CLIENT}:${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
+  codex:*|claude:*) ;;
+  :codex:) CLIENT=codex ;;
+  ::claude) CLIENT=claude ;;
   *) echo 'Host client missing/ambiguous. Set CLIENT=codex or CLIENT=claude.' >&2; exit 1 ;;
 esac
 PROJECT=$PWD

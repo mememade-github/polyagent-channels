@@ -1202,3 +1202,47 @@ def test_other_root_conflict_and_uninstall_preservation(artifact, tmp_path, even
             event in result.stderr) == (1, before, False, True)
     removed = invoke(artifact, 'uninstall', '--target', tmp_path / 'root', '--project', project, cwd=tmp_path)
     assert (removed.returncode, path.read_bytes(), json.loads(removed.stdout)['bindings_removed']) == (0, before, [])
+
+
+@pytest.mark.parametrize('environment, expected', [
+    ({'CLIENT': 'codex'}, ['codex']),
+    ({'CLIENT': 'claude'}, ['claude']),
+    ({'CLIENT': 'codex', 'CODEX_THREAD_ID': 'one', 'CLAUDE_CODE_SESSION_ID': 'two'}, ['codex']),
+    ({'CLIENT': 'claude', 'CODEX_THREAD_ID': 'one', 'CLAUDE_CODE_SESSION_ID': 'two'}, ['claude']),
+    ({'CODEX_THREAD_ID': 'one'}, ['codex']),
+    ({'CLAUDE_CODE_SESSION_ID': 'two'}, ['claude']),
+    ({'CLIENT': 'invalid', 'CODEX_THREAD_ID': 'one'}, ['codex']),
+    ({'CLIENT': 'claude:invalid', 'CODEX_THREAD_ID': 'one'}, ['codex']),
+])
+def test_served_help_installs_selected_client(served_install_block, tmp_path, environment, expected):
+    result = run_install_block(served_install_block, tmp_path, environment)
+    manifests = (tmp_path / 'selected').glob('install-manifest.json')
+    selected = [hook['client'] for path in manifests for hook in json.loads(path.read_text())['hooks']]
+    assert (result.returncode, selected) == (0, expected), result.stderr
+
+
+@pytest.fixture
+def served_install_block(artifact, monkeypatch, client):
+    from polyagent_channels import harness
+
+    monkeypatch.setattr(harness, 'artifact_bytes', artifact.read_bytes)
+    content = client.get('/help').text
+    block = 'SERVICE=' + content.split('\nSERVICE=', 1)[1].split('\nStop on failure.', 1)[0]
+    block = block.replace('curl --fail "$SERVICE/harness" -o harness.pyz',
+                          'cp ' + shlex.quote(str(artifact)) + ' harness.pyz')
+    return block
+
+
+def run_install_block(block, tmp_path, environment):
+    environment = {**os.environ, 'CLIENT': '', 'CODEX_THREAD_ID': '', 'CLAUDE_CODE_SESSION_ID': '',
+                   'CHANNEL_ROOT': str(tmp_path / 'selected'), 'NAME': 'synthetic', **environment}
+    return subprocess.run(['bash', '-c', block], cwd=tmp_path, env=environment,
+                          capture_output=True, text=True, timeout=30)
+
+
+@pytest.mark.parametrize('environment', [{}, {'CODEX_THREAD_ID': 'one', 'CLAUDE_CODE_SESSION_ID': 'two'},
+                                         {'CLIENT': 'invalid'}, {'CLIENT': 'codex:invalid'}])
+def test_served_help_keeps_native_detection_failures(served_install_block, tmp_path, environment):
+    result = run_install_block(served_install_block, tmp_path, environment)
+    assert (result.returncode, result.stderr.strip(), (tmp_path / 'selected').exists()) == (
+        1, 'Host client missing/ambiguous. Set CLIENT=codex or CLIENT=claude.', False)

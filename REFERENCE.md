@@ -194,9 +194,14 @@ The commands below fetch the checksum from that service:
 ```bash
 SERVICE=http://service-host:18765
 : "${NAME:?Set NAME first (for example myrepo-claude).}"
-case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
-  codex:) CLIENT=codex ;;
-  :claude) CLIENT=claude ;;
+case "${CLIENT-}" in
+  codex|claude) ;;
+  *) CLIENT= ;;
+esac
+case "${CLIENT}:${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
+  codex:*|claude:*) ;;
+  :codex:) CLIENT=codex ;;
+  ::claude) CLIENT=claude ;;
   *) echo 'Host client missing/ambiguous. Set CLIENT=codex or CLIENT=claude.' >&2; exit 1 ;;
 esac
 PROJECT=$PWD
