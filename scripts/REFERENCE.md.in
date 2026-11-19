@@ -266,6 +266,8 @@ Derived from [auth.checked_key](src/polyagent_channels/auth.py),
 | Project | `.claude/settings.local.json`: background callbacks on `SessionStart` and `Stop`, and the tool rule `mcp__channels` | `.codex/config.toml`: a marked `thread_unload_delay_secs = {{setup.unload_delay}}` line at the top, and a marked block registering the tools with `default_tools_approval_mode = "approve"` |
 | Shared root | `harness.pyz`, `bin/channels`, URL-only `config.json`, `install-manifest.json`, protected `.env/channel.key`, session-hashed `state`, `joined-topics.json` and its lock | the same |
 
+Installation adds no ignore rule: both project files hold this computer's client root path, so keep them out of commits.
+
 The tool rule and the approval mode record the one consent given at
 installation. Without them a woken session would stop at a permission prompt
 with nobody there.
