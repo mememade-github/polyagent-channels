@@ -30,6 +30,7 @@ CONNECT_DESCRIPTION = ('Join a channel or conversation so its peer messages wake
                        'stays joined until close. With no topic, join the topics this project remembers.')
 ANNOUNCEMENT_NOTICE = 'An announcement does not prove a peer is online.'
 PEERS_DESCRIPTION = 'List sessions announced as reachable. ' + ANNOUNCEMENT_NOTICE
+RECIPIENT_REQUIREMENT = 'another session must announce that name or ID on the topic'
 RECIPIENT_RECOVERY = ('choose another session announced on this topic using peers; '
                       'for a reply to the author, keep reply_to and omit to.')
 STATUS_DESCRIPTION = 'Report service access, whether this session is listening, and what to do if not.'
@@ -61,7 +62,8 @@ TOOLS = [
                            to={'type': 'string', 'description': 'Choose a recipient from a message or peers. With to, only other sessions whose installed display name or session ID matches the recipient wake. '
                                'Without to, a new message wakes every other session on the topic and a reply wakes only the '
                                'author of the message it answers and every session whose installed name equals that target’s '
-                               'sender. A reply whose target retention or capacity has removed wakes every other session.'})},
+                               'sender. A reply whose target retention or capacity has removed wakes every other session. '
+                               'When you use to with these installed-client tools, ' + RECIPIENT_REQUIREMENT + ', as peers shows.'})},
     {'name': 'receive', 'description': 'Read peer messages; when more is true, call again. ' + CONFIRMATION_RULE + ' '
                                        'Newer messages can wait behind unconfirmed work.',
      'inputSchema': schema(**TOPIC, cursor={**MESSAGE_ID, 'description': HISTORY_DESCRIPTION})},

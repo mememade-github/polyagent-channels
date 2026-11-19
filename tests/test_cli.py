@@ -1570,3 +1570,19 @@ def test_unknown_recipient_remedy_allows_reply_to_unannounced_author(connection_
     assert (str(refused.value), len(after_refusal), reply['reply_to'], reply.get('to'), reply['text']) == (
         'recipient_unknown: choose another session announced on this topic using peers; '
         'for a reply to the author, keep reply_to and omit to.', 1, '1-0', None, 'answer')
+
+
+def test_publish_tool_recipient_guidance_matches_announced_topic_peer(connection_client, monkeypatch):
+    from polyagent_channels import stdio_tools
+
+    session = connection_client
+    session.presence.append({'session_id': 'peer-session', 'name': 'peer', 'topics': ['general/main']})
+    listed = stdio_tools.respond(None, {'method': 'tools/list'}, None)['tools']
+    publish = next(tool for tool in listed if tool['name'] == 'publish')
+    description = publish['inputSchema']['properties']['to']['description']
+    peers = session.invoke('peers')['sessions']
+    arguments, text = stdio_tools.cli_arguments('publish', {'text': 'hello', 'to': peers[0]['name']})
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(text))
+    session.invoke(*arguments)
+    assert (stdio_tools.RECIPIENT_REQUIREMENT in description, session.messages[-1]['to'],
+            session.messages[-1]['session_id'], session.messages[-1]['text']) == (True, 'peer', 'native-self', 'hello')
