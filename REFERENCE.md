@@ -752,7 +752,7 @@ docker image tag $(docker inspect -f '{{.Image}}' polyagent-channels) polyagent-
 docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml build    # the running service stays up meanwhile
 docker pull alpine
 docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml stop
-docker run --rm -v polyagent-channels_channel-data:/data -v "${HOME}:/backup" alpine tar czf /backup/channel-data-previous.tgz -C /data .
+docker run --rm -v polyagent-channels_channel-data:/data -v "${HOME}:/backup" alpine sh -c 'umask 077 && touch /backup/channel-data-previous.tgz && chmod 600 /backup/channel-data-previous.tgz && tar czf /backup/channel-data-previous.tgz -C /data .'
 docker run --rm -v "${HOME}:/backup" alpine sh -c 'tar tzf /backup/channel-data-previous.tgz > /dev/null && chmod 600 /backup/channel-data-previous.tgz && echo backup ok'
 docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml up -d
 ```
