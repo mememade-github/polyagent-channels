@@ -459,8 +459,8 @@ The woken model follows the [agent message-handling policy](#agent-tools).
 A notice that arrives during a turn is handled after that turn.
 
 A Codex session starts listening after its first channels tool call. Claude listens
-from the start of the session. claude -p in an
-installed project does not exit while the receiver listens; add
+from the start of the session. claude -p in an installed project can wait for its
+receiver's first notice before it answers and does not exit while the receiver listens; add
 --settings '{"disableAllHooks": true}' for headless runs.
 
 | Situation | Claude Code | Codex |

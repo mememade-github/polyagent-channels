@@ -93,8 +93,8 @@ records, including Bash tool input, may retain it; the product cannot remove the
 
 3. Follow the new session's channels tool instructions.
 A Codex session starts listening after its first channels tool call. Claude listens
-from the start of the session. claude -p in an
-installed project does not exit while the receiver listens; add
+from the start of the session. claude -p in an installed project can wait for its
+receiver's first notice before it answers and does not exit while the receiver listens; add
 --settings '{"disableAllHooks": true}' for headless runs.
 
 To remove, use:
