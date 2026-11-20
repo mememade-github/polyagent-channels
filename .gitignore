@@ -1,3 +1,80 @@
+# =============================================================================
+# Polyagent DevContainer - Git Ignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Environment configuration (sensitive)
+# -----------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# -----------------------------------------------------------------------------
+# Node.js
+# -----------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------------------------------------------------------------
+# VS Code
+# -----------------------------------------------------------------------------
+.vscode/settings.local.json
+*.code-workspace
+
+# -----------------------------------------------------------------------------
+# Claude Code (runtime markers — never committed)
+# -----------------------------------------------------------------------------
+.claude/.last-verification*
+.claude/.allow-force-push*
+.claude/.stop-blocked*
+.claude/.refinement-active
+.claude/.refine-output
+.claude/.refine-eval.json
+.claude/settings.local.json
+.claude/worktrees/
+.mcp.json
+
+# -----------------------------------------------------------------------------
+# Codex CLI (runtime markers — never committed; keep only .gitkeep)
+# -----------------------------------------------------------------------------
+.codex/state/last-verification*
+.codex/state/allow-force-push*
+.codex/state/stop-blocked*
+.codex/state/refinement-active
+.codex/state/.refine-output
+.codex/state/.refine-eval.json
+.codex/state/refinement/
+
+# -----------------------------------------------------------------------------
+# Misc
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.temp
+*.bak
+*~
+.claude/agent-memory/refinement/
+
+# Serena MCP — per-project state (auto-generated, do not track)
+.serena/
+
+# -----------------------------------------------------------------------------
+# GitLab CI pull-mirror template — local-only (not shipped tracked)
+# -----------------------------------------------------------------------------
+# Its scheduled pipeline force-resets to an upstream and force-pushes, which
+# would overwrite any consumer repo that registers a Runner + schedule. Kept
+# locally for manual mirror wiring; never tracked/pushed. See PROJECT.md.
+/.gitlab-ci.yml
+
+# Session state belongs to the local workspace, never the template history.
+/wip/
+
+# Polyagent Channels
 .env/
 .channels/
 .devcontainer/.env
@@ -6,7 +83,6 @@
 .venv/
 __pycache__/
 *.pyc
-.codex/state/
 .pytest_cache/
 .coverage
 htmlcov/

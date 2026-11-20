@@ -56,7 +56,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose \
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-# General Python development tools.
+# Python tools — refinement loop verification (project scorer dependency, e.g. .refine/score.sh)
+# ruff/pytest/mypy provide deterministic reward signals for the refinement loop.
+# Without them, score=0 (loop becomes meaningless).
+# --break-system-packages: required since pip 23.0+; Ubuntu 22.04 default pip (22.x) does not need it.
 RUN pip3 install --no-cache-dir $(pip3 install --help 2>&1 | grep -q break-system-packages && echo "--break-system-packages") \
     ruff pytest mypy
 
@@ -151,7 +154,7 @@ RUN curl -LsSf https://astral.sh/uv/0.6.0/install.sh | sh
 # =============================================================================
 # Volume mount points must exist in the image so new named volumes are
 # created vscode-owned (a missing mount point yields a root-owned volume).
-RUN mkdir -p ${HOME}/.claude ${HOME}/.codex ${HOME}/.config/nano ${HOME}/.gemini ${HOME}/.config/antigravity
+RUN mkdir -p ${HOME}/.claude ${HOME}/.config/nano ${HOME}/.gemini ${HOME}/.config/antigravity
 
 # .bashrc
 RUN echo 'export LANG=en_US.UTF-8' >> ${HOME}/.bashrc \
@@ -188,11 +191,9 @@ RUN git config --global core.quotepath false \
 # Setup scripts + Entrypoint
 # =============================================================================
 USER root
-COPY .devcontainer/LICENSE /usr/share/doc/polyagent-devcontainer/LICENSE
-COPY LICENSE /usr/share/doc/polyagent-channels/LICENSE
-COPY .devcontainer/codex-launcher.sh /usr/local/bin/codex-launcher
-COPY .devcontainer/setup-env.sh /usr/local/bin/
-COPY .devcontainer/entrypoint.sh /usr/local/bin/
+COPY codex-launcher.sh /usr/local/bin/codex-launcher
+COPY setup-env.sh /usr/local/bin/
+COPY entrypoint.sh /usr/local/bin/
 RUN sed -i 's/\r$//' /usr/local/bin/codex-launcher /usr/local/bin/setup-env.sh /usr/local/bin/entrypoint.sh \
     && chmod 755 /usr/local/bin/codex-launcher /usr/local/bin/setup-env.sh /usr/local/bin/entrypoint.sh \
     && mkdir -p /home/${USERNAME}/.local/bin \
@@ -207,22 +208,3 @@ WORKDIR /workspaces
 # → setup-env.sh auto-runs to set permissions, SSH, and Claude CLI version sync.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]
-
-# Polyagent Channels product layer; no prebuilt local image is required.
-# The build user owns the product directory, so the package builds in place under BuildKit and the legacy builder alike;
-# the legacy builder would create a WORKDIR owned by root.
-USER root
-RUN install -d -o ${USERNAME} -g ${USERNAME} /opt/polyagent-channels
-USER ${USERNAME}
-WORKDIR /opt/polyagent-channels
-RUN uv python install 3.12
-COPY --chown=vscode:vscode requirements.lock requirements.txt pyproject.toml README.md LICENSE ./
-RUN uv venv --python 3.12 /home/vscode/channels-venv && uv pip install --python /home/vscode/channels-venv/bin/python --require-hashes -r requirements.lock
-COPY --chown=vscode:vscode src ./src
-RUN uv pip install --python /home/vscode/channels-venv/bin/python --no-deps .
-COPY --chown=vscode:vscode scripts/build_harness.py ./scripts/build_harness.py
-RUN /home/vscode/channels-venv/bin/python scripts/build_harness.py /opt/polyagent-channels/harness.pyz
-ENV PATH=/home/vscode/channels-venv/bin:$PATH \
-    CHANNEL_KEY_FILE=/workspaces/.env/channel.key
-WORKDIR /workspaces
-CMD ["python", "-m", "uvicorn", "--factory", "polyagent_channels.server:create_app", "--host", "0.0.0.0", "--port", "8080", "--ws-max-size", "16777216", "--no-access-log"]

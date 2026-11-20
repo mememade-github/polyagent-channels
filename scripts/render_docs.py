@@ -77,7 +77,7 @@ def definitions():
 
 
 def compose_defaults():
-    path = ROOT / '.devcontainer/docker-compose.yml'
+    path = ROOT / '.devcontainer/compose.channels.yml'
     content = path.read_text(encoding='utf-8')
     defaults = dict(re.findall(r'\$\{(\w+):?-([^}]+)\}', content))
     defaults['COMPOSE_PROJECT_NAME'] = re.search(r'^name: (\S+)$', content, re.M)[1]

@@ -6,7 +6,7 @@ Before exposing the service, read [Network exposure](REFERENCE.md#network-exposu
 
 ## Requirements
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with Compose v2.20 or later, and internet access for the first build
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with Compose 2.33.0 or later, and internet access for the first build. Current Compose releases also require the Buildx plugin for additional build contexts.
 - Client prerequisites are in the [first-connection procedure](REFERENCE.md#client-installation), served at `/help`.
 
 ## Quick start
@@ -45,13 +45,13 @@ Terminal commands are in [CLI](REFERENCE.md#cli). For removal, updating and rece
 
 ## Tests and development
 
-Test commands and the dedicated Redis procedure are in [Verification](REFERENCE.md#verification). Agent and contributor guidance is in [AGENTS.md](AGENTS.md); project context is in [PROJECT.md](PROJECT.md).
+Test commands and the dedicated Redis procedure are in [Verification](REFERENCE.md#verification). Agent and contributor guidance is in [the project guide](.claude/rules/project/polyagent-channels.md); project context is in [PROJECT.md](PROJECT.md).
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| Build fails | `docker compose --env-file .devcontainer/.env -f .devcontainer/docker-compose.yml build --no-cache` |
+| Build fails | `docker compose --env-file .devcontainer/.env -f .devcontainer/compose.channels.yml build --no-cache` |
 | Another computer or container cannot connect | Follow the address and firewall checks in [Network exposure](REFERENCE.md#network-exposure) |
 | Port stays unavailable after a change | See [Network exposure](REFERENCE.md#network-exposure) |
 | Files invisible or container unhealthy | See `HOST_WORKSPACE_PATH` in [Configuration](REFERENCE.md#configuration-devcontainerenv) |
@@ -65,4 +65,4 @@ Test commands and the dedicated Redis procedure are in [Verification](REFERENCE.
 
 See [LICENSE](LICENSE) for the product license and copyright.
 
-The container files under `.devcontainer/` derive from [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer), with local product adaptations; retain its [MIT notice](.devcontainer/LICENSE). Source distributions include that notice and `.dockerignore`; the image installs the notice at `/usr/share/doc/polyagent-devcontainer/LICENSE`. Redis is offered under [RSALv2 or SSPLv1](https://raw.githubusercontent.com/redis/redis/7.4.11/LICENSE.txt). Bundled vendor tools and other dependencies remain subject to their own licenses and terms.
+The base container files and imported governance, including agent rules, skills, hooks and their supporting scripts, come from [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer). Retain its [MIT notice](.devcontainer/LICENSE). The imported skills retain their accompanying notices. Source distributions include that notice and `.dockerignore`; the image installs the notice at `/usr/share/doc/polyagent-devcontainer/LICENSE`. Redis is offered under [RSALv2 or SSPLv1](https://raw.githubusercontent.com/redis/redis/7.4.11/LICENSE.txt). Bundled vendor tools and other dependencies remain subject to their own licenses and terms.

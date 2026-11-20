@@ -1,0 +1,23 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER root
+RUN curl -fSL "https://github.com/docker/compose/releases/download/v2.33.0/docker-compose-linux-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose \
+    && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+COPY .devcontainer/LICENSE /usr/share/doc/polyagent-devcontainer/LICENSE
+COPY LICENSE /usr/share/doc/polyagent-channels/LICENSE
+
+RUN install -d -o vscode -g vscode /opt/polyagent-channels
+USER vscode
+WORKDIR /opt/polyagent-channels
+RUN uv python install 3.12
+COPY --chown=vscode:vscode requirements.lock requirements.txt pyproject.toml README.md LICENSE ./
+RUN uv venv --python 3.12 /home/vscode/channels-venv && uv pip install --python /home/vscode/channels-venv/bin/python --require-hashes -r requirements.lock
+COPY --chown=vscode:vscode src ./src
+RUN uv pip install --python /home/vscode/channels-venv/bin/python --no-deps .
+COPY --chown=vscode:vscode scripts/build_harness.py ./scripts/build_harness.py
+RUN /home/vscode/channels-venv/bin/python scripts/build_harness.py /opt/polyagent-channels/harness.pyz
+ENV PATH=/home/vscode/channels-venv/bin:$PATH \
+    CHANNEL_KEY_FILE=/workspaces/.env/channel.key
+WORKDIR /workspaces
+CMD ["python", "-m", "uvicorn", "--factory", "polyagent_channels.server:create_app", "--host", "0.0.0.0", "--port", "8080", "--ws-max-size", "16777216", "--no-access-log"]

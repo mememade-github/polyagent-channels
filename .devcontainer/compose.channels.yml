@@ -1,0 +1,87 @@
+name: polyagent-channels
+
+x-channel-logging: &channel-logging
+  driver: local
+  options:
+    max-size: "${CHANNEL_LOG_MAX_SIZE:-10m}"
+    max-file: "${CHANNEL_LOG_MAX_FILES:-3}"
+    compress: "true"
+
+services:
+  devcontainer-base:
+    image: ${IMAGE_NAME:-polyagent-channels-polyagent-channels}-base/${COMPOSE_PROJECT_NAME}:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    scale: 0
+  polyagent-channels:
+    extends:
+      file: docker-compose.yml
+      service: polyagent-devcontainer
+    dns: !reset []
+    stdin_open: !reset null
+    tty: !reset null
+    container_name: ${CONTAINER_NAME:-polyagent-channels}
+    image: ${IMAGE_NAME:-polyagent-channels-polyagent-channels}:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile.channels
+      args:
+        BASE_IMAGE: ${IMAGE_NAME:-polyagent-channels-polyagent-channels}-base/${COMPOSE_PROJECT_NAME}:${IMAGE_TAG:-latest}
+      additional_contexts:
+        - ${IMAGE_NAME:-polyagent-channels-polyagent-channels}-base/${COMPOSE_PROJECT_NAME}:${IMAGE_TAG:-latest}=service:devcontainer-base
+    init: true
+    user: vscode
+    working_dir: /workspaces
+    environment: !override
+      CHANNEL_URL: http://127.0.0.1:8080
+      CHANNEL_MAX_STORAGE_BYTES: "${CHANNEL_MAX_STORAGE_BYTES-1073741824}"
+      CHANNEL_RETENTION_DAYS: "${CHANNEL_RETENTION_DAYS-7}"
+      REDIS_URL: redis://redis:6379/0
+      CHANNEL_KEY_FILE: /workspaces/.env/channel.key
+    ports:
+      - "${CHANNEL_BIND:-0.0.0.0}:${CHANNEL_PORT:-18765}:8080"
+    volumes: !override
+      - type: bind
+        source: ${HOST_WORKSPACE_PATH:-..}
+        target: /workspaces
+      # Host Docker daemon, as in the upstream DevContainer; see REFERENCE.md, Privilege boundary.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Agent logins, sessions and shell history outlive the container, as in the upstream DevContainer.
+      - claude-config:/home/vscode/.claude
+      - codex-config:/home/vscode/.codex
+      - gemini-config:/home/vscode/.gemini
+      - antigravity-secrets:/home/vscode/.config/antigravity
+      - command-history:/commandhistory
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging: *channel-logging
+    restart: unless-stopped
+    healthcheck: !override
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  redis:
+    image: redis:7.4.11-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec",
+              "--auto-aof-rewrite-percentage", "${REDIS_AOF_REWRITE_PERCENTAGE:-50}",
+              "--auto-aof-rewrite-min-size", "${REDIS_AOF_REWRITE_MIN_SIZE:-64mb}",
+              "--save", ""]
+    volumes:
+      - channel-data:/data
+    logging: *channel-logging
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  channel-data:
+  claude-config:
+  codex-config:
+  gemini-config:
+  antigravity-secrets:
+  command-history:

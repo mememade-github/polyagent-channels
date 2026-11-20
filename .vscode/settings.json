@@ -1,0 +1,32 @@
+{
+  // ==========================================================================
+  // Polyagent DevContainer — VS Code Settings
+  // ==========================================================================
+  // Generic editor settings. Add language-specific settings per project.
+  // ==========================================================================
+
+  "files.encoding": "utf8",
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.rulers": [120],
+
+  "files.exclude": {
+    "**/node_modules": true
+  },
+
+  "search.exclude": {
+    "**/node_modules": true
+  },
+
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/node_modules/**": true
+  },
+
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingModuleSource": "none"
+  }
+}

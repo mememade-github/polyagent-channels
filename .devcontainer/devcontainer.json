@@ -1,9 +1,10 @@
 {
   "name": "Polyagent Channels",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "compose.channels.yml",
   "service": "polyagent-channels",
   "workspaceFolder": "/workspaces",
   "remoteUser": "vscode",
   "overrideCommand": false,
+  "initializeCommand": ["docker", "compose", "--env-file", ".devcontainer/.env", "-f", ".devcontainer/compose.channels.yml", "build", "devcontainer-base"],
   "shutdownAction": "stopCompose"
 }

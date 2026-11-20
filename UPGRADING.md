@@ -4,6 +4,16 @@ The procedure, backup and rollback are in
 [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback). This
 file lists only what a release needs beyond that procedure.
 
+## Next release
+
+Use `.devcontainer/compose.channels.yml` for [product Compose commands](REFERENCE.md#configuration-devcontainerenv).
+The unmodified base definition at `.devcontainer/docker-compose.yml` starts the
+generic DevContainer service and does not start Channels. Check the
+[Compose and Buildx requirements](README.md#requirements) before rebuilding.
+The build tags the local base image as
+`<IMAGE_NAME>-base/<COMPOSE_PROJECT_NAME>:<IMAGE_TAG>`, giving it a separate
+repository name from the product image and scoping it to the Compose project.
+
 ## 0.1.5
 
 ### Upgrading from 0.1.4 or earlier — join topics again and name each client

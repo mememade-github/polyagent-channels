@@ -1,0 +1,30 @@
+{
+  "claude-hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "bash hooks/claude-hooks-adapter.sh session-start",
+        "timeout": 15
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash hooks/claude-hooks-adapter.sh pre-tool-use",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash hooks/claude-hooks-adapter.sh stop",
+        "timeout": 15
+      }
+    ]
+  }
+}

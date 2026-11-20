@@ -1,0 +1,68 @@
+# default.yml — Rubric Fallback for non-objective evaluation
+#
+# This rubric serves as calibration anchors for the evaluator
+# subagent when Contract.mode == "calibrated" (last resort).
+# For most projects with tests/build/lint, objective mode takes priority.
+# For non-code domains, tool-augmented mode with checks[] is preferred.
+#
+# When active (calibrated mode):
+# - IMMUTABLE during refinement — the evaluator cannot modify calibration anchors
+# - Evaluator subagent scores against these anchors with tool evidence
+# - Each dimension has 5 anchor levels: 0.0, 0.25, 0.5, 0.75, 1.0
+# - NO interpolation — score must be exactly one of these values
+# - Every score MUST cite specific evidence (tool output, file:line, diff hunk)
+# - No evidence = 0.0 for that dimension
+
+rubric:
+  name: universal
+  version: "2.0"
+  description: Universal rubric for any project type (code, docs, system, config)
+
+  evaluation_rules:
+    - "Score ONLY against the anchor criteria below. No free-form judgment: anchor matching is constrained by cited evidence, never by overall impressions."
+    - "Every score MUST cite specific evidence from tool output or file:line."
+    - "If no evidence can be cited, score is 0.0 for that dimension."
+    - "Evaluate the DIFF (changes made), not the entire codebase."
+    - "Tool output trumps intuition — failed tests override perceived quality."
+    - "Higher score than all previous attempts requires stronger evidence."
+
+  dimensions:
+    correctness:
+      weight: 0.30
+      description: "Does it work? Evidence: tool execution results."
+      anchors:
+        "0.0": "Broken. Build fails, tests crash, or runtime errors in tool output."
+        "0.25": "Partially works. Build passes but tests fail, or significant tool warnings."
+        "0.5": "Core works. Main functionality passes verification, some failures remain."
+        "0.75": "Solid. All existing tests pass, lint/type checks clean, no regressions."
+        "1.0": "Verified. All tests pass, no warnings, new tests added for new behavior."
+
+    improvement:
+      weight: 0.30
+      description: "Is it better than before? Evidence: diff comparison."
+      anchors:
+        "0.0": "No improvement or regression. Changes do not address the stated task."
+        "0.25": "Marginal. Addresses part of the task, but core issue remains."
+        "0.5": "Partial. Core issue addressed, but approach has clear limitations."
+        "0.75": "Substantial. Task effectively addressed, measurably better than baseline."
+        "1.0": "Excellent. Task fully resolved, approach is clean and well-motivated."
+
+    completeness:
+      weight: 0.25
+      description: "All aspects handled? Evidence: scope coverage."
+      anchors:
+        "0.0": "Task not addressed. Changes unrelated to objective."
+        "0.25": "Minimal. Only the most obvious aspect handled, major gaps."
+        "0.5": "Core covered. Main objective met, edge cases not handled."
+        "0.75": "Thorough. Core + edge cases handled, minor gaps remain."
+        "1.0": "Complete. All aspects addressed including error handling and edge cases."
+
+    consistency:
+      weight: 0.15
+      description: "Follows existing patterns? Evidence: style comparison."
+      anchors:
+        "0.0": "Inconsistent. Naming, formatting, or patterns diverge from codebase."
+        "0.25": "Partial. Some conventions followed, notable deviations."
+        "0.5": "Adequate. Follows project conventions, no major deviations."
+        "0.75": "Clean. All changes follow conventions, well-organized, no dead code."
+        "1.0": "Exemplary. Perfect adherence, improves consistency of touched files."
