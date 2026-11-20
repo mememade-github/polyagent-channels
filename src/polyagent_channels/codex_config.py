@@ -14,6 +14,8 @@ CODEX_BLOCK_END = '# end polyagent-channels managed block\n'
 FILTERED_BLOCK_START = '# polyagent-channels filter ownership: '
 OWNERSHIP_SHAPES = ((), ('setting',), ('newline',), ('setting', 'newline'))
 CODEX_SETTING = '# polyagent-channels: end the session when its window closes\nthread_unload_delay_secs = 0\n'
+LEGACY_ENV_VARS = 'env_vars = ["CODEX_HOME"]\n'
+CODEX_ENV_VARS = 'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE"]\n'
 
 
 class SetupError(ValueError):
@@ -23,7 +25,7 @@ class SetupError(ValueError):
 def codex_block(wrapper):
     """Project MCP needs no per-hook review; the approval mode records the one consent given at installation."""
     return (CODEX_BLOCK_START + '[mcp_servers.channels]\ncommand = ' + json.dumps(str(wrapper))
-            + '\nargs = ["--client", "codex", "mcp"]\nenv_vars = ["CODEX_HOME"]\n'
+            + '\nargs = ["--client", "codex", "mcp"]\n' + CODEX_ENV_VARS
             + 'default_tools_approval_mode = "approve"\n' + CODEX_BLOCK_END)
 
 
@@ -41,7 +43,7 @@ def parsed_toml(text, path):
 
 def codex_config(path, wrapper):
     """Return the config with the tools and the close-on-exit setting added, judged by its parsed meaning."""
-    content = path.read_text() if path.exists() else ''
+    content = path.read_bytes().decode('utf-8') if path.exists() else ''
     updated, additions = add_registration(content, path, wrapper)
     created = [name for name, added in (('directory', not path.parent.exists()), ('file', not path.exists())) if added]
     return updated.encode(), created + additions
@@ -61,9 +63,14 @@ def add_registration(content, path, wrapper, *, filtered=False):
     if filtered and match is not None and not is_filtered_block(match[1]):
         content = without_registration(content, match)
         registered = False
+    ending = '\r\n' if '\r\n' in content and '\n' not in content.replace('\r\n', '') else '\n'
+    if registered:
+        _, _, ownership, ending = match
+        if delay is None and 'setting' not in ownership:
+            ownership = (*ownership, 'setting')
+        content = replace_registration(content, match, block, ownership=ownership)
     created = [name for name, added in (('setting', delay is None),
                                         ('newline', not registered and bool(content) and not content.endswith('\n'))) if added]
-    ending = '\r\n' if filtered and '\r\n' in content and '\n' not in content.replace('\r\n', '') else '\n'
     updated = (CODEX_SETTING.replace('\n', ending) if delay is None else '') + content
     if not registered:
         separator = '\n' if 'newline' in created else ''
@@ -116,11 +123,17 @@ def owned_registration(content, wrapper, settings=None, created=()):
             settings = tomllib.loads(content)
         except tomllib.TOMLDecodeError:
             return None
-    block = codex_block(wrapper)
     servers = settings.get('mcp_servers')
-    if not isinstance(servers, dict) or servers.get('channels') != tomllib.loads(block)['mcp_servers']['channels']:
+    if not isinstance(servers, dict) or 'channels' not in servers:
         return None
-    for registered, ownership, ending in registration_candidates(wrapper, created):
+    for block in registration_blocks(wrapper):
+        if servers['channels'] == tomllib.loads(block)['mcp_servers']['channels']:
+            return find_registration(content, block, settings, created)
+    return None
+
+
+def find_registration(content, block, settings, created):
+    for registered, ownership, ending in registration_candidates(block, created):
         offset = owned_offset(content, registered, settings, ending)
         if offset is not None:
             return offset, registered, ownership, ending
@@ -152,8 +165,12 @@ def starts_on_line(content, registered, ending, offset):
     return registered.startswith(ending) or offset == 0 or content[offset - 1] == '\n'
 
 
-def registration_candidates(wrapper, created=()):
+def registration_blocks(wrapper):
     block = codex_block(wrapper)
+    return block, block.replace(CODEX_ENV_VARS, LEGACY_ENV_VARS)
+
+
+def registration_candidates(block, created=()):
     for ending in ('\n', '\r\n'):
         for ownership in OWNERSHIP_SHAPES:
             separator = '\n' if 'newline' in ownership else ''
@@ -165,7 +182,11 @@ def registration_candidates(wrapper, created=()):
 
 
 def has_registration_candidate(content, wrapper):
-    for registered, _, ending in registration_candidates(wrapper):
+    return any(has_block_candidate(content, block) for block in registration_blocks(wrapper))
+
+
+def has_block_candidate(content, block):
+    for registered, _, ending in registration_candidates(block):
         start = 0
         while (offset := content.find(registered, start)) != -1:
             if starts_on_line(content, registered, ending, offset):
@@ -176,6 +197,15 @@ def has_registration_candidate(content, wrapper):
 
 def is_filtered_block(registered):
     return registered.lstrip('\r\n').startswith(FILTERED_BLOCK_START)
+
+
+def replace_registration(content, match, block, *, ownership=None):
+    offset, registered, previous_ownership, ending = match
+    if ownership is None:
+        ownership = previous_ownership
+    replacement = filtered_block(block, ownership) if is_filtered_block(registered) else block
+    separator = ending if registered.startswith(ending) else ''
+    return content[:offset] + separator + replacement.replace('\n', ending) + content[offset + len(registered):]
 
 
 def remove_registration(content, wrapper, created=()):
@@ -242,13 +272,12 @@ def filtered_config(path, wrapper, created):
     match = owned_registration(content, wrapper, created=created)
     if match is not None:
         if is_filtered_block(match[1]):
+            block = codex_block(wrapper)
             if 'thread_unload_delay_secs' in parsed_toml(content, path):
-                return body
-            offset, registered, ownership, ending = match
-            separator = ending if 'newline' in ownership else ''
-            repaired = filtered_block(codex_block(wrapper), (*ownership, 'setting')).replace('\n', ending)
-            return (CODEX_SETTING.replace('\n', ending) + content[:offset] + separator + repaired
-                    + content[offset + len(registered):]).encode('utf-8')
+                return replace_registration(content, match, block).encode('utf-8')
+            _, _, ownership, ending = match
+            repaired = replace_registration(content, match, block, ownership=(*ownership, 'setting'))
+            return (CODEX_SETTING.replace('\n', ending) + repaired).encode('utf-8')
         content = without_registration(content, match)
     updated, _ = add_registration(content, path, wrapper, filtered=True)
     return updated.encode('utf-8')

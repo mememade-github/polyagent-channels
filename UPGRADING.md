@@ -14,8 +14,10 @@ The build tags the local base image as
 `<IMAGE_NAME>-base/<COMPOSE_PROJECT_NAME>:<IMAGE_TAG>`, giving it a separate
 repository name from the product image and scoping it to the Compose project.
 
-[Update the client](REFERENCE.md#updating-a-client) to set up the clone-local
-Git filter for an existing Codex installation in a tracked configuration.
+[Update the client](REFERENCE.md#updating-a-client) to refresh an existing
+Codex registration. The new registration passes the container's
+`SKIP_CODEX_UPDATE` setting through to Codex session wakes. The update also
+sets up the clone-local Git filter for a tracked configuration.
 If installation enables the filter and reports a staged or committed server
 block, review the diff, then stage and commit `.codex/config.toml` to remove
 that block from the next revision. Earlier revisions keep their original content. Review the

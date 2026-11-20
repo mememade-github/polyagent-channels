@@ -32,6 +32,11 @@ INLINE_SERVERS = (b'mcp_servers = {}\n', b'mcp_servers = { other = { command = "
 GIT = shutil.which('git')
 
 
+def released_codex_block(wrapper):
+    return codex_block(wrapper).replace(
+        'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE"]', 'env_vars = ["CODEX_HOME"]')
+
+
 @pytest.fixture(autouse=True)
 def isolated_git(monkeypatch, tmp_path):
     monkeypatch.setenv('HOME', str(tmp_path))
@@ -100,6 +105,86 @@ def registered(project, root):
     return (command, content.count(b'[mcp_servers.channels]')) == (str(root / 'bin/channels'), 1)
 
 
+@pytest.mark.parametrize('tracked', [False, True])
+def test_reinstall_updates_owned_old_codex_block_with_current_archive(artifact, tmp_path, tracked):
+    project = tmp_path / 'project'
+    base = BASE.replace(b'\n', b'\r\n')
+    if tracked:
+        repository(project, base)
+    if not tracked:
+        configured(project, base)
+    root = tmp_path / 'client'
+    path = project / CONFIG
+    setup(artifact, project, root)
+    current = path.read_bytes()
+    wrapper = root / 'bin/channels'
+    block = codex_block(wrapper)
+    legacy = released_codex_block(wrapper)
+    if tracked:
+        block = filtered_block(block, ('setting',))
+        legacy = filtered_block(legacy, ('setting',))
+    path.write_bytes(current.replace(block.replace('\n', '\r\n').encode(), legacy.replace('\n', '\r\n').encode()))
+    assert legacy.replace('\n', '\r\n').encode() in path.read_bytes()
+    if tracked:
+        assert clean_object(project) == index_object(project)
+    status = hook_binding_status(root, project, 'codex')['status']
+    setup(root / 'harness.pyz', project, root)
+    updated = path.read_bytes()
+    server = tomllib.loads(updated.decode())['mcp_servers']['channels']
+    setup(root / 'harness.pyz', project, root, 'uninstall')
+    assert (status, updated, server.get('env_vars'), path.read_bytes()) == (
+        'installed', current, ['CODEX_HOME', 'SKIP_CODEX_UPDATE'], base)
+
+
+def test_reinstall_repairs_mixed_endings_with_released_plain_block(artifact, tmp_path):
+    project = tmp_path / 'project'
+    project.mkdir()
+    git(project, 'init', '-q', '--template=')
+    root = tmp_path / 'client'
+    wrapper = root / 'bin/channels'
+    base = BASE.replace(b'\n', b'\r\n')
+    path = configured(project, base)
+    setup(artifact, project, root)
+    prefix = CODEX_SETTING.replace('\n', '\r\n').encode()
+    block = codex_block(wrapper).replace('\n', '\r\n').encode()
+    legacy = released_codex_block(wrapper).replace('\n', '\r\n').encode()
+    installed = path.read_bytes()
+    assert installed == prefix + base + block
+    comment = b'# user appended this line\n'
+    path.write_bytes(installed.removeprefix(prefix).replace(block, legacy) + comment)
+
+    setup(root / 'harness.pyz', project, root)
+    repaired = path.read_bytes()
+    setup(root / 'harness.pyz', project, root, 'uninstall')
+    assert (repaired, path.read_bytes()) == (installed + comment, base + comment)
+
+
+def test_smudge_repairs_mixed_endings_and_owns_setting_with_released_filtered_block(artifact, tmp_path):
+    base = BASE.replace(b'\n', b'\r\n')
+    user_setting = b'thread_unload_delay_secs = 0\r\n'
+    project = repository(tmp_path / 'project', user_setting + base)
+    root = tmp_path / 'client'
+    wrapper = root / 'bin/channels'
+    setup(artifact, project, root)
+    path = project / CONFIG
+    block = filtered_block(codex_block(wrapper), ()).replace('\n', '\r\n').encode()
+    legacy = filtered_block(released_codex_block(wrapper), ()).replace('\n', '\r\n').encode()
+    installed = path.read_bytes()
+    assert installed == user_setting + base + block
+    comment = b'# user appended this line\n'
+    path.write_bytes(installed.removeprefix(user_setting).replace(block, legacy) + comment)
+    blob = git(project, 'hash-object', '-w', '--no-filters', '--', CONFIG).stdout.decode().strip()
+
+    repaired = git(project, 'cat-file', '--filters', f'--path={CONFIG}', blob).stdout
+    path.write_bytes(repaired)
+    git(project, 'add', '--', CONFIG)
+    staged = git(project, 'show', ':' + CONFIG).stdout
+    setup(root / 'harness.pyz', project, root, 'uninstall')
+    prefix = CODEX_SETTING.replace('\n', '\r\n').encode()
+    owned = filtered_block(codex_block(wrapper), ('setting',)).replace('\n', '\r\n').encode()
+    assert (repaired, staged, path.read_bytes()) == (prefix + base + owned + comment, base + comment, base + comment)
+
+
 @pytest.mark.parametrize('body', [
     BASE, BASE.rstrip(b'\n'), b'', b'"thread_unload_delay_secs" = 0x0\n', CODEX_SETTING.encode(),
     b'model = "mixed"\r\n# comment\n',
@@ -158,12 +243,16 @@ def test_uninstall_keeps_unstaged_changes(artifact, tmp_path):
 
 
 @pytest.mark.parametrize('edit', ['block', 'root', 'setting', 'ownership', 'ownership-shape'])
-def test_edits_to_managed_text_stay_visible(artifact, tmp_path, edit):
+@pytest.mark.parametrize('legacy', [False, True])
+def test_edits_to_managed_text_stay_visible(artifact, tmp_path, edit, legacy):
     project = repository(tmp_path / 'project')
     root = tmp_path / 'client'
     setup(artifact, project, root)
     path = project / CONFIG
     content = path.read_bytes()
+    if legacy:
+        wrapper = root / 'bin/channels'
+        content = CODEX_SETTING.encode() + BASE + filtered_block(released_codex_block(wrapper), ('setting',)).encode()
     changes = {
         'block': (b'"approve"', b'"prompt"'),
         'ownership': (BLOCK, b'# ownership comment edited: '),
@@ -673,7 +762,8 @@ def test_released_registration_already_in_git_gets_cleanup_notice(artifact, tmp_
     project = repository(tmp_path / 'project')
     root = tmp_path / 'client'
     path = project / CONFIG
-    path.write_text(CODEX_SETTING + BASE.decode() + codex_block(root / 'bin/channels'))
+    legacy = released_codex_block(root / 'bin/channels')
+    path.write_text(CODEX_SETTING + BASE.decode() + legacy)
     git(project, 'add', '--', CONFIG)
     if state == 'committed':
         git(project, 'commit', '-qm', 'released registration')
@@ -710,7 +800,7 @@ def test_active_filter_preserves_plain_legacy_bytes_despite_stale_manifest(artif
     initial = git(project, 'rev-parse', 'HEAD').stdout.strip()
     path = project / CONFIG
     user_content = CODEX_SETTING.encode() + b'model = "legacy"\n'
-    legacy = user_content + codex_block(root / 'bin/channels').encode()
+    legacy = user_content + released_codex_block(root / 'bin/channels').encode()
     path.write_bytes(legacy)
     commit(project, 'released registration')
     released = git(project, 'rev-parse', 'HEAD').stdout.strip()

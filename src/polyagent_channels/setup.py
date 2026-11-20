@@ -417,7 +417,7 @@ def claude_binding_mismatch(path, root):
 
 
 def codex_binding_mismatch(path, root):
-    content = path.read_text()
+    content = path.read_bytes().decode('utf-8')
     if not has_registration(content, root / 'bin/channels'):
         return 'mcp', 'block_mismatch'
     return None if is_immediate_unload(parsed_toml(content, path).get('thread_unload_delay_secs')) else ('mcp', 'unload_setting_mismatch')
@@ -575,6 +575,10 @@ def installation_matches(options, root, project):
                 return False
         if hook_binding_status(root, project, options.client)['status'] != 'installed':
             return False
+        if options.client == 'codex':
+            binding = native_binding(project, options.client)
+            if codex_config(binding, wrapper)[0] != binding.read_bytes():
+                return False
         if options.client == 'claude' and claude_tool_registration(project, wrapper) != 'owned':
             return False
         manifest = manifest_data(root)
