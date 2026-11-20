@@ -19,10 +19,9 @@ from polyagent_channels.client_config import SESSION_RESTART, ConfigError, defau
 from polyagent_channels.exchange import RECEPTION_TIMEOUT
 from polyagent_channels.identity import MAX_MEMBER_LABEL_BYTES, is_identifier
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+from polyagent_channels.codex_config import (CODEX_SETTING, SetupError, codex_block, codex_config,
+                                             codex_config_removed, filtered_config, has_registration, is_immediate_unload, parsed_toml)
+from polyagent_channels.codex_git import CodexGit, clone, filter_program
 
 NATIVE_TRUST = "Accept the client's own folder trust prompt. Never write native trust records yourself."
 TOOLS_READY = 'That session finds the channels tools by name and needs no further setup. A running client does not load new tools. '
@@ -39,24 +38,17 @@ LEGACY_CODEX_HOOKS = '.codex/hooks.json'
 RECEIVER_EVENTS = ('SessionStart', 'Stop')
 MCP_NAME = 'channels'
 CLAUDE_TOOL_RULE = 'mcp__channels'
-CODEX_BLOCK_START = '# polyagent-channels managed block\n'
-CODEX_BLOCK_END = '# end polyagent-channels managed block\n'
-CODEX_SETTING = '# polyagent-channels: end the session when its window closes\nthread_unload_delay_secs = 0\n'
 LEGACY_LOCK_FILES = {'root': ('.install.lock', '.lifecycle.lock'),
                      'project': ('.claude/settings.local.json.channels.lock', '.codex/hooks.json.channels.lock')}
 
 
-class SetupError(ValueError):
-    """A diagnostic containing only installer-authored safe text."""
-
-
-def atomic_write(path, content, mode=None):
+def atomic_write(path, content, mode=None, *, prefix='.channels-', temporary_dir=None):
     """Replace a file whole; an existing file keeps its mode, a new one is private unless MODE says otherwise."""
     if path.is_symlink():
         raise SetupError('Refusing symlink destination')
     if mode is None:
         mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
-    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix='.channels-')
+    descriptor, temporary = tempfile.mkstemp(dir=temporary_dir or path.parent, prefix=prefix)
     try:
         with os.fdopen(descriptor, 'wb') as output:
             output.write(content)
@@ -303,58 +295,6 @@ def unregister_claude_tools(project, wrapper):
     return True
 
 
-def codex_block(wrapper):
-    """Project MCP needs no per-hook review; the approval mode records the one consent given at installation."""
-    return (CODEX_BLOCK_START + '[mcp_servers.channels]\ncommand = ' + json.dumps(str(wrapper))
-            + '\nargs = ["--client", "codex", "mcp"]\nenv_vars = ["CODEX_HOME"]\n'
-            + 'default_tools_approval_mode = "approve"\n' + CODEX_BLOCK_END)
-
-
-def is_immediate_unload(value):
-    """Codex types this setting as an integer, so false and 0.0 do not count as 0."""
-    return type(value) is int and value == 0
-
-
-def parsed_toml(text, path):
-    try:
-        return tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        raise SetupError('Codex configuration is not valid TOML; fix it first: ' + str(path)) from None
-
-
-def codex_config(path, wrapper):
-    """Return the config with the tools and the close-on-exit setting added, judged by its parsed meaning."""
-    content = path.read_text() if path.exists() else ''
-    settings = parsed_toml(content, path)
-    block = codex_block(wrapper)
-    servers = settings.get('mcp_servers', {})
-    if block not in content and (not isinstance(servers, dict) or 'channels' in servers):
-        raise SetupError('Another Codex channels server is configured in ' + str(path) + '; inspect it')
-    delay = settings.get('thread_unload_delay_secs')
-    if delay is not None and not is_immediate_unload(delay):
-        raise SetupError('thread_unload_delay_secs in ' + str(path) + ' would keep a closed window running; set it to 0 or remove it')
-    created = [name for name, added in (('directory', not path.parent.exists()), ('file', not path.exists()),
-                                        ('setting', delay is None),
-                                        ('newline', block not in content and bool(content) and not content.endswith('\n'))) if added]
-    updated = (CODEX_SETTING if delay is None else '') + content
-    if block not in content:
-        updated += ('\n' if 'newline' in created else '') + block
-    result = parsed_toml(updated, path)
-    if not is_immediate_unload(result.get('thread_unload_delay_secs')) or result.get('mcp_servers', {}).get('channels', {}).get('command') != str(wrapper):
-        raise SetupError('Could not add the channels server to ' + str(path) + '; inspect it')
-    return updated.encode(), created
-
-
-def codex_config_removed(path, wrapper, created):
-    """Take out exactly what installation appended and prepended; anything edited since stays."""
-    content = path.read_text()
-    block = codex_block(wrapper)
-    if block not in content:
-        return content
-    content = content.replace(('\n' if 'newline' in created else '') + block, '', 1)
-    return content[len(CODEX_SETTING):] if 'setting' in created and content.startswith(CODEX_SETTING) else content
-
-
 def is_same_directory(path, descriptor):
     try:
         return os.path.samestat(os.stat(path), os.fstat(descriptor))
@@ -478,7 +418,7 @@ def claude_binding_mismatch(path, root):
 
 def codex_binding_mismatch(path, root):
     content = path.read_text()
-    if codex_block(root / 'bin/channels') not in content:
+    if not has_registration(content, root / 'bin/channels'):
         return 'mcp', 'block_mismatch'
     return None if is_immediate_unload(parsed_toml(content, path).get('thread_unload_delay_secs')) else ('mcp', 'unload_setting_mismatch')
 
@@ -520,26 +460,70 @@ def execute(options):
     if options.action == 'plan':
         return install(options, root, project)
     with ExitStack() as stack:
+        repository = clone(project) if 'codex' in clients else None
+        git_binding = CodexGit(*repository, project, root / 'bin/channels') if repository else None
+        if git_binding:
+            stack.enter_context(directory_lock(git_binding.common, fcntl.LOCK_EX))
+            git_binding.refuse_stale_driver()
+        enabled, filter_notice = (False, '')
+        if git_binding and options.action == 'install':
+            enabled, filter_notice = git_binding.preflight()
         if options.action == 'install':
-            root.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        # Installers wait for one another on these directories; the same directory is locked only once.
-        for directory in sorted({root.parent, project}):
-            if directory.is_dir():
-                stack.enter_context(directory_lock(directory, fcntl.LOCK_EX))
-        if options.action == 'install' and installation_matches(options, root, project):
-            print(json.dumps({'action': 'install', 'status': 'already_installed', 'root': str(root),
-                              'binding': str(native_binding(project, options.client)),
-                              'resume_command': native_resume_command(options.client, project),
-                              'next_step': NEXT_STEP[options.client]}))
-            return
-        if options.action == 'install':
-            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if git_binding:
+                git_binding.cleanup_metadata_temps()
+            common = git_binding.common if git_binding else None
+            return install_locked(options, root, project, stack, git_binding if enabled else None, filter_notice, common)
+        lock_setup_directories(stack, root, project, git_binding.common if git_binding else None)
         if not root.is_dir():
+            if git_binding and git_binding.has_filter_metadata():
+                raise SetupError(f'The client root {root} is missing and its local Git filter remains. '
+                                 f'Reinstall for this project with the same --target {shlex.quote(str(root))}, then uninstall.')
             return report_nothing_installed(root, project)
+        if git_binding:
+            git_binding.cleanup_metadata_temps()
         stack.enter_context(lifecycle_lock(root, exclusive=True))
-        if options.action == 'uninstall':
-            return uninstall(options, root, project, clients)
-        install(options, root, project)
+        uninstall(options, root, project, clients, git_binding)
+
+
+def lock_setup_directories(stack, root, project, common):
+    # Installers wait on these directories; a directory shared by both paths is locked only once.
+    for directory in sorted({root.parent, project} - {common}):
+        if directory.is_dir():
+            stack.enter_context(directory_lock(directory, fcntl.LOCK_EX))
+
+
+def install_locked(options, root, project, stack, git_binding, filter_notice, common):
+    source = canonical_path(sys.argv[0])
+    program = filter_program(source) if git_binding and source.suffix == '.pyz' and archive_owned(source) else None
+    root.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock_setup_directories(stack, root, project, common)
+    if installation_matches(options, root, project) and filter_matches(git_binding, root, project, program):
+        if git_binding:
+            git_binding.cleanup_binding_temps()
+            git_binding.refresh()
+            git_binding.check_driver_config()
+        print(json.dumps({'action': 'install', 'status': 'already_installed', 'root': str(root),
+                          'binding': str(native_binding(project, options.client)),
+                          'resume_command': native_resume_command(options.client, project),
+                          'next_step': next_step(options.client, filter_notice)}))
+        return
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    stack.enter_context(lifecycle_lock(root, exclusive=True))
+    install(options, root, project, git_binding, program, filter_notice)
+
+
+def filter_matches(git_binding, root, project, program):
+    if not git_binding:
+        return True
+    wrapper = root / 'bin/channels'
+    if not git_binding.ready(program):
+        return False
+    binding = native_binding(project, 'codex')
+    return filtered_config(binding, wrapper, ()) == binding.read_bytes()
+
+
+def next_step(client, filter_notice):
+    return ' '.join(part for part in (NEXT_STEP[client], filter_notice) if part)
 
 
 def manifest_data(root):
@@ -610,7 +594,7 @@ def installation_matches(options, root, project):
         return False
 
 
-def install(options, root, project):
+def install(options, root, project, git_binding=None, program=None, filter_notice=''):
     config = canonical_path(root / 'config.json')
     wrapper = canonical_path(root / 'bin/channels')
     archive = canonical_path(root / 'harness.pyz')
@@ -639,11 +623,11 @@ def install(options, root, project):
         raise SetupError('Existing shared key differs; preserving it')
     if options.client == 'claude' and claude_tool_registration(project, wrapper) == 'foreign':
         raise SetupError('Another MCP server named channels is configured for this project; inspect it with claude mcp get channels')
-    print(json.dumps({'action': options.action, 'root': str(root), 'binding': str(binding),
-                      'command': command, 'previous_bindings': previous,
-                      'key': str(key), 'resume_command': native_resume_command(options.client, project),
-                      'next_step': NEXT_STEP[options.client]}))
+    result = {'action': options.action, 'root': str(root), 'binding': str(binding), 'command': command,
+              'previous_bindings': previous, 'key': str(key), 'resume_command': native_resume_command(options.client, project),
+              'next_step': next_step(options.client, filter_notice)}
     if options.action == 'plan':
+        print(json.dumps(result))
         return
     if source.suffix != '.pyz' or not archive_owned(source):
         raise SetupError('Install requires the downloaded zipapp')
@@ -675,8 +659,19 @@ def install(options, root, project):
     if options.client == 'claude':
         register_claude_tools(project, wrapper)
     binding.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(binding, binding_bytes)
+    if git_binding:
+        legacy_ownership = () if git_binding.has_assignment() else previously_created
+        binding_bytes = filtered_config(binding, wrapper, legacy_ownership)
+        git_binding.enable(program, atomic_write)
+        git_binding.cleanup_binding_temps()
+        atomic_write(binding, binding_bytes, prefix=git_binding.binding_prefix)
+        git_binding.refresh()
+    else:
+        atomic_write(binding, binding_bytes)
     record_ownership(root, manifest, {**record, 'created': sorted({*previously_created, *created})})
+    if git_binding:
+        git_binding.check_driver_config()
+    print(json.dumps(result))
 
 
 def record_ownership(root, manifest, record):
@@ -745,12 +740,16 @@ def claude_removal_plan(root, project, record, legacy):
     return path, changed, body, created, unregister
 
 
-def codex_removal_plan(root, project, record, legacy):
+def codex_removal_plan(root, project, record, legacy, git_binding=None):
     path = project / NATIVE_BINDING_PATHS['codex']
     created = (record or {}).get('created', [])
+    if git_binding and git_binding.has_assignment():
+        created = []
+    elif git_binding and git_binding.tracked(git_binding.name):
+        created = [item for item in created if item not in ('file', 'directory')]
     wrapper = root / 'bin/channels'
     content = codex_config_removed(path, wrapper, created) if path.exists() else ''
-    changed = path.exists() and content != path.read_text()
+    changed = path.exists() and content.encode() != path.read_bytes()
     body = content.encode() if content or 'file' not in created else None
     def remove_legacy():
         return remove_legacy_codex_hook(project, root)
@@ -760,7 +759,7 @@ def codex_removal_plan(root, project, record, legacy):
 REMOVAL_PLANS = {'claude': claude_removal_plan, 'codex': codex_removal_plan}
 
 
-def apply_removal(plan):
+def apply_removal(plan, write):
     """Write one planned removal and delete only the file and directory this install created."""
     path, changed, body, created, external = plan
     external_changed = external()
@@ -769,13 +768,13 @@ def apply_removal(plan):
     if body is None:
         path.unlink()
     if body is not None:
-        atomic_write(path, body)
+        write(path, body)
     if 'directory' in created and not any(path.parent.iterdir()):
         path.parent.rmdir()
     return True
 
 
-def uninstall(options, root, project, clients):
+def uninstall(options, root, project, clients, git_binding=None):
     manifest = manifest_data(root)
     removed = []
     legacy = not (root / 'install-manifest.json').exists()
@@ -787,8 +786,21 @@ def uninstall(options, root, project, clients):
     plans = []
     for client in clients:
         records = recorded_bindings(manifest, project, client)
-        plans.append((client, REMOVAL_PLANS[client](root, project, records[0] if records else None, legacy)))
-    bindings_removed = [{'client': client, 'path': str(plan[0])} for client, plan in plans if apply_removal(plan)]
+        record = records[0] if records else None
+        if client == 'codex' and git_binding:
+            plan = codex_removal_plan(root, project, record, legacy, git_binding)
+        else:
+            plan = REMOVAL_PLANS[client](root, project, record, legacy)
+        plans.append((client, plan))
+    bindings_removed = []
+    for client, plan in plans:
+        binding = git_binding if client == 'codex' else None
+        write = binding.metadata_writer(atomic_write) if binding and binding.has_assignment() else atomic_write
+        changed = apply_removal(plan, write)
+        if binding:
+            changed = binding.disable(atomic_write) or changed
+        if changed:
+            bindings_removed.append({'client': client, 'path': str(plan[0])})
     manifest['hooks'] = remaining
     kept = []
     if manifest['hooks']:

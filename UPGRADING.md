@@ -14,6 +14,19 @@ The build tags the local base image as
 `<IMAGE_NAME>-base/<COMPOSE_PROJECT_NAME>:<IMAGE_TAG>`, giving it a separate
 repository name from the product image and scoping it to the Compose project.
 
+[Update the client](REFERENCE.md#updating-a-client) to set up the clone-local
+Git filter for an existing Codex installation in a tracked configuration.
+If installation enables the filter and reports a staged or committed server
+block, review the diff, then stage and commit `.codex/config.toml` to remove
+that block from the next revision. Earlier revisions keep their original content. Review the
+[legacy registration cleanup limits](REFERENCE.md#what-installation-adds)
+when taking a config from an earlier revision.
+
+Before downgrading the client, uninstall its Codex registration with the
+current harness, then install the older release. The older uninstaller
+leaves the filtered registration, its ownership comment and the Git filter
+in place. The filter can restore the registration on a subsequent Git checkout.
+
 ## 0.1.5
 
 ### Upgrading from 0.1.4 or earlier — join topics again and name each client

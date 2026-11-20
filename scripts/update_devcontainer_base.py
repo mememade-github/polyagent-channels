@@ -2,7 +2,7 @@
 import argparse
 import json
 from pathlib import Path
-from subprocess import check_output
+from subprocess import check_output, run
 
 
 LOCK_PATH = Path("devcontainer-base.lock.json")
@@ -25,12 +25,13 @@ def main():
     options = parser.parse_args()
     pin = git(options.upstream, "rev-parse", "--verify", options.revision + "^{commit}").decode().strip()
     entries = base_entries(options.upstream, pin)
+    checkout = checkout_root()
     previous = previous_paths()
     check_new_paths(entries.keys() - previous)
     for name in sorted(previous - entries.keys()):
         Path(name).unlink(missing_ok=True)
     for name, entry in entries.items():
-        write_blob(options.upstream, Path(name), entry)
+        write_blob(options.upstream, Path(name), entry, checkout)
     lock = {"pin": pin, "blobs": {name: blob for name, (_, blob) in entries.items()}}
     LOCK_PATH.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8", newline="\n")
 
@@ -65,10 +66,24 @@ def check_new_paths(new_paths):
             raise SystemExit(f"New upstream path overlaps an existing file or directory: {name}")
 
 
-def write_blob(upstream, path, entry):
+def checkout_root():
+    root = Path.cwd()
+    probe = run(["git", "rev-parse", "--show-toplevel"], capture_output=True, check=False)
+    if probe.returncode == 0 and Path(probe.stdout.decode().removesuffix("\n")) == root:
+        return root
+    if (root / ".git").exists():
+        raise SystemExit("Cannot locate the destination Git working tree")
+    return None
+
+
+def write_blob(upstream, path, entry, checkout):
     mode, blob = entry
+    content = git(upstream, "cat-file", "blob", blob)
+    if checkout:
+        object_id = check_output(["git", "hash-object", "-w", "--stdin"], input=content).decode().strip()
+        content = git(checkout, "cat-file", "--filters", f"--path={path.as_posix()}", object_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(git(upstream, "cat-file", "blob", blob))
+    path.write_bytes(content)
     path.chmod(int(mode, 8) & 0o777)
 
 

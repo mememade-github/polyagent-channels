@@ -1,6 +1,10 @@
 # DevContainer base maintenance
 
 [Polyagent DevContainer](https://github.com/mememade-github/polyagent-devcontainer) supplies the base. [devcontainer-base.lock.json](devcontainer-base.lock.json) records the pinned commit and the Git blob of every base-owned file. Update those files from upstream as a set. Keep local adaptations in the product files below. The offline test compares blobs after Git's end-of-line normalization.
+With the [clone-local Codex filter](REFERENCE.md#what-installation-adds), a
+channel installation leaves `.codex/config.toml` unchanged for Git and the
+lock test. The importer applies the clone's checkout filters to the new
+base files, preserving the registration when the new configuration accepts it.
 
 ## Shared paths
 

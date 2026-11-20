@@ -316,10 +316,86 @@ Derived from [auth.checked_key](src/polyagent_channels/auth.py),
 | Where | Claude Code | Codex |
 |-------|-------------|-------|
 | Client registry | `claude mcp add -s local channels`, kept by the client in `~/.claude.json` for this project | none |
-| Project | `.claude/settings.local.json`: background callbacks on `SessionStart` and `Stop`, and the tool rule `mcp__channels` | `.codex/config.toml`: a marked `thread_unload_delay_secs = 0` line at the top, and a marked block registering the tools with `default_tools_approval_mode = "approve"` |
+| Project | `.claude/settings.local.json`: background callbacks on `SessionStart` and `Stop`, and the tool rule `mcp__channels` | `.codex/config.toml`: a marked `thread_unload_delay_secs = 0` line at the top, and a marked block registering the tools with `default_tools_approval_mode = "approve"`. A tracked file normally gets the clone-local Git filter below. |
 | Shared root | `harness.pyz`, `bin/channels`, URL-only `config.json`, `install-manifest.json`, protected `.env/channel.key`, session-hashed `state`, `joined-topics.json` and its lock | the same |
 
-Installation adds no ignore rule: both project files hold this computer's client root path, so keep them out of commits.
+Both project files hold this computer's client root path. Keep Claude's local
+settings and any untracked Codex configuration out of commits.
+
+For tracked `.codex/config.toml`, installation normally sets up a required
+Git filter local to this clone. While the local assignment is active, it hides
+the exact filtered registration from Git and restores it when Git writes the
+file. It assigns the filter through an untracked `.codex/.gitattributes` and
+ignores that attributes file locally.
+The installer's `next_step` reports the Git behavior for this project.
+
+- Enabled: A Git filter local to this clone keeps the installed lines out of Git.
+- Another filter: Git can see the installed lines because another filter applies to .codex/config.toml.
+- Tracked attributes: Git can see the installed lines because .codex/.gitattributes is tracked.
+- Tracked ignore file: Git can see the installed lines because .codex/.gitignore is tracked and Git ignore rules must stay local to this worktree.
+- Different filesystems: Git can see the installed lines because the Git common directory and .codex are on different filesystems.
+- Registration already staged or committed: Stage and commit .codex/config.toml to remove the installed server block from Git.
+
+With the clone-local filter in place, Git clean and checkout, reinstall, and uninstall preserve the marked unload setting and preceding newline of an exact plain legacy block because either may be yours. Review what remains before committing the cleanup.
+
+Initial migration or ordinary uninstall without the clone-local filter can
+use the released install's manifest. Current filtered blocks carry their
+own ownership markers.
+
+With a tracked ignore file, installation uses the ordinary Codex registration.
+The installed lines remain visible in Git, and other worktrees retain their
+existing ignore behavior.
+
+The filter publishes its local Git metadata atomically from temporary files
+in the Git common directory. When that directory and `.codex` are on different
+filesystems, such as in some linked worktrees, installation uses the ordinary
+Codex registration and Git shows the installed lines.
+
+A required filter fails closed when Git invokes it and the driver cannot run.
+This includes invocations outside the installed worktree or for a different file.
+An unchanged `git add` can reuse cached file information without invoking it.
+When Git cleans malformed TOML containing an exact candidate channels block
+for this installation, the filter stops the operation. A candidate inside a
+multiline string is also ambiguous until the TOML is valid. Fix the TOML and
+retry. Checkout preserves malformed tracked configuration byte for byte.
+Restore a missing tracked configuration before installing.
+Installation refuses an incompatible Git driver setting supplied by worktree
+or command configuration. Resolve the reported override and rerun installation.
+
+Use Git in the environment where the client was installed. Git elsewhere,
+such as on the host beside the DevContainer, can fail at this file.
+Programs that read working files see the registration.
+The base's completion checker can flag a client root matching its leak scan,
+and `git archive --worktree-attributes` includes the registration.
+
+The project registration and filter are tied to the installed paths. Uninstall
+with the current installer before moving the project or using `git worktree move`,
+then reinstall at the destination. If you already moved it, move it back, run the
+current installer with `uninstall` at the original location, move it again, and
+reinstall at the destination. To set up a copy, start with a clean checkout
+and install there.
+
+An inline `mcp_servers` table, including `mcp_servers = {}`, cannot take the
+appended channels table. Use regular tables such as `[mcp_servers.other]` for
+existing servers, or remove the empty inline assignment before installing.
+If Git checks out a config with an inline table, the filter preserves its bytes
+and `status` reports the missing registration.
+
+An overlay copy or a hand-resolved conflict can remove the registration.
+Use `status` to check and install again to restore it. `git clean -x` removes
+the local attributes file. Reinstall to keep the lines out of Git again.
+
+Before switching, merging or rebasing to a revision that tracks
+`.codex/.gitattributes` or `.codex/.gitignore`, uninstall the Codex client for
+this project. Git can replace the ignored metadata with the tracked version,
+which can expose the local registration or attributes file to staging or
+remove the registration when Git rewrites the config. For a branch switch,
+`git switch --no-overwrite-ignore <branch>` can refuse an overwrite of these
+ignored files before changing the branch. After the operation, reinstall and
+follow the installation notice about which lines Git can see.
+
+If an abrupt interruption leaves an index lock, follow Git's lock recovery
+guidance once you have verified that no process holds the lock, then retry.
 
 The tool rule and the approval mode record the one consent given at
 installation. Without them a woken session would stop at a permission prompt
@@ -359,7 +435,8 @@ To reinstall after a service upgrade, follow [Updating a client](#updating-a-cli
 
 Uninstall removes exactly what installation added: the callbacks, the tool
 rule, the settings keys or file it created, this root's `channels`
-registration, and the marked Codex line and block. A settings file keeps its
+registration, the marked Codex line and block, and this project's Git filter
+setup. A settings file keeps its
 content, not necessarily its JSON formatting. Unrelated settings, modified
 program files, unknown files and native folder trust stay.
 
@@ -369,7 +446,7 @@ program files, unknown files and native folder trust stay.
   left, including the `channels` registration.
 - **Lost client home.** Uninstall alone cannot remove callbacks whose root and
   ownership record were lost. Reinstall at the same root, then uninstall.
-  This removes the callbacks and registration, but leaves tool rules, empty
+  This removes the callbacks, registration and local Git filter setup, but leaves tool rules, empty
   settings keys and files whose original ownership is unknown. Remove those
   remnants manually after inspecting them.
 - **Concurrent commands.** Installation holds directory locks and leaves no

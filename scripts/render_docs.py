@@ -14,7 +14,7 @@ from tempfile import TemporaryDirectory
 import tomllib
 from unittest.mock import patch
 
-from polyagent_channels import auth, cli, client_config, exchange, harness, identity, membership, persistence, server, setup, stdio_tools
+from polyagent_channels import auth, cli, client_config, codex_git, exchange, harness, identity, membership, persistence, server, setup, stdio_tools
 
 
 SOURCE = Path(__file__).resolve()
@@ -43,7 +43,7 @@ def replace_region(filename, name, content):
 
 
 def definitions():
-    modules = (auth, cli, client_config, exchange, identity, membership, persistence, setup, stdio_tools)
+    modules = (auth, cli, client_config, codex_git, exchange, identity, membership, persistence, setup, stdio_tools)
     values = {module.__name__.rsplit('.', 1)[1] + '.' + name: value
               for module in modules for name, value in vars(module).items() if name.isupper()}
     values.update(compose_defaults())
