@@ -600,6 +600,33 @@ def test_receiver_retries_after_service_failure_without_waking(tmp_path, monkeyp
     assert status == 0 and diagnostic['state'] == 'error' and 'synthetic-secret-detail' not in capsys.readouterr().err
 
 
+@pytest.mark.parametrize('failures, outages', [([True, True, True], 1), ([True, True, False, True, True], 2)])
+def test_receiver_reports_once_per_outage_and_keeps_retries(tmp_path, monkeypatch, capsys, failures, outages):
+    opened(tmp_path)
+    selected = hook_options(tmp_path)
+    selected.session_id = 'native-a'
+    remaining = list(failures)
+    recorded, pauses = [], []
+    original = cli.record_hook
+    def record(options, state):
+        recorded.append(state)
+        original(options, state)
+    def watch(options, key):
+        if remaining.pop(0):
+            raise httpx.ConnectError('synthetic-sensitive-detail')
+        cli.record_hook(options, 'waiting')
+        return [], True
+    monkeypatch.setattr(cli, 'read_secret', lambda path: 'synthetic-key')
+    monkeypatch.setattr(cli, 'receiver_wanted', lambda options, owner: bool(remaining))
+    monkeypatch.setattr(cli, 'watch_once', watch)
+    monkeypatch.setattr(cli, 'record_hook', record)
+    monkeypatch.setattr(cli.time, 'sleep', lambda delay: pauses.append((delay, cli.last_callback(selected)['state'])))
+    status = cli.watch_cycles(selected, False)
+    assert (status, capsys.readouterr().err.splitlines(), recorded, pauses, cli.last_callback(selected)['state']) == (
+        0, ['channel receiver failed: check key, state and service'] * outages,
+        ['error' if failure else 'waiting' for failure in failures], [(15, 'error')] * sum(failures), 'error')
+
+
 def due_notices(directory, *conversations):
     notices = []
     for name in conversations:

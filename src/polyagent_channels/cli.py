@@ -756,6 +756,7 @@ def watch_cycles(options, join_default):
     """Notify about peer messages until no topic is open, the session ends or it no longer applies."""
     owner = receiver_owner(options)
     notify = NOTIFIERS.get(options.client, rewake_claude)
+    in_outage = False
     while receiver_wanted(options, owner):
         try:
             key = read_secret(options.key_file) if join_default or live_topic_paths(options)[0] or remembered_topics(options) else None
@@ -765,9 +766,12 @@ def watch_cycles(options, join_default):
             notices, listening = watch_once(options, key)
         except (httpx.HTTPError, ValueError, OSError):
             record_hook(options, 'error')
-            print('channel receiver failed: check key, state and service', file=sys.stderr)
+            if not in_outage:
+                print('channel receiver failed: check key, state and service', file=sys.stderr)
+            in_outage = True
             time.sleep(ERROR_RETRY_SECONDS)
             continue
+        in_outage = False
         if not listening:
             return 0
         if notices and notify(options, notices):
