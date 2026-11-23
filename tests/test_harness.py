@@ -190,8 +190,19 @@ def test_url_change_explains_how_to_replace_a_shared_address(artifact, tmp_path)
     invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
     changed = invoke(artifact, 'install', *args(tmp_path, 'codex'), '--url', 'http://new.invalid:18765', cwd=tmp_path)
     assert (changed.returncode, changed.stderr.strip()) == (
-        1, 'channel setup failed: Shared URL change: uninstall every project and client using this root, '
+        1, 'channel setup failed: This root uses http://localhost:18765. Install with --url http://localhost:18765 '
+           'to add a project or client to the same service. Shared URL change: uninstall every project and client using this root, '
            'then install with the new --url')
+
+
+def test_saved_address_adds_another_project_after_url_refusal(artifact, tmp_path):
+    invoke(artifact, 'install', *args(tmp_path, 'codex'), cwd=tmp_path)
+    project = project_directory(tmp_path / 'another-project')
+    changed = invoke(artifact, 'install', *args(tmp_path, 'codex', project), '--url', 'http://new.invalid:18765', cwd=tmp_path)
+    added = invoke(artifact, 'install', *args(tmp_path, 'codex', project), cwd=tmp_path)
+    records = json.loads((tmp_path / 'root/install-manifest.json').read_text())['hooks']
+    assert (changed.returncode, '--url http://localhost:18765' in changed.stderr, added.returncode,
+            {record['project'] for record in records}) == (1, True, 0, {str(tmp_path), str(project)})
 
 
 def reinstall_after_lost_root(artifact, tmp_path, synthetic_claude):

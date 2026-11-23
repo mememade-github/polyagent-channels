@@ -604,8 +604,11 @@ def install(options, root, project, git_binding=None, program=None, filter_notic
     archive = canonical_path(root / 'harness.pyz')
     key = canonical_path(root / '.env/channel.key')
     url = service_url(options.url)
-    if config.exists() and read_config(config) != url:
-        raise SetupError('Shared URL change: uninstall every project and client using this root, then install with the new --url')
+    saved_url = read_config(config) if config.exists() else None
+    if saved_url is not None and saved_url != url:
+        raise SetupError(f'This root uses {saved_url}. Install with --url {shlex.quote(saved_url)} '
+                         'to add a project or client to the same service. Shared URL change: uninstall every project '
+                         'and client using this root, then install with the new --url')
     binding = native_binding(project, options.client)
     command = binding_command(root, options.client)
     previous, binding_bytes, created = [], b'', []
