@@ -79,10 +79,10 @@ def definitions():
 def compose_defaults():
     path = ROOT / '.devcontainer/compose.channels.yml'
     content = path.read_text(encoding='utf-8')
-    defaults = dict(re.findall(r'\$\{(\w+):?-([^}]+)\}', content))
+    defaults = dict(re.findall(r'\$\{(\w+):?-([^}]*)\}', content))
     defaults['COMPOSE_PROJECT_NAME'] = re.search(r'^name: (\S+)$', content, re.M)[1]
     defaults['container_port'] = re.search(r'\$\{CHANNEL_PORT[^}]+\}:(\d+)', content)[1]
-    defaults['redis_version'] = re.search(r'image: redis:([^\s]+)-alpine', content)[1]
+    defaults['redis_image'] = re.search(r'image: (redis:\S+)', content)[1]
     defaults['appendfsync'] = re.search(r'"--appendfsync", "([^"]+)"', content)[1]
     return {'compose.' + name: value for name, value in defaults.items()}
 

@@ -39,6 +39,9 @@ services:
       CHANNEL_RETENTION_DAYS: "${CHANNEL_RETENTION_DAYS-7}"
       REDIS_URL: redis://redis:6379/0
       CHANNEL_KEY_FILE: /workspaces/.env/channel.key
+      SKIP_CLAUDE_UPDATE: "${SKIP_CLAUDE_UPDATE:-}"
+      SKIP_CODEX_UPDATE: "${SKIP_CODEX_UPDATE:-}"
+      SKIP_AGY_UPDATE: "${SKIP_AGY_UPDATE:-}"
     ports:
       - "${CHANNEL_BIND:-0.0.0.0}:${CHANNEL_PORT:-18765}:8080"
     volumes: !override

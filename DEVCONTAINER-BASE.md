@@ -21,13 +21,16 @@ base files, preserving the registration when the new configuration accepts it.
 
 The product [Compose file](.devcontainer/compose.channels.yml) extends the base service. It resets the base DNS, interactive terminal and stdin settings and replaces the environment, healthcheck and mounts. This preserves the Channels runtime configuration, including the long-form workspace bind that fails on a missing host path and the Channels healthcheck timing. Base changes to mounts, environment or healthcheck do not reach the product and must be ported. Review any new inherited settings to keep the product runtime stable.
 
+The DNS reset keeps Docker's default resolver. The base's fixed public
+resolvers cannot answer on a closed network.
+
 The build-only service uses the upstream Dockerfile. Its local image is tagged `<IMAGE_NAME>-base/<COMPOSE_PROJECT_NAME>:<IMAGE_TAG>`. Appending `-base/<COMPOSE_PROJECT_NAME>` gives the base a different repository name from the product image and scopes it to the Compose project. Keep the build argument used by `FROM` and the corresponding additional context on the same image reference. [Dockerfile.channels](.devcontainer/Dockerfile.channels) replaces the base's bundled Compose with 2.33.0 to support the service build context. Drop that override once the base bundles a compatible Compose and builder.
 
 The [project rule](.claude/rules/project/polyagent-channels.md) belongs to Channels. Regenerate its mirror using the upstream sync script.
 
 ## Update the pin
 
-Start from a clean product branch at the repository root. Set `upstream` to a separate clone of the base repository and `revision` to the desired tag or commit. Fetch the target in that clone first if necessary. Run this block in Bash with Python 3.12 and Git available.
+Updating the pin requires access to the upstream base repository. Start from a clean product branch at the repository root. Set `upstream` to a separate clone of the base repository and `revision` to the desired tag or commit. Fetch the target in that clone first if necessary. Run this block in Bash with Python 3.12 and Git available.
 
 ```bash
 set -e

@@ -6,13 +6,19 @@ file lists only what a release needs beyond that procedure.
 
 ## Next release
 
-Use `.devcontainer/compose.channels.yml` for [product Compose commands](REFERENCE.md#configuration-devcontainerenv).
-The unmodified base definition at `.devcontainer/docker-compose.yml` starts the
-generic DevContainer service and does not start Channels. Check the
+The product Compose file moves to `.devcontainer/compose.channels.yml`.
+In this release, `.devcontainer/docker-compose.yml` defines the generic
+DevContainer service. Select the product file for each tree using the
+[upgrade and rollback procedure](REFERENCE.md#upgrade-and-rollback). Check the
 [Compose and Buildx requirements](README.md#requirements) before rebuilding.
 The build tags the local base image as
 `<IMAGE_NAME>-base/<COMPOSE_PROJECT_NAME>:<IMAGE_TAG>`, giving it a separate
 repository name from the product image and scoping it to the Compose project.
+
+For a closed-network upgrade, bring the two images and matching release tree
+described in [Operating without internet access](REFERENCE.md#operating-without-internet-access).
+Keep the existing instance settings and set the update-check overrides before
+recreating the container if its network cannot reach the update servers.
 
 [Update the client](REFERENCE.md#updating-a-client) to refresh an existing
 Codex registration. The new registration passes the container's
