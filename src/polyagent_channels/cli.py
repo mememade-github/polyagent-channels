@@ -43,7 +43,6 @@ NOTICE_ATTEMPTS = 3
 LIVE_LEASE_SECONDS = 90
 ACTIVE_LEASE_SECONDS = 600
 PAGE_SIZE = 100
-# One read scans at most this many service pages.
 MAX_SCANNED_PAGES = 50
 
 
