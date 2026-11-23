@@ -1,5 +1,6 @@
 """Exercise the bundled Codex Git integration in disposable repositories."""
 from concurrent.futures import ThreadPoolExecutor
+from importlib.util import find_spec
 import io
 import json
 import os
@@ -1398,6 +1399,8 @@ def test_uninstall_retries_removing_metadata_files(artifact, tmp_path, point, ab
 
 @pytest.mark.parametrize('project_name', ['project', 'project\n'], ids=['ordinary', 'trailing-newline'])
 def test_base_lock_hash_sees_real_edit_with_filter_installed(artifact, tmp_path, project_name):
+    if find_spec('test_devcontainer_base') is None:
+        pytest.skip('test_devcontainer_base is excluded from the source distribution')
     from test_devcontainer_base import working_blob, working_git
 
     project = repository(tmp_path / project_name)
@@ -1413,6 +1416,8 @@ def test_base_lock_hash_sees_real_edit_with_filter_installed(artifact, tmp_path,
 
 
 def test_sha256_clone_passes_pinned_base_lock_with_channel_installed(artifact, tmp_path):
+    if find_spec('test_devcontainer_base') is None:
+        pytest.skip('test_devcontainer_base is excluded from the source distribution')
     from test_devcontainer_base import working_blob, working_git
 
     source = Path(__file__).resolve().parents[1]
