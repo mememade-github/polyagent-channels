@@ -236,8 +236,39 @@ def test_install_refuses_missing_wrapper_from_another_root(artifact, tmp_path):
     original = json.dumps({'hooks': {'SessionStart': [{'hooks': [{'type': 'command', 'command': command}]}]}})
     settings.write_text(original)
     installed = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
-    assert (installed.returncode, installed.stderr.strip(), settings.read_text()) == (
-        1, 'channel setup failed: Ambiguous receiver at SessionStart[0].hooks[0]; inspect manually', original)
+    assert (installed.returncode, installed.stderr.startswith(
+        'channel setup failed: Ambiguous receiver at SessionStart[0].hooks[0]; inspect manually'), settings.read_text()) == (
+        1, True, original)
+
+
+def test_claude_lost_root_refusal_explains_restore_then_move(artifact, tmp_path):
+    project = project_directory(tmp_path / 'project')
+    old = tmp_path / 'old home/client-alt'
+    previous = [*args(tmp_path, project=project), '--target', old]
+    assert invoke(artifact, 'install', *previous, cwd=project).returncode == 0
+    settings = project / '.claude/settings.local.json'
+    before = settings.read_bytes()
+    old.parent.rename(tmp_path / 'saved home')
+    refused = invoke(artifact, 'install', *args(tmp_path, project=project), cwd=project)
+    assert (refused.returncode, shlex.quote(str(old / 'bin/channels')) in refused.stderr,
+            f'install with --target {shlex.quote(str(old))} to restore it, then uninstall there before moving' in refused.stderr,
+            'If this is a Polyagent Channels binding from a missing client root' in refused.stderr,
+            settings.read_bytes()) == (1, True, True, True, before)
+    removed = uninstall_project(artifact, tmp_path, project)
+    assert (removed.returncode, json.loads(removed.stdout)['kept'], settings.read_bytes()) == (0, [], before)
+    for action in ('install', 'uninstall'):
+        result = invoke(artifact, action, *previous, cwd=project)
+        assert result.returncode == 0, result.stderr
+    assert invoke(artifact, 'install', *args(tmp_path, project=project), cwd=project).returncode == 0
+
+
+def test_uninstall_empty_root_reports_nothing_installed(artifact, tmp_path):
+    root = tmp_path / 'root'
+    root.mkdir()
+    result = uninstall_project(artifact, tmp_path, tmp_path)
+    report = json.loads(result.stdout)
+    assert (result.returncode, report['kept'], report['note'], list(root.iterdir())) == (
+        0, [], f'Nothing is installed at {root} for {tmp_path}', [])
 
 
 def failed_claude_install(artifact, tmp_path):

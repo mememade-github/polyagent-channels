@@ -20,7 +20,8 @@ from polyagent_channels.exchange import RECEPTION_TIMEOUT
 from polyagent_channels.identity import MAX_MEMBER_LABEL_BYTES, is_identifier
 
 from polyagent_channels.codex_config import (CODEX_SETTING, SetupError, codex_block, codex_config,
-                                             codex_config_removed, filtered_config, has_registration, is_immediate_unload, parsed_toml)
+                                             codex_config_removed, filtered_config, has_registration, is_immediate_unload,
+                                             missing_root_hint, parsed_toml)
 from polyagent_channels.codex_git import CodexGit, clone, filter_program
 
 NATIVE_TRUST = "Accept the client's own folder trust prompt. Never write native trust records yourself."
@@ -138,7 +139,15 @@ def hook_owner(hook, position, command=None):
     try:
         return managed_binding(hook.get('command', ''))
     except ValueError:
-        raise SetupError(f'Ambiguous receiver at {position}; inspect manually') from None
+        raise SetupError(f'Ambiguous receiver at {position}; inspect manually' + hook_recovery_hint(hook)) from None
+
+
+def hook_recovery_hint(hook):
+    try:
+        words = shlex.split(hook.get('command', ''))
+    except ValueError:
+        return ''
+    return missing_root_hint(words[0]) if words else ''
 
 
 def owned_hooks(data, event, command=None):
@@ -474,7 +483,7 @@ def execute(options):
             common = git_binding.common if git_binding else None
             return install_locked(options, root, project, stack, git_binding if enabled else None, filter_notice, common)
         lock_setup_directories(stack, root, project, git_binding.common if git_binding else None)
-        if not root.is_dir():
+        if not root.is_dir() or not any(root.iterdir()):
             if git_binding and git_binding.has_filter_metadata():
                 raise SetupError(f'The client root {root} is missing and its local Git filter remains. '
                                  f'Reinstall for this project with the same --target {shlex.quote(str(root))}, then uninstall.')

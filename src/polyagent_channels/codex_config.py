@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import shlex
 import sys
 
 try:
@@ -20,6 +21,16 @@ CODEX_ENV_VARS = 'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE"]\n'
 
 class SetupError(ValueError):
     """A diagnostic containing only installer-authored safe text."""
+
+
+def missing_root_hint(command):
+    if not isinstance(command, str):
+        return ''
+    wrapper = Path(command)
+    if not wrapper.is_absolute() or wrapper.parts[-2:] != ('bin', 'channels'):
+        return ''
+    return (f' Found command {shlex.quote(command)}. If this is a Polyagent Channels binding from a missing client root, '
+            f'install with --target {shlex.quote(str(wrapper.parent.parent))} to restore it, then uninstall there before moving.')
 
 
 def codex_block(wrapper):
@@ -56,7 +67,9 @@ def add_registration(content, path, wrapper, *, filtered=False):
     registered = match is not None
     servers = settings.get('mcp_servers', {})
     if not isinstance(servers, dict) or (not registered and 'channels' in servers):
-        raise SetupError('Another Codex channels server is configured in ' + str(path) + '; inspect it')
+        server = servers.get('channels') if isinstance(servers, dict) else None
+        hint = missing_root_hint(server.get('command')) if isinstance(server, dict) else ''
+        raise SetupError('Another Codex channels server is configured in ' + str(path) + '; inspect it' + hint)
     delay = settings.get('thread_unload_delay_secs')
     if delay is not None and not is_immediate_unload(delay):
         raise SetupError('thread_unload_delay_secs in ' + str(path) + ' would keep a closed window running; set it to 0 or remove it')

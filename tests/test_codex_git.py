@@ -4,6 +4,7 @@ from importlib.util import find_spec
 import io
 import json
 import os
+import shlex
 from pathlib import Path
 import shutil
 import subprocess
@@ -1441,6 +1442,32 @@ def test_sha256_clone_passes_pinned_base_lock_with_channel_installed(artifact, t
     path = project / CONFIG
     path.write_bytes(path.read_bytes() + b'\n# genuine change\n')
     assert working_blob(command, project, CONFIG) != lock[CONFIG]
+
+
+def test_codex_lost_root_refusal_explains_restore_then_move(artifact, tmp_path):
+    project = repository(tmp_path / 'project')
+    old = tmp_path / 'old home/client-alt'
+    new = tmp_path / 'new-client'
+    setup(artifact, project, old)
+    path = project / CONFIG
+    before = path.read_bytes()
+    indexed = index_object(project)
+    assignment = git(project, 'check-attr', 'filter', '--', CONFIG).stdout
+    old.parent.rename(tmp_path / 'saved home')
+    refused = setup(artifact, project, new, check=False)
+    assert (refused.returncode, shlex.quote(str(old / 'bin/channels')) in refused.stderr,
+            f'install with --target {shlex.quote(str(old))} to restore it, then uninstall there before moving' in refused.stderr,
+            'If this is a Polyagent Channels binding from a missing client root' in refused.stderr,
+            path.read_bytes(), index_object(project), git(project, 'check-attr', 'filter', '--', CONFIG).stdout) == (
+        1, True, True, True, before, indexed, assignment)
+    removed = setup(artifact, project, new, 'uninstall')
+    assert (json.loads(removed.stdout)['kept'], path.read_bytes()) == ([], before)
+    setup(artifact, project, old)
+    setup(artifact, project, old, 'uninstall')
+    assert (path.read_bytes(), git(project, 'check-attr', 'filter', '--', CONFIG).stdout) == (
+        BASE, f'{CONFIG}: filter: unspecified\n'.encode())
+    setup(artifact, project, new)
+    assert registered(project, new)
 
 
 def test_uninstall_with_different_client_root_keeps_the_active_filter(artifact, tmp_path):
