@@ -1030,6 +1030,15 @@ def test_install_returns_the_selected_clients_next_step(artifact, tmp_path, clie
     assert installed['next_step'] == NEXT_STEP[client]
 
 
+def test_claude_update_explains_resumed_tool_definitions(artifact, tmp_path):
+    assert invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path).returncode == 0
+    assert invoke(artifact, 'uninstall', *args(tmp_path), '--client', 'claude', cwd=tmp_path).returncode == 0
+    updated = invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path)
+    guidance = json.loads(updated.stdout)['next_step']
+    assert (updated.returncode, 'resumed Claude conversation' in guidance,
+            'keeps previously loaded tool definitions' in guidance, 'run /compact there' in guidance) == (0, True, True, True)
+
+
 def test_open_session_receiver_does_not_block_install_of_the_other_client(artifact, tmp_path):
     assert invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path).returncode == 0
     directory = exchange.session_directory(tmp_path / 'root/state', 'listening')
