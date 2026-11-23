@@ -1456,7 +1456,7 @@ def test_codex_lost_root_refusal_explains_restore_then_move(artifact, tmp_path):
     assignment = git(project, 'check-attr', 'filter', '--', CONFIG).stdout
     old.parent.rename(tmp_path / 'saved home')
     refused = setup(artifact, project, new, check=False)
-    assert (refused.returncode, shlex.quote(str(old / 'bin/channels')) in refused.stderr,
+    assert (refused.returncode, f'; inspect it. Found command {shlex.quote(str(old / "bin/channels"))}.' in refused.stderr,
             f'install with --target {shlex.quote(str(old))} to restore it, then uninstall there before moving' in refused.stderr,
             'If this is a Polyagent Channels binding from a missing client root' in refused.stderr,
             path.read_bytes(), index_object(project), git(project, 'check-attr', 'filter', '--', CONFIG).stdout) == (

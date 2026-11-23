@@ -30,7 +30,7 @@ def missing_root_hint(command):
     wrapper = Path(command)
     if not wrapper.is_absolute() or wrapper.parts[-2:] != ('bin', 'channels'):
         return ''
-    return (f' Found command {shlex.quote(command)}. If this is a Polyagent Channels binding from a missing client root, '
+    return (f'. Found command {shlex.quote(command)}. If this is a Polyagent Channels binding from a missing client root, '
             f'install with --target {shlex.quote(str(wrapper.parent.parent))} to restore it, then uninstall there before moving.')
 
 
