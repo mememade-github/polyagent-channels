@@ -16,7 +16,8 @@ FILTERED_BLOCK_START = '# polyagent-channels filter ownership: '
 OWNERSHIP_SHAPES = ((), ('setting',), ('newline',), ('setting', 'newline'))
 CODEX_SETTING = '# polyagent-channels: end the session when its window closes\nthread_unload_delay_secs = 0\n'
 LEGACY_ENV_VARS = 'env_vars = ["CODEX_HOME"]\n'
-CODEX_ENV_VARS = 'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE"]\n'
+PREVIOUS_ENV_VARS = 'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE"]\n'
+CODEX_ENV_VARS = 'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE", "CHANNEL_KEY_FILE", "CHANNEL_STATE_DIR"]\n'
 
 
 class SetupError(ValueError):
@@ -180,7 +181,7 @@ def starts_on_line(content, registered, ending, offset):
 
 def registration_blocks(wrapper):
     block = codex_block(wrapper)
-    return block, block.replace(CODEX_ENV_VARS, LEGACY_ENV_VARS)
+    return block, block.replace(CODEX_ENV_VARS, PREVIOUS_ENV_VARS), block.replace(CODEX_ENV_VARS, LEGACY_ENV_VARS)
 
 
 def registration_candidates(block, created=()):

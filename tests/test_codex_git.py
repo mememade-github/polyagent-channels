@@ -19,7 +19,7 @@ import httpx
 import pytest
 
 from polyagent_channels.cli import client_status
-from polyagent_channels.codex_config import CODEX_SETTING, codex_block, filtered_block
+from polyagent_channels.codex_config import CODEX_ENV_VARS, CODEX_SETTING, codex_block, filtered_block
 from polyagent_channels.codex_git import CodexGit
 from polyagent_channels.setup import hook_binding_status
 from test_harness import artifact
@@ -34,9 +34,8 @@ INLINE_SERVERS = (b'mcp_servers = {}\n', b'mcp_servers = { other = { command = "
 GIT = shutil.which('git')
 
 
-def released_codex_block(wrapper):
-    return codex_block(wrapper).replace(
-        'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE"]', 'env_vars = ["CODEX_HOME"]')
+def released_codex_block(wrapper, environment='env_vars = ["CODEX_HOME"]\n'):
+    return codex_block(wrapper).replace(CODEX_ENV_VARS, environment)
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +107,9 @@ def registered(project, root):
 
 
 @pytest.mark.parametrize('tracked', [False, True])
-def test_reinstall_updates_owned_old_codex_block_with_current_archive(artifact, tmp_path, tracked):
+@pytest.mark.parametrize('environment', ['env_vars = ["CODEX_HOME"]\n',
+                                        'env_vars = ["CODEX_HOME", "SKIP_CODEX_UPDATE"]\n'])
+def test_reinstall_updates_owned_old_codex_block_with_current_archive(artifact, tmp_path, tracked, environment):
     project = tmp_path / 'project'
     base = BASE.replace(b'\n', b'\r\n')
     if tracked:
@@ -121,7 +122,7 @@ def test_reinstall_updates_owned_old_codex_block_with_current_archive(artifact, 
     current = path.read_bytes()
     wrapper = root / 'bin/channels'
     block = codex_block(wrapper)
-    legacy = released_codex_block(wrapper)
+    legacy = released_codex_block(wrapper, environment)
     if tracked:
         block = filtered_block(block, ('setting',))
         legacy = filtered_block(legacy, ('setting',))
@@ -135,7 +136,7 @@ def test_reinstall_updates_owned_old_codex_block_with_current_archive(artifact, 
     server = tomllib.loads(updated.decode())['mcp_servers']['channels']
     setup(root / 'harness.pyz', project, root, 'uninstall')
     assert (status, updated, server.get('env_vars'), path.read_bytes()) == (
-        'installed', current, ['CODEX_HOME', 'SKIP_CODEX_UPDATE'], base)
+        'installed', current, ['CODEX_HOME', 'SKIP_CODEX_UPDATE', 'CHANNEL_KEY_FILE', 'CHANNEL_STATE_DIR'], base)
 
 
 def test_reinstall_repairs_mixed_endings_with_released_plain_block(artifact, tmp_path):
