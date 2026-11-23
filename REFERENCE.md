@@ -882,31 +882,38 @@ home directory through a bind mount, so run the procedure where the Docker
 daemon can bind that directory, such as Docker Desktop on the same computer. On a Linux host the archive belongs to root.
 
 Record the running release commit (from the handoff for a carried tree) and
-keep its tree and env file for rollback. Review the target's release-specific
-steps in [UPGRADING.md](UPGRADING.md). Prepare the target in a separate
-directory while the running tree and service stay available. For a Git
-checkout, fetch tags on the connected host and check out the target release
-in a separate checkout. For a carried release, stage the supplied tree
-matching the image archive. A source export needs no Git metadata.
+save its env file separately for rollback. Keep the old export tree if you
+are upgrading from an export. Review the target's release-specific steps in
+[UPGRADING.md](UPGRADING.md).
+
+For a Git checkout, fetch tags on the connected host. Confirm
+`git status --short` is empty and
+`git rev-parse --verify "<target-commit>^{commit}"` succeeds in the live checkout.
+Fetch or transfer missing Git objects while preparing the release; an image
+archive does not supply them. Run `git checkout "<target-commit>"` at the
+**same live workspace path** while the old containers stay running.
+
+For a source export, stage the supplied target tree in a separate directory
+while the running tree and service stay available. For a carried release,
+use the tree matching the image archive. A source export needs no Git metadata.
 
 Prepare the target `.devcontainer/.env` with the existing instance settings
 and any release-specific changes. Set `HOST_WORKSPACE_PATH` to the absolute
-path of the **live** workspace as seen by the Docker daemon. The separate
-directory provides the build context. Inspect both configurations before
+path of the **live** workspace as seen by the Docker daemon. Run the following
+config, build and stop commands from the target tree, which is the live Git
+checkout or the staged export. Inspect the target configuration before
 tagging or preparing images:
 
 ```bash
-# From the running release tree
-docker compose --env-file .devcontainer/.env -f "<old-compose-file>" config
-# From the staged target tree
 docker compose --env-file .devcontainer/.env -f "<target-compose-file>" config
 ```
 
-Confirm that both configurations use the project `name`, `container_name`,
-workspace bind `source`, published address and port, and Redis and agent
-volume names of the running instance (`docker inspect polyagent-channels polyagent-channels-redis-1`).
-Record the old image references for rollback and confirm the target image
-references match the intended build or archive.
+Confirm that the target configuration uses the project `name`, service names,
+`container_name`, workspace bind `source`, published address and port, and
+Redis and agent volume names of the running instance
+(`docker inspect polyagent-channels polyagent-channels-redis-1`).
+Record the old image references (`Config.Image` in that inspection) for rollback
+and confirm the target image references match the intended build or archive.
 
 Tag the images from the running containers before a build or load can replace
 their tags. The saved Redis image supplies `sh` and `tar` for backup and restore.
@@ -916,7 +923,7 @@ docker image tag $(docker inspect -f '{{.Image}}' polyagent-channels) polyagent-
 docker image tag $(docker inspect -f '{{.Image}}' polyagent-channels-redis-1) polyagent-channels-redis:previous
 ```
 
-On a connected host, build from the staged target tree, then pull the Redis
+On a connected host, build from the target tree, then pull the Redis
 image named in the target configuration:
 
 ```bash
@@ -932,29 +939,23 @@ docker load -i "${HOME}/channels-images.tar"
 ```
 
 Use `docker image inspect "<target-service-image>" "<target-redis-image>"`
-to confirm both configured target images are present. For a live Git checkout,
-confirm `git status --short` is empty and
-`git rev-parse --verify "<target-commit>^{commit}"` succeeds there before stopping.
-Fetch or transfer missing Git objects while preparing the release; an image
-archive does not supply them. Save any agent state described above
-before stopping. From the still-live old tree, stop and back up the data
-volume:
+to confirm both configured target images are present. Save any agent state
+described above before stopping. From the target tree, stop and back up the
+data volume:
 
 ```bash
-docker compose --env-file .devcontainer/.env -f "<old-compose-file>" stop
+docker compose --env-file .devcontainer/.env -f "<target-compose-file>" stop
 docker run --rm --entrypoint sh --network none --pull never -v polyagent-channels_channel-data:/data:ro -v "${HOME}:/backup" polyagent-channels-redis:previous -c 'umask 077 && touch /backup/channel-data-previous.tgz && chmod 600 /backup/channel-data-previous.tgz && tar czf /backup/channel-data-previous.tgz -C /data . && tar tzf /backup/channel-data-previous.tgz > /dev/null && echo backup ok'
 ```
 
-Switch the release at the **same live workspace path**. For Git, check out the
-prepared target commit in the live checkout. For source exports, move the old
-tree aside and put the staged export at the original path. Preserve the
-workspace's local files, including the entire `.env/` directory and
-`.env/channel.key`. Save the old
-`.devcontainer/.env` separately and install the prepared target env file in
+For source exports, move the old tree aside and put the staged export at the
+original path. Preserve the workspace's local files, including the entire
+`.env/` directory and `.env/channel.key`. Use the prepared target env file in
 the live tree. Keep the existing Redis and agent volumes.
 
-From the live target tree, rerun its `config` command and confirm the runtime
-settings match those inspected before cutover. Then start:
+For source exports, rerun the target `config` command from the live tree and
+confirm the runtime settings match those inspected before cutover. Start from
+the live target tree:
 
 ```bash
 docker compose --env-file .devcontainer/.env -f "<target-compose-file>" up -d --no-build --pull never
@@ -982,12 +983,13 @@ to start it:
 docker compose --env-file .devcontainer/.env -f "<target-compose-file>" stop
 ```
 
-Put the saved old release tree and env file back at the live path, using the
-same Git or export procedure and keeping the workspace files and volumes.
-From that tree, rerun the old `config` command and verify it before retagging
+At the live path, check out the recorded Git commit or put the saved old
+export tree back, keeping the workspace files and volumes. Restore the saved
+old env file there. From that tree, run `config` and verify it before retagging
 the saved images to the old references recorded above:
 
 ```bash
+docker compose --env-file .devcontainer/.env -f "<old-compose-file>" config
 docker image tag polyagent-channels:previous "<old-service-image>"
 docker image tag polyagent-channels-redis:previous "<old-redis-image>"
 ```
