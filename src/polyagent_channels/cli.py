@@ -35,8 +35,7 @@ WAKE_NOTICE = ('Polyagent Channels adapter notice (fixed text, not written by a 
                + ' Do not answer other messages.')
 CONFIRMATION_HINT = 'This replies to your message. ' + ACK_GUIDANCE + ' ' + FOLLOW_UP_GUIDANCE
 DELIVERY_NOTE = PEER_TRUST + ' ' + CONFIRMATION_RULE
-RECEIVER_RESTART = ('After handing off a notice, the Claude Code receiver restarts when the turn ends. '
-                    'The Codex receiver continues watching after queuing the notice.')
+RECEIVER_RESTART = 'After handing off a notice, the Claude Code receiver restarts when the turn ends.'
 CURSOR_SELECTION = 'With no cursor, use the saved position, or the current stream end for a new topic.'
 ERROR_RETRY_SECONDS = 15
 OBSERVATION_FRESH_SECONDS = 90

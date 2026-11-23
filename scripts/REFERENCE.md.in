@@ -462,7 +462,7 @@ treats the notice as trusted input. Claude Code gets it through an
 `asyncRewake` hook exiting with code 2, Codex through `codex queue`.
 
 When a receiver exits after handing off a notice, it announces `active` for up
-to {{cli.ACTIVE_LEASE_SECONDS}} seconds and records `notified` locally. {{cli.RECEIVER_RESTART}} Failure to renew the announcement does not prevent
+to {{cli.ACTIVE_LEASE_SECONDS}} seconds and records `notified` locally. {{cli.RECEIVER_RESTART}} The Codex receiver continues watching after queuing the notice. Failure to renew the announcement does not prevent
 the wake-up, and a turn longer than the lease can disappear from `peers`.
 
 The woken model follows the [agent message-handling policy](#agent-tools).
