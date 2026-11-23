@@ -849,8 +849,8 @@ the root of the tree named in each step. Stop at the first error. Replace
 
 | Release tree | Product Compose file |
 |--------------|----------------------|
-| Current release with the DevContainer base split | `.devcontainer/compose.channels.yml` |
-| Earlier 0.1.x releases from 0.1.2 onward | `.devcontainer/docker-compose.yml` |
+| 0.2.0 | `.devcontainer/compose.channels.yml` |
+| 0.1.2–0.1.7 | `.devcontainer/docker-compose.yml` |
 
 For upgrades from 0.1.1 or earlier, see the [0.1.2 migration](UPGRADING.md#012).
 The commands assume the [Compose defaults](.devcontainer/compose.channels.yml).

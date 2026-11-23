@@ -4,7 +4,9 @@ The procedure, backup and rollback are in
 [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback). This
 file lists only what a release needs beyond that procedure.
 
-## Next release
+## 0.2.0
+
+### Upgrading from 0.1.x
 
 The product Compose file moves to `.devcontainer/compose.channels.yml`.
 In this release, `.devcontainer/docker-compose.yml` defines the generic
