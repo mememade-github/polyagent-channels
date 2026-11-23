@@ -70,6 +70,8 @@ replace the image the other runs and rolls back to.
 | `IMAGE_NAME` | `{{compose.IMAGE_NAME}}` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
 | `IMAGE_TAG` | `{{compose.IMAGE_TAG}}` | Service image tag |
 | `HOST_WORKSPACE_PATH` | `{{compose.HOST_WORKSPACE_PATH}}` | Repository path relative to the Compose file, as the Docker daemon sees it; set only when that differs |
+| `TZ` | `{{compose.TZ}}` | Service process timezone |
+| `PROJECT_NODE_VERSION` | `"{{compose.PROJECT_NODE_VERSION}}"` | Optional project Node.js version installed when building the base image |
 | `CHANNEL_RETENTION_DAYS` | `{{compose.CHANNEL_RETENTION_DAYS}}` | Nonnegative integer; see [Retention](#persistence-and-limits) for disabling age expiration |
 | `CHANNEL_MAX_STORAGE_BYTES` | `{{compose.CHANNEL_MAX_STORAGE_BYTES}}` | {{storage.validation}}; [Byte cap](#persistence-and-limits) defines what it counts |
 | `CHANNEL_LOG_MAX_SIZE` | `{{compose.CHANNEL_LOG_MAX_SIZE}}` | Docker `local` log segment size for both services |

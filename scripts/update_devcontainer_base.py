@@ -9,13 +9,12 @@ import sys
 LOCK_PATH = Path("devcontainer-base.lock.json")
 SHARED_PATHS = {
     ".devcontainer/devcontainer.json": (
-        "Keep the product workspace and service settings and select `compose.channels.yml`. Keep "
-        "`initializeCommand` so Create/Reopen builds the base before the service. Review upstream "
-        "lifecycle changes for any setup the product needs."
+        "Review upstream settings against [DevContainer settings](#devcontainer-settings)."
     ),
     ".devcontainer/.env.example": (
-        "Keep the product override form. Review any upstream variables the product needs and document "
-        "their effective defaults in the product Compose file and reference."
+        "Keep the product override form. Review upstream variables against "
+        "[Base environment inputs](#base-environment-inputs) and derive effective defaults in the "
+        "reference from product Compose."
     ),
     ".gitignore": (
         "Replace its upstream prefix with the new upstream blob, then retain the product block. Use the "

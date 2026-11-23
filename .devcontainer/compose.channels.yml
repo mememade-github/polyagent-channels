@@ -13,6 +13,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        PROJECT_NODE_VERSION: "${PROJECT_NODE_VERSION:-}"
     scale: 0
   polyagent-channels:
     extends:
@@ -26,14 +28,16 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile.channels
-      args:
+      args: !override
         BASE_IMAGE: ${IMAGE_NAME:-polyagent-channels-polyagent-channels}-base/${COMPOSE_PROJECT_NAME}:${IMAGE_TAG:-latest}
       additional_contexts:
         - ${IMAGE_NAME:-polyagent-channels-polyagent-channels}-base/${COMPOSE_PROJECT_NAME}:${IMAGE_TAG:-latest}=service:devcontainer-base
+        - ${IMAGE_NAME:-polyagent-channels-polyagent-channels}-base/${COMPOSE_PROJECT_NAME}=service:devcontainer-base
     init: true
     user: vscode
     working_dir: /workspaces
     environment: !override
+      TZ: "${TZ:-UTC}"
       CHANNEL_URL: http://127.0.0.1:8080
       CHANNEL_MAX_STORAGE_BYTES: "${CHANNEL_MAX_STORAGE_BYTES-1073741824}"
       CHANNEL_RETENTION_DAYS: "${CHANNEL_RETENTION_DAYS-7}"

@@ -77,6 +77,8 @@ replace the image the other runs and rolls back to.
 | `IMAGE_NAME` | `polyagent-channels-polyagent-channels` | Service image name the build tags; the rollback in [Upgrade and rollback](#upgrade-and-rollback) retags it |
 | `IMAGE_TAG` | `latest` | Service image tag |
 | `HOST_WORKSPACE_PATH` | `..` | Repository path relative to the Compose file, as the Docker daemon sees it; set only when that differs |
+| `TZ` | `UTC` | Service process timezone |
+| `PROJECT_NODE_VERSION` | `""` | Optional project Node.js version installed when building the base image |
 | `CHANNEL_RETENTION_DAYS` | `7` | Nonnegative integer; see [Retention](#persistence-and-limits) for disabling age expiration |
 | `CHANNEL_MAX_STORAGE_BYTES` | `1073741824` | CHANNEL_MAX_STORAGE_BYTES must be a positive integer <= 9007199254740991; [Byte cap](#persistence-and-limits) defines what it counts |
 | `CHANNEL_LOG_MAX_SIZE` | `10m` | Docker `local` log segment size for both services |
