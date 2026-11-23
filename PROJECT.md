@@ -29,7 +29,3 @@ See [Configuration](REFERENCE.md#configuration-devcontainerenv), [Shared key](RE
 - **GitHub** (origin): `mememade-github/polyagent-channels`
 - **Attribution**: [README.md § License & attribution](README.md#license--attribution)
 - **Package**: [pyproject.toml](pyproject.toml); [MANIFEST.in](MANIFEST.in) lists source-distribution files
-
----
-
-*Last updated: 2026-11-19*

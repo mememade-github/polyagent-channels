@@ -35,7 +35,7 @@ def max_storage_bytes():
     return int(value)
 
 
-# configure_storage() replaces these from the environment when the service starts; importing reads nothing.
+# Import loads the bundled Lua script. configure_storage() reads the environment and creates the Redis client at startup.
 MAX_STORAGE_BYTES = DEFAULT_MAX_STORAGE_BYTES
 LIFECYCLE = files('polyagent_channels').joinpath('lifecycle.lua').read_text(encoding='utf-8')
 STORAGE_KEYS = ('channels:heads', 'channels:bytes', 'channels:version', 'channels:clock')
@@ -68,7 +68,7 @@ def configure_storage():
 
 
 def storage_address():
-    """Connection target exactly as configured: no library defaults, and never credentials."""
+    """Display the Redis target without credentials, using database 0 if none is specified."""
     settings = redis.connection_pool.connection_kwargs
     database = settings.get('db', 0)
     if 'path' in settings:

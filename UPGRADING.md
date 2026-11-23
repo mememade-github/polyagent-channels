@@ -11,9 +11,6 @@ In this release, `.devcontainer/docker-compose.yml` defines the generic
 DevContainer service. Select the product file for each tree using the
 [upgrade and rollback procedure](REFERENCE.md#upgrade-and-rollback). Check the
 [Compose and Buildx requirements](README.md#requirements) before rebuilding.
-The build tags the local base image as
-`<IMAGE_NAME>-base/<COMPOSE_PROJECT_NAME>:<IMAGE_TAG>`, giving it a separate
-repository name from the product image and scoping it to the Compose project.
 
 For a closed-network upgrade, bring the two images and matching release tree
 described in [Operating without internet access](REFERENCE.md#operating-without-internet-access).

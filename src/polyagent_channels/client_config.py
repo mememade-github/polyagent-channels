@@ -10,7 +10,7 @@ SESSION_RESTART = 'Start a new session in this project'
 
 
 def default_root():
-    """The client root, read when a command runs: CHANNEL_ROOT, else ~/.local/share/polyagent-channels."""
+    """Resolve the client root at call time."""
     return Path(os.environ.get('CHANNEL_ROOT') or Path.home() / DEFAULT_ROOT).expanduser().absolute()
 
 

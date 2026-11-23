@@ -91,7 +91,7 @@ def claude_session(options, params):
 
 
 def codex_session(options, params):
-    """Codex 0.167 sends the thread with every tool call; a missing value fails the call visibly."""
+    """Require params['_meta']['threadId']. Missing metadata keys produce a tool error."""
     return params['_meta']['threadId']
 
 

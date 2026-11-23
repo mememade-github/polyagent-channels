@@ -38,7 +38,7 @@ Keep changes within the requested scope and avoid unrelated cleanup. State assum
 
 Use explicit failures and clear error boundaries. Keep secrets out of tracked files, logs and messages. Read the README for public use and [REFERENCE.md](../../../REFERENCE.md) for operating constraints. Use isolated synthetic test data; clean only resources owned by the test. Run checks appropriate to the changed behavior and report actual commands, results and limitations. Documentation work alone does not authorize source refactoring.
 
-The supplied guide below translates every supplied item into English by meaning, retaining the code-smell and solution IDs and every Clean Code category; references replace repeated rules. It is not a claim that current source mechanically satisfies every item. When an item conflicts with a required library interface or minimal standard idiom, surface the specific conflict and its consequences for resolution within the task's authorized scope; do not assume a blanket waiver or silently redefine the item.
+The supplied code guide is not a claim that current source mechanically satisfies every item. When an item conflicts with a required library interface or minimal standard idiom, surface the specific conflict and its consequences for resolution within the task's authorized scope; do not assume a blanket waiver or silently redefine the item.
 
 ## Licensing and attribution
 

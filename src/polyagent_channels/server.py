@@ -62,7 +62,6 @@ to names a recipient and has the same limit as sender. Optional reply_to referen
 retained history in this channel/conversation. conversation_id
 defaults to {DEFAULT_CONVERSATION}. Message fields are session_id,sender,channel,
 conversation_id,text,reply_to,to,id,cursor; absent to is null when reading.
-Existing agent_id/history stay readable.
 Rows missing identity/conversation fields remain readable without a conversation
 filter; absent session_id,agent_id,conversation_id are null. Missing conversation_id
 excludes a row from filtered reads and reply targets; missing identity alone does

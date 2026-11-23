@@ -952,7 +952,7 @@ def is_generated_lock(path):
 
 
 def is_generated_session_file(path):
-    """Recognize only files this product can prove it wrote; anything else in a session folder belongs to someone else."""
+    """Recognize session files by their expected names, paths and contents."""
     from polyagent_channels.exchange import read_state
 
     if path.is_symlink() or not path.is_file():

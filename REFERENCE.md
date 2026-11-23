@@ -515,7 +515,7 @@ treats the notice as trusted input. Claude Code gets it through an
 `asyncRewake` hook exiting with code 2, Codex through `codex queue`.
 
 When a receiver exits after handing off a notice, it announces `active` for up
-to 600 seconds and records `notified` locally. The background receiver restarts when the turn ends. Failure to renew the announcement does not prevent
+to 600 seconds and records `notified` locally. After handing off a notice, the Claude Code receiver restarts when the turn ends. The Codex receiver continues watching after queuing the notice. Failure to renew the announcement does not prevent
 the wake-up, and a turn longer than the lease can disappear from `peers`.
 
 The woken model follows the [agent message-handling policy](#agent-tools).
@@ -552,7 +552,7 @@ receiver's first notice before it answers and does not exit while the receiver l
 | New session left idle | Follow the [client-specific next step](#client-installation) | — |
 | After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
 | Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
-| Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn; listens again after it |
+| Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn |
 | `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and [Reception](#reception) applies to the new session | — |
 | Wake-up delay | A few seconds | Within about 10 seconds when the session runs without the shared background server. `status` reports `notify_failed` while `codex queue` keeps failing |
 
@@ -634,9 +634,9 @@ Follow the returned `next_action`:
 | `hook_invalid` | The native binding differs from its record or cannot be read | This project/client binding differs from its installation record or cannot be read. Inspect the reported file. Download the installer following &lt;service-url&gt;/help for this project/client. Reuse the existing protected key. Start a new session in this project. |
 | `not_open` | No topic is listening | No topic is listening in this session. To listen here, run connect for the topic; a saved position is kept. |
 | `hook_unobserved` | No receiver has reported for this listening session | Installed, but no background receiver has been observed for this session yet. If it stays unobserved: Start a new session in this project. |
-| `notified` | A notice was handed to this session within 600 seconds | A notification was handed to this session. The background receiver restarts when the turn ends. |
+| `notified` | A notice was handed to this session within 600 seconds | A notification was handed to this session. After handing off a notice, the Claude Code receiver restarts when the turn ends. The Codex receiver continues watching after queuing the notice. |
 | `waiting` | A receiver reported waiting within 90 seconds | A background receiver is listening. Finish your turn; a peer message wakes this session and is read with the receive command. |
-| `callback_stale` | The report is older than 90 seconds (600 for notified), or its timestamp is invalid | The background receiver report is stale or has an invalid timestamp. The background receiver restarts when the turn ends. If it stays stale while idle: Start a new session in this project. |
+| `callback_stale` | The report is older than 90 seconds (600 for notified), or its timestamp is invalid | The background receiver report is stale or has an invalid timestamp. If it stays stale while idle: Start a new session in this project. |
 | `callback_observed` | A recent report other than waiting, such as error or notify_failed | The background receiver reported notify_failed. Check the service, key and the last callback state if this persists. |
 
 Derived from [cli.command_parser, reception_status and callback_reception](src/polyagent_channels/cli.py).
@@ -665,7 +665,6 @@ to names a recipient and has the same limit as sender. Optional reply_to referen
 retained history in this channel/conversation. conversation_id
 defaults to main. Message fields are session_id,sender,channel,
 conversation_id,text,reply_to,to,id,cursor; absent to is null when reading.
-Existing agent_id/history stay readable.
 Rows missing identity/conversation fields remain readable without a conversation
 filter; absent session_id,agent_id,conversation_id are null. Missing conversation_id
 excludes a row from filtered reads and reply targets; missing identity alone does
@@ -795,8 +794,8 @@ An absent storage version takes this path at startup.
 ## Operating without internet access
 
 On a connected host, check out the release to ship and prepare the destination
-[env file](#configuration-devcontainerenv). Build with Compose 2.33.0 or later
-and, on current Compose releases, the Buildx plugin. Use the destination's
+[env file](#configuration-devcontainerenv). Follow the
+[build requirements](README.md#requirements). Use the destination's
 `IMAGE_NAME` and `IMAGE_TAG` in the build and save the two runtime images
 together. These commands use the Compose defaults. Save the archive in your
 home directory outside the checkout so it stays accessible when switching
@@ -812,9 +811,9 @@ Carry the archive, the matching release commit ID and tree
 (including `.devcontainer/`), and `.devcontainer/.env`. Keep the env file
 private. Place the archive at `${HOME}/channels-images.tar` on the destination,
 outside the release tree. Adjust `HOST_WORKSPACE_PATH` if needed and retain
-the image names and tags in the archive. Runtime requires Compose 2.24.4 or
-later. Compose can start with 2.24.3 but it inherits the base's `TZ` and
-healthcheck `start_period`. The runtime needs only the two carried images.
+the image names and tags in the archive. Check the
+[requirements for running loaded images](README.md#requirements). The runtime
+needs only the two carried images.
 
 For a new instance, run these commands from the matching release tree.
 For an existing instance, use [Upgrade and rollback](#upgrade-and-rollback)
@@ -836,12 +835,11 @@ Use the running service's [client installation](#client-installation) and
 Set `SKIP_CLAUDE_UPDATE=1`, `SKIP_CODEX_UPDATE=1` and `SKIP_AGY_UPDATE=1`
 in `.devcontainer/.env` before startup to skip the checks described in
 [Configuration](#configuration-devcontainerenv). Unset or empty values
-keep the checks and updates enabled. In isolated runs with checks enabled,
-startup took about 80–86 seconds with no outbound route and about 596 seconds
-with silently dropped packets. With all three skips set, HTTP responded after
-about 6–7 seconds. A Codex wake command through the base launcher timed out
-after 60 seconds during the update check. These timings are observations;
-they vary with the network and installed CLIs.
+keep the checks and updates enabled. If the update servers are unreachable,
+startup waits for the enabled checks in sequence before starting the service.
+That wait can exceed a minute and can stretch to about ten minutes if packets
+are silently dropped. A Codex session wake can hit its 60-second timeout
+during the launcher update check.
 
 ## Upgrade and rollback
 
@@ -1015,9 +1013,9 @@ docker compose --env-file .devcontainer/.env -f "<old-compose-file>" up -d --no-
 
 See the [upstream lifecycle reference](https://github.com/mememade-github/polyagent-devcontainer/blob/361bbab27bfe903f3744249a5442f7261fe4c874/REFERENCE.md#devcontainer-lifecycle) for the base.
 Create/Reopen (or `devcontainer up`) uses `initializeCommand` to build the
-local base image before building the Channels service. Bare `devcontainer build`
-in CLI 0.90.0 skips initialization and fails on a cold checkout without the
-local base image. Run this from the repository root before that command:
+local base image before building the Channels service. A direct
+`devcontainer build` requires the local base image to be built first. If the
+image is missing, run this from the repository root:
 
 ```bash
 docker compose --env-file .devcontainer/.env -f .devcontainer/compose.channels.yml build devcontainer-base

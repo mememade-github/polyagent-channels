@@ -35,7 +35,8 @@ WAKE_NOTICE = ('Polyagent Channels adapter notice (fixed text, not written by a 
                + ' Do not answer other messages.')
 CONFIRMATION_HINT = 'This replies to your message. ' + ACK_GUIDANCE + ' ' + FOLLOW_UP_GUIDANCE
 DELIVERY_NOTE = PEER_TRUST + ' ' + CONFIRMATION_RULE
-RECEIVER_RESTART = 'The background receiver restarts when the turn ends.'
+RECEIVER_RESTART = ('After handing off a notice, the Claude Code receiver restarts when the turn ends. '
+                    'The Codex receiver continues watching after queuing the notice.')
 CURSOR_SELECTION = 'With no cursor, use the saved position, or the current stream end for a new topic.'
 ERROR_RETRY_SECONDS = 15
 OBSERVATION_FRESH_SECONDS = 90
@@ -43,7 +44,7 @@ NOTICE_ATTEMPTS = 3
 LIVE_LEASE_SECONDS = 90
 ACTIVE_LEASE_SECONDS = 600
 PAGE_SIZE = 100
-# One read scans at most this many service pages, so a long backlog cannot outlast the tool call timeout.
+# One read scans at most this many service pages.
 MAX_SCANNED_PAGES = 50
 
 
@@ -634,8 +635,8 @@ def callback_reception(result, callback, age):
         return result
     if not fresh:
         result.update(callback_observation='callback_stale', reception='callback_stale',
-                      next_action='The background receiver report is stale or has an invalid timestamp. ' + RECEIVER_RESTART
-                      + ' If it stays stale while idle: ' + SESSION_RESTART + '.')
+                      next_action='The background receiver report is stale or has an invalid timestamp. '
+                      'If it stays stale while idle: ' + SESSION_RESTART + '.')
         return result
     if callback.get('state') == 'waiting':
         result.update(reception='waiting', next_action='A background receiver is listening. Finish your turn; '

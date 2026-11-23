@@ -6,7 +6,7 @@ Before exposing the service, read [Network exposure](REFERENCE.md#network-exposu
 
 ## Requirements
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with Compose 2.24.4 or later to run the loaded images [without internet access](REFERENCE.md#operating-without-internet-access). Building requires internet access and Compose 2.33.0 or later. Current Compose releases also require the Buildx plugin for additional build contexts.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine. Building requires internet access and Compose 2.33.0 or later. Current Compose releases also require the Buildx plugin for additional build contexts. Running the loaded images [without internet access](REFERENCE.md#operating-without-internet-access) requires Compose 2.24.4 or later.
 - Client prerequisites are in the [first-connection procedure](REFERENCE.md#client-installation), served at `/help`.
 
 ## Quick start

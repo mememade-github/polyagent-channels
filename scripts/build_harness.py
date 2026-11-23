@@ -1,4 +1,4 @@
-"""Build only the client allowlist and pinned pure-Python dependency records."""
+"""Build the client archive with pinned pure-Python dependencies."""
 import argparse
 import importlib.metadata as metadata
 import re
