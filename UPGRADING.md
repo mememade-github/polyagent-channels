@@ -4,6 +4,19 @@ The procedure, backup and rollback are in
 [REFERENCE.md § Upgrade and rollback](REFERENCE.md#upgrade-and-rollback). This
 file lists only what a release needs beyond that procedure.
 
+## 0.2.1
+
+### Upgrading from 0.2.0
+
+[Update each Codex client](REFERENCE.md#updating-a-client) to forward
+`CHANNEL_KEY_FILE` and `CHANNEL_STATE_DIR` to its tools and receiver.
+Upgrading the service alone leaves the registration's old variable list in place.
+
+Before downgrading a Codex client to 0.2.0,
+[uninstall it with its installed harness](REFERENCE.md#uninstall), then
+[install the 0.2.0 client](REFERENCE.md#client-installation). The 0.2.0 installer
+refuses this release's registration, and its uninstaller leaves it behind.
+
 ## 0.2.0
 
 ### Upgrading from 0.1.x
