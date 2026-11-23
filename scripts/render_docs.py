@@ -1,4 +1,4 @@
-"""Render the marked operator-document regions from runtime definitions and Compose."""
+"""Render the marked document regions from runtime, Compose and maintenance definitions."""
 import argparse
 import ast
 from contextlib import redirect_stdout
@@ -8,6 +8,7 @@ import inspect
 import os
 from pathlib import Path
 import re
+import runpy
 import sys
 import stat
 from tempfile import TemporaryDirectory
@@ -29,7 +30,14 @@ def rendered_documents():
     return {
         ROOT / 'REFERENCE.md': replace_region('REFERENCE.md', 'reference', reference),
         ROOT / 'UPGRADING.md': replace_region('UPGRADING.md', 'name', values['help.name_required']),
+        ROOT / 'DEVCONTAINER-BASE.md': replace_region('DEVCONTAINER-BASE.md', 'shared paths', shared_paths_table()),
     }
+
+
+def shared_paths_table():
+    importer = runpy.run_path(str(SOURCE.with_name('update_devcontainer_base.py')))
+    rows = [f'| `{path}` | {guidance} |' for path, guidance in importer['SHARED_PATHS'].items()]
+    return '\n'.join(['| Path | What to carry forward |', '| --- | --- |', *rows])
 
 
 def replace_region(filename, name, content):

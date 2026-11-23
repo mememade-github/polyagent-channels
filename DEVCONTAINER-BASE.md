@@ -8,6 +8,7 @@ base files, preserving the registration when the new configuration accepts it.
 
 ## Shared paths
 
+<!-- generated: shared paths -->
 | Path | What to carry forward |
 | --- | --- |
 | `.devcontainer/devcontainer.json` | Keep the product workspace and service settings and select `compose.channels.yml`. Keep `initializeCommand` so Create/Reopen builds the base before the service. Review upstream lifecycle changes for any setup the product needs. |
@@ -18,6 +19,7 @@ base files, preserving the registration when the new configuration accepts it.
 | `PROJECT.md` | Keep product context and the pointer to the product rule for clients that load project context. Review any changed base session-start requirements. |
 | `REFERENCE.md` | Keep product commands and a link to the upstream lifecycle section at the new pin. Edit the [rendering template](scripts/REFERENCE.md.in) and regenerate the reference. |
 | `UPGRADING.md` | Keep product release-specific steps. Add actions operators need when an upstream update affects them. |
+<!-- end generated: shared paths -->
 
 The product [Compose file](.devcontainer/compose.channels.yml) extends the base service. It resets the base DNS, interactive terminal and stdin settings and replaces the environment, healthcheck and mounts. This preserves the Channels runtime configuration, including the long-form workspace bind that fails on a missing host path and the Channels healthcheck timing. Base changes to mounts, environment or healthcheck do not reach the product and must be ported. Review any new inherited settings to keep the product runtime stable.
 
@@ -30,38 +32,54 @@ The [project rule](.claude/rules/project/polyagent-channels.md) belongs to Chann
 
 ## Update the pin
 
-Updating the pin requires access to the upstream base repository. Start from a clean product branch at the repository root. Set `upstream` to a separate clone of the base repository and `revision` to the desired tag or commit. Fetch the target in that clone first if necessary. Run this block in Bash with Python 3.12 and Git available.
+Updating the pin requires access to the upstream base repository. Start from a clean product branch at the repository root. Set `upstream` to a separate clone of the base repository and `revision` to the desired tag or commit. Fetch the target and the commit recorded in the product lock in that clone if necessary. Run the review and import blocks in the same Bash shell with Python 3.12 and Git available.
 
 ```bash
-set -e
 # Set upstream and revision before running the block.
-: "${upstream:?set upstream to the base clone}"
-: "${revision:?set revision to the new base pin or tag}"
-pin=$(git -C "$upstream" rev-parse --verify "${revision}^{commit}")
+pin=$(git -C "${upstream:?set upstream to the base clone}" rev-parse --verify "${revision:?set revision to the new base pin or tag}^{commit}") &&
+  python scripts/update_devcontainer_base.py --review "$upstream" "$pin"
+```
 
-python scripts/update_devcontainer_base.py "$upstream" "$pin"
+After review succeeds, inspect the patch for the shared paths and the full
+base Compose file. Use the [Shared paths](#shared-paths) guidance, including
+the environment, healthcheck and mounts the product replaces. Then import the
+reviewed pin.
 
-ignore=$(mktemp)
-git -C "$upstream" show "$pin:.gitignore" > "$ignore"
-printf '\n' >> "$ignore"
-sed -n '/^# Polyagent Channels$/,$p' .gitignore >> "$ignore"
-cat "$ignore" > .gitignore
-rm "$ignore"
+```bash
+(
+  set -e
+  python scripts/update_devcontainer_base.py "$upstream" "$pin"
+
+  ignore=$(mktemp)
+  trap 'rm -f "$ignore"' EXIT
+  git -C "$upstream" show "$pin:.gitignore" > "$ignore"
+  printf '\n' >> "$ignore"
+  sed -n '/^# Polyagent Channels$/,$p' .gitignore >> "$ignore"
+  cat "$ignore" > .gitignore
+)
 ```
 
 The importer discovers files in the new Git tree, skips the shared paths in the
 table, and removes files listed in the old lock that are absent at the new pin.
 It updates individual files so product additions in the same directories
 survive. If a new base path overlaps a product file or directory, resolve its
-ownership before retrying the import. Review the shared paths and product-layer
-settings above, update the lifecycle link in the reference template to `$pin`,
-and run the mirror script.
+ownership before retrying the import. Port any changes identified in review,
+update the lifecycle link in the reference template to `$pin`, and run the
+mirror script in the product checkout.
 
 ```bash
 bash scripts/sync-agents-mirror.sh
-PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python scripts/render_docs.py
-PYTHONPATH=src python -m pytest tests/test_devcontainer_base.py tests/test_documents.py
-bash scripts/meta/completion-checker.sh
+```
+
+From the product checkout in the Python 3.12 test environment provisioned in
+[Verification](REFERENCE.md#verification), regenerate the documents and run
+the lock and document tests.
+
+```bash
+PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \
+  /tmp/channels-test-venv/bin/python scripts/render_docs.py
+PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \
+  /tmp/channels-test-venv/bin/python -m pytest -p no:cacheprovider tests/test_devcontainer_base.py tests/test_documents.py
 ```
 
 Run the upstream `.devcontainer/verify-template.sh` with Docker unavailable and
@@ -69,3 +87,6 @@ follow the [product verification procedure](REFERENCE.md#verification). Check
 a cold product Compose build and a cold DevContainer Create/Reopen (or `devcontainer up`) in an isolated
 checkout and confirm the product's effective runtime settings before starting
 an isolated stack.
+
+Before committing, run `bash scripts/meta/completion-checker.sh` in the product
+checkout. On success it writes ignored per-branch completion markers.
