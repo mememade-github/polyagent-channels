@@ -267,8 +267,55 @@ def test_uninstall_empty_root_reports_nothing_installed(artifact, tmp_path):
     root.mkdir()
     result = uninstall_project(artifact, tmp_path, tmp_path)
     report = json.loads(result.stdout)
-    assert (result.returncode, report['kept'], report['note'], list(root.iterdir())) == (
-        0, [], f'Nothing is installed at {root} for {tmp_path}', [])
+    assert (result.returncode, report['kept'], report['note'], root.exists()) == (
+        0, [], f'Nothing is installed at {root} for {tmp_path}', False)
+
+
+@pytest.mark.parametrize('refusal', ['missing-claude', 'foreign-codex', 'nonprivate-key', 'invalid-url'])
+@pytest.mark.parametrize('existing', ['absent', 'empty', 'populated'])
+def test_refused_install_removes_only_its_new_empty_root(artifact, tmp_path, monkeypatch, refusal, existing):
+    project = project_directory(tmp_path / 'project')
+    subprocess.run(['git', 'init', '-q', str(project)], check=True, capture_output=True, timeout=15)
+    root = tmp_path / 'new-parent/client/root'
+    if existing != 'absent':
+        root.mkdir(parents=True, mode=0o750)
+    if existing == 'populated':
+        (root / 'keep').mkdir()
+        (root / 'keep/user.txt').write_bytes(b'preserve this content\n')
+    original_inode = root.stat().st_ino if root.exists() else None
+    original_mode = root.stat().st_mode if root.exists() else None
+    original_entries = sorted(path.relative_to(root) for path in root.rglob('*'))
+    client = 'codex' if refusal == 'foreign-codex' else 'claude'
+    arguments = [*args(tmp_path, client, project), '--target', root]
+    config = project / '.codex/config.toml'
+    if refusal == 'missing-claude':
+        monkeypatch.setenv('PATH', str(tmp_path / 'empty-path'))
+    if refusal == 'foreign-codex':
+        config.parent.mkdir()
+        config.write_text('[mcp_servers.channels]\ncommand = "other"\n')
+    if refusal == 'nonprivate-key':
+        key = tmp_path / 'private/key'
+        key.parent.mkdir(mode=0o700)
+        key.write_text('synthetic-key\n')
+        key.chmod(0o644)
+        arguments.extend(['--key-file', key])
+    if refusal == 'invalid-url':
+        arguments.extend(['--url', 'ftp://x'])
+    diagnostic = {
+        'missing-claude': 'claude command not found; run this from the Claude Code environment',
+        'foreign-codex': f'Another Codex channels server is configured in {config}; inspect it',
+        'nonprivate-key': 'Key file and parent must be private (0600/0700)',
+        'invalid-url': 'config_url_invalid',
+    }[refusal]
+    result = invoke(artifact, 'install', *arguments, cwd=project)
+    inode = root.stat().st_ino if root.exists() else None
+    mode = root.stat().st_mode if root.exists() else None
+    contents = (root / 'keep/user.txt').read_bytes() if existing == 'populated' else None
+    assert (result.returncode, result.stderr, root.exists(), inode, mode,
+            sorted(path.relative_to(root) for path in root.rglob('*')), contents,
+            root.parent.is_dir(), root.parent.parent.is_dir()) == (
+        1, f'channel setup failed: {diagnostic}\n', existing != 'absent', original_inode, original_mode,
+        original_entries, b'preserve this content\n' if existing == 'populated' else None, True, True)
 
 
 def failed_claude_install(artifact, tmp_path):
@@ -683,6 +730,50 @@ def test_concurrent_same_dispatcher(artifact, tmp_path):
     with concurrent.futures.ThreadPoolExecutor() as pool:
         results = list(pool.map(lambda _: invoke(artifact, 'install', *args(tmp_path), cwd=tmp_path), range(2)))
     assert ([item.returncode for item in results], len(commands(tmp_path / '.claude/settings.local.json'))) == ([0, 0], 1)
+
+
+def wait_for_installer_flock(process):
+    """Observe the child waiting on the held directory lock before starting or releasing its peer."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and process.poll() is None:
+        if Path(f'/proc/{process.pid}/wchan').read_text().strip() == 'locks_lock_inode_wait':
+            return
+        time.sleep(.01)
+    pytest.fail('installer did not wait on the held directory flock')
+
+
+@pytest.mark.parametrize('first', ['refused', 'valid'])
+def test_concurrent_refused_and_valid_installers_keep_the_installed_root(artifact, tmp_path, first):
+    root = tmp_path / 'root'
+    held = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    processes = {}
+    try:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        for name in (first, 'valid' if first == 'refused' else 'refused'):
+            arguments = args(tmp_path)
+            if name == 'refused':
+                arguments.extend(['--url', 'ftp://x'])
+            processes[name] = subprocess.Popen([sys.executable, str(artifact), 'install', *map(str, arguments)],
+                                                cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            wait_for_installer_flock(processes[name])
+        blocked = ([process.poll() for process in processes.values()], root.exists())
+        fcntl.flock(held, fcntl.LOCK_UN)
+        outputs = {name: process.communicate(timeout=30) for name, process in processes.items()}
+    finally:
+        os.close(held)
+        for process in processes.values():
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+    manifest = json.loads((root / 'install-manifest.json').read_text())
+    wrapper = root / 'bin/channels'
+    assert (blocked, processes['refused'].returncode, outputs['refused'][1], processes['valid'].returncode,
+            outputs['valid'][1], root.is_dir(), root.parent.is_dir(), (root / 'harness.pyz').read_bytes(),
+            json.loads((root / 'config.json').read_text()), wrapper.read_bytes(),
+            set(manifest['files']), len(manifest['hooks']), hook_binding_status(root, tmp_path, 'claude')['status']) == (
+        ([None, None], False), 1, 'channel setup failed: config_url_invalid\n', 0, '', True, True,
+        artifact.read_bytes(), {'url': 'http://localhost:18765'}, wrapper_content(Path(sys.executable), root),
+        {'harness.pyz', 'config.json', 'bin/channels'}, 1, 'installed')
 
 
 def test_legacy_replace_and_conservative_uninstall(artifact, tmp_path):

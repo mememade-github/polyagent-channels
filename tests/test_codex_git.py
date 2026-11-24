@@ -880,6 +880,33 @@ def test_git_command_error_stops_before_writes(artifact, tmp_path, monkeypatch):
         1, True, False, BASE)
 
 
+@pytest.mark.parametrize('root_state', ['missing', 'empty'])
+def test_uninstall_refuses_missing_or_empty_root_with_git_filter(artifact, tmp_path, root_state):
+    project = repository(tmp_path / 'project', BASE.rstrip(b'\n'))
+    root = tmp_path / 'client with spaces'
+    setup(artifact, project, root)
+    saved = tmp_path / 'saved-client'
+    saved.mkdir()
+    for child in root.iterdir():
+        child.rename(saved / child.name)
+    if root_state == 'missing':
+        root.rmdir()
+    original_root = (root.stat().st_ino, root.stat().st_mode) if root.exists() else None
+    binding = CodexGit(project, project / '.git', project, root / 'bin/channels')
+    metadata_temp = binding.common / (binding.metadata_prefix + 'preserve')
+    metadata_temp.write_bytes(b'preserve unfinished metadata\n')
+    tracked_files = (project / CONFIG, binding.attributes, binding.local_ignore, binding.program,
+                     binding.common / 'config', binding.common / 'index', metadata_temp)
+    before = [file.read_bytes() for file in tracked_files]
+    result = setup(artifact, project, root, 'uninstall', check=False)
+    remaining_root = (root.stat().st_ino, root.stat().st_mode) if root.exists() else None
+    assert (result.returncode, result.stdout, result.stderr, remaining_root,
+            list(root.iterdir()) if root.exists() else [], [file.read_bytes() for file in tracked_files]) == (
+        1, '', f'channel setup failed: The client root {root} is missing and its local Git filter remains. '
+        f'Reinstall for this project with the same --target {shlex.quote(str(root))}, then uninstall.\n',
+        original_root, [], before)
+
+
 def test_uninstall_after_losing_the_client_root(artifact, tmp_path):
     project = repository(tmp_path / 'project', BASE.rstrip(b'\n'))
     root = tmp_path / 'client'

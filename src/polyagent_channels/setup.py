@@ -489,6 +489,7 @@ def execute(options):
             if git_binding and git_binding.has_filter_metadata():
                 raise SetupError(f'The client root {root} is missing and its local Git filter remains. '
                                  f'Reinstall for this project with the same --target {shlex.quote(str(root))}, then uninstall.')
+            remove_empty_root(root)
             return report_nothing_installed(root, project)
         if git_binding:
             git_binding.cleanup_metadata_temps()
@@ -503,22 +504,31 @@ def lock_setup_directories(stack, root, project, common):
             stack.enter_context(directory_lock(directory, fcntl.LOCK_EX))
 
 
+def remove_empty_root(root):
+    if root.is_dir() and not any(root.iterdir()):
+        root.rmdir()
+
+
 def install_locked(options, root, project, stack, git_binding, filter_notice, common):
     source = canonical_path(sys.argv[0])
     program = filter_program(source) if git_binding and source.suffix == '.pyz' and archive_owned(source) else None
     root.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_setup_directories(stack, root, project, common)
-    if installation_matches(options, root, project) and filter_matches(git_binding, root, project, program):
-        if git_binding:
-            git_binding.cleanup_binding_temps()
-            git_binding.refresh()
-            git_binding.check_driver_config()
+    already_installed = installation_matches(options, root, project) and filter_matches(git_binding, root, project, program)
+    if already_installed and git_binding:
+        git_binding.cleanup_binding_temps()
+        git_binding.refresh()
+        git_binding.check_driver_config()
+    if already_installed:
         print(json.dumps({'action': 'install', 'status': 'already_installed', 'root': str(root),
                           'binding': str(native_binding(project, options.client)),
                           'resume_command': native_resume_command(options.client, project),
                           'next_step': next_step(options.client, filter_notice)}))
         return
+    created_root = not root.exists()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if created_root:
+        stack.callback(remove_empty_root, root)
     stack.enter_context(lifecycle_lock(root, exclusive=True))
     install(options, root, project, git_binding, program, filter_notice)
 
