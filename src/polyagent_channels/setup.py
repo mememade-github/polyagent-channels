@@ -833,8 +833,6 @@ def uninstall(options, root, project, clients, git_binding=None):
     kept = []
     if manifest['hooks']:
         atomic_write(root / 'install-manifest.json', (json.dumps(manifest, indent=2) + '\n').encode())
-    if legacy:
-        kept.append(str(root) + ' (legacy ownership across projects unknown; shared files preserved)')
     if not manifest['hooks'] and not legacy:
         for name, expected in manifest['files'].items():
             if name not in ('harness.pyz', 'config.json', 'bin/channels'):
@@ -856,18 +854,27 @@ def uninstall(options, root, project, clients, git_binding=None):
     follow_up = None
     if key.exists() or (root / 'joined-topics.json').exists():
         installer = Path(sys.argv[0]).absolute()
-        follow_up = shlex.join(['rm', '-f', '--', str(key), str(root / 'joined-topics.json'), str(root / 'joined-topics.lock')])
+        follow_up = purge_fallback_command(root, key)
         if installer.is_file():
             follow_up = shlex.join(['python3', str(installer), 'uninstall',
                                    '--target', str(root), '--project', str(project), '--purge-key'])
     # Pruning comes last: this process holds the root until it finishes and changes nothing afterwards.
     prune_empty_directories(root)
+    if legacy and root.exists():
+        kept.append(str(root) + ' (legacy ownership across projects unknown; shared files preserved)')
     unconfirmed = unconfirmed_work(root)
     print(json.dumps({'action': 'uninstall', 'bindings_removed': bindings_removed,
                       'removed': removed, 'kept': kept + remaining_paths(root), 'purge_key_command': follow_up,
                       'unconfirmed': unconfirmed,
                       'discard_unconfirmed_command': discard_command(root, unconfirmed) if not manifest['hooks'] else None,
                       'note': UNINSTALL_NOTICE}))
+
+
+def purge_fallback_command(root, key):
+    remove_files = shlex.join(['rm', '-f', '--', str(key), str(root / 'joined-topics.json'),
+                               str(root / 'joined-topics.lock')])
+    remove_directories = shlex.join(['rmdir', '--', str(key.parent), str(root)])
+    return f'{remove_files} && {{ {remove_directories} 2>/dev/null || :; }}'
 
 
 def purge_joined_topics(root, removed):

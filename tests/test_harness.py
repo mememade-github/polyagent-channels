@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import shlex
 import shutil
@@ -269,6 +270,14 @@ def test_uninstall_empty_root_reports_nothing_installed(artifact, tmp_path):
     report = json.loads(result.stdout)
     assert (result.returncode, report['kept'], report['note'], root.exists()) == (
         0, [], f'Nothing is installed at {root} for {tmp_path}', False)
+
+
+def test_uninstall_pruned_legacy_root_is_not_kept(artifact, tmp_path):
+    root = tmp_path / 'root'
+    (root / 'bin').mkdir(parents=True)
+    (root / '.env').mkdir()
+    result = uninstall_project(artifact, tmp_path, tmp_path)
+    assert (result.returncode, json.loads(result.stdout)['kept'], root.exists()) == (0, [], False)
 
 
 @pytest.mark.parametrize('refusal', ['missing-claude', 'foreign-codex', 'nonprivate-key', 'invalid-url'])
@@ -823,7 +832,7 @@ def test_purge_removes_joined_topics_and_lock(artifact, tmp_path, purge):
     removed = invoke(root / 'harness.pyz', 'uninstall', '--target', root, '--project', tmp_path, *arguments, cwd=tmp_path)
     result = removed
     if purge == 'follow-up':
-        result = subprocess.run(shlex.split(json.loads(removed.stdout)['purge_key_command']), cwd=tmp_path,
+        result = subprocess.run(['/bin/sh', '-c', json.loads(removed.stdout)['purge_key_command']], cwd=tmp_path,
                                 capture_output=True, text=True, timeout=15)
     assert (installed.returncode, removed.returncode, result.returncode,
             (root / 'joined-topics.json').exists(), (root / 'joined-topics.lock').exists()) == (0, 0, 0, False, False)
@@ -1305,10 +1314,54 @@ def test_installed_uninstall_emits_executable_key_only_removal(artifact, tmp_pat
                     '--project', tmp_path, cwd=tmp_path)
     output = json.loads(result.stdout)
     assert result.returncode == 0 and not (root / 'harness.pyz').exists()
-    purge = subprocess.run(shlex.split(output['purge_key_command']), cwd=tmp_path,
+    purge = subprocess.run(['/bin/sh', '-c', output['purge_key_command']], cwd=tmp_path,
                            capture_output=True, text=True, timeout=15)
-    assert (purge.returncode == 0 and not key.exists() and unrelated.read_text() == 'retain'
+    assert (purge.returncode == 0 and not purge.stdout and not purge.stderr
+            and not key.exists() and not key.parent.exists() and unrelated.read_text() == 'retain'
             and 'synthetic-key-never-print' not in result.stdout + result.stderr + purge.stdout + purge.stderr)
+
+
+def install_codex_with_saved_key(artifact, project, root):
+    source = project / 'source.key'
+    source.write_text('synthetic-key\n')
+    source.chmod(0o600)
+    installed = invoke(artifact, 'install', '--target', root, '--client', 'codex',
+                       '--project', project, '--url', 'http://localhost:18765', '--key-file', source, cwd=project)
+    assert installed.returncode == 0, installed.stderr
+    return source
+
+
+def test_self_archive_purge_runs_as_printed(artifact, tmp_path):
+    root = tmp_path / 'root'
+    install_codex_with_saved_key(artifact, tmp_path, root)
+    membership.remember(root, tmp_path, 'codex', 'review/main')
+    removed = invoke(root / 'harness.pyz', 'uninstall', '--target', root, '--project', tmp_path, cwd=tmp_path)
+    command = re.search(r'"purge_key_command": "((?:\\.|[^"\\])*)"', removed.stdout)[1]
+    purge = subprocess.run(['/bin/sh', '-c', command], cwd=tmp_path, capture_output=True, text=True, timeout=15)
+    assert (removed.returncode, purge.returncode, purge.stdout, purge.stderr, root.exists(),
+            '\\' in command, '"' in command) == (0, 0, '', '', False, False, False)
+
+
+@pytest.mark.parametrize('topic', [None, 'review/main'], ids=['key-only', 'joined-topic'])
+def test_self_archive_purge_removes_root(artifact, tmp_path, topic):
+    root = tmp_path / "root with 'quotes' and $(touch injected)"
+    source = install_codex_with_saved_key(artifact, tmp_path, root)
+    if topic:
+        membership.remember(root, tmp_path, 'codex', topic)
+    removed = invoke(root / 'harness.pyz', 'uninstall', '--target', root, '--project', tmp_path, cwd=tmp_path)
+    purge = subprocess.run(['/bin/sh', '-c', json.loads(removed.stdout)['purge_key_command']],
+                           cwd=tmp_path, capture_output=True, text=True, timeout=15)
+    assert (removed.returncode, purge.returncode, purge.stdout, purge.stderr, root.exists(),
+            (tmp_path / 'injected').exists(), source.read_text()) == (0, 0, '', '', False, False, 'synthetic-key\n')
+
+
+def test_external_archive_purge_does_not_report_pruned_root_as_kept(artifact, tmp_path):
+    root = tmp_path / 'root'
+    install_codex_with_saved_key(artifact, tmp_path, root)
+    removed = invoke(artifact, 'uninstall', '--target', root, '--project', tmp_path, cwd=tmp_path)
+    purge = subprocess.run(shlex.split(json.loads(removed.stdout)['purge_key_command']),
+                           cwd=tmp_path, capture_output=True, text=True, timeout=15)
+    assert (removed.returncode, purge.returncode, json.loads(purge.stdout)['kept'], root.exists()) == (0, 0, [], False)
 
 
 def test_uninstall_preflights_both_clients_before_any_write(artifact, tmp_path, synthetic_claude):
