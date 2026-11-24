@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from threading import Thread
 
 from polyagent_channels import exchange, identity
 
@@ -237,6 +238,7 @@ def reply_to_line(options, line, receivers):
     if not isinstance(message, dict):
         return protocol_error(None, -32600, 'Invalid request')
     if 'id' not in message:
+        start_listener_on_initialized(options, message)
         return None
     try:
         result = respond(options, message, receivers)
@@ -247,6 +249,23 @@ def reply_to_line(options, line, receivers):
     if result is None:
         return protocol_error(message['id'], -32601, 'Method not found')
     return {'jsonrpc': '2.0', 'id': message['id'], 'result': result}
+
+
+def start_listener_on_initialized(options, message):
+    if message.get('method') == 'notifications/initialized' and options.client == 'codex':
+        start_listener()
+
+
+def start_listener():
+    command = [sys.executable, sys.argv[0], 'codex-listen']
+    try:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    except OSError as error:
+        print('codex-listen failed to start: ' + str(error), file=sys.stderr)
+        return
+    atexit.register(process.terminate)
+    reaper = Thread(target=process.wait, daemon=True)
+    reaper.start()
 
 
 def serve(options):

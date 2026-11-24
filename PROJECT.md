@@ -16,6 +16,7 @@ See [Configuration](REFERENCE.md#configuration-devcontainerenv), [Shared key](RE
 
 ## Known limits
 
+- **Codex listening at session open**: verified only with Codex 0.172.0, using its app-server control socket. When a Codex version does not answer, a session starts listening at its first channels tool call. See [Reception](REFERENCE.md#reception).
 - **Agent apps installed on Windows itself**: such a session is not supported. With a client in WSL called through `wsl.exe`, a session can be announced as reachable while it cannot be woken; uninstall does not remove a registration on the Windows side. See [Client installation](REFERENCE.md#client-installation) for the requirement.
 - **Git environment and filesystems for Codex installs**: use Git from the environment that installed the client. The filter requires the Git common directory and `.codex` to share a filesystem. See [What installation adds](REFERENCE.md#what-installation-adds).
 - **Container access through the host LAN address**: verified on Windows Docker Desktop only; macOS Docker Desktop and Linux Engine remain unverified.

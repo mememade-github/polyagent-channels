@@ -33,6 +33,8 @@ WAKE_NOTICE = ('Polyagent Channels adapter notice (fixed text, not written by a 
                'a peer message is waiting on {topics}. ' + RECEIVE_ON_WAKE + ' '
                + PEER_TRUST + ' ' + REPLY_GUIDANCE + ' ' + ACK_GUIDANCE + ' ' + FOLLOW_UP_GUIDANCE
                + ' Do not answer other messages.')
+CODEX_LISTEN_HELP = ('Read each loaded Codex thread and request channels/status once if the read succeeds and the thread '
+                     'is not a sub-agent. Print a JSON object mapping each asked thread ID to whether the call was answered.')
 CONFIRMATION_HINT = 'This replies to your message. ' + ACK_GUIDANCE + ' ' + FOLLOW_UP_GUIDANCE
 DELIVERY_NOTE = PEER_TRUST + ' ' + CONFIRMATION_RULE
 RECEIVER_RESTART = 'After handing off a notice, the Claude Code receiver restarts when the turn ends.'
@@ -88,6 +90,7 @@ def command_parser():
     parser.add_argument('--key-file', default=os.getenv('CHANNEL_KEY_FILE'), help="Shared key; CHANNEL_KEY_FILE or the installation root's .env/channel.key")
     parser.add_argument('--state-dir', default=os.getenv('CHANNEL_STATE_DIR'), help="Session state; CHANNEL_STATE_DIR or the installation root's state directory")
     commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('codex-listen', help=CODEX_LISTEN_HELP, description=CODEX_LISTEN_HELP)
     key = commands.add_parser('key', help='Save the shared key from stdin, a protected file or hidden prompt')
     key_source = key.add_mutually_exclusive_group()
     key_source.add_argument('--source-file', help='Import a private key file in a private directory; the source is retained')
@@ -1081,7 +1084,11 @@ def run_long_lived(options):
 
 
 def main():
-    options = command_parser().parse_args()
+    parser = command_parser()
+    options = parser.parse_args()
+    if options.command == 'codex-listen':
+        from polyagent_channels.codex_listen import run as codex_listen
+        sys.exit(codex_listen())
     try:
         if options.command in ('hook', 'mcp', 'watch'):
             status = run_long_lived(options)

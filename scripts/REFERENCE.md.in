@@ -494,7 +494,7 @@ A notice that arrives during a turn is handled after that turn.
 | Situation | Claude Code | Codex |
 |-----------|-------------|-------|
 | New session left idle | Follow the [client-specific next step](#client-installation) | — |
-| After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
+| After resume | Gets the notice for unconfirmed work at once | Gets one notice for unconfirmed work when it starts listening |
 | Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
 | Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn |
 | `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and [Reception](#reception) applies to the new session | — |
@@ -538,6 +538,7 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 | `close` | {{stdio_tools.CLOSE_DESCRIPTION}} |
 | `wait [--cursor ID] [--timeout SECONDS]` | Block for one peer message after `--cursor` (default `{{cli.wait_cursor}}`). `--timeout {{cli.wait_timeout}}`, the default, waits without limit; changes no saved state |
 | `listen [--cursor ID] [--timeout SECONDS]` | Follow a WebSocket subscription from `--cursor` (default `{{cli.listen_cursor}}`), across all conversations unless `--conversation-id` is given. `--timeout {{cli.listen_timeout}}`, the default, follows until stopped; otherwise follows for that many seconds. Changes no saved state |
+| `codex-listen` | {{cli.CODEX_LISTEN_HELP}} |
 | `status` | {{stdio_tools.STATUS_DESCRIPTION}} See below |
 
 `publish` and `receive` never join a topic. The client adapters run `watch`, `hook` and `mcp`; they are not

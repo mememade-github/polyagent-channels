@@ -32,7 +32,10 @@ NEXT_STEP = {'claude': (SESSION_RESTART + ', or resume this one. After a client 
                         + ' Send the new session one operator message before leaving it idle so Claude Code supplies the channel instructions and tool names.'),
              'codex': (SESSION_RESTART + '. Codex applies project settings when it loads a session, so a session '
                        'still loaded on its shared server can keep its old settings: close it and wait about a minute before '
-                       'resuming it. ' + TOOLS_READY + NATIVE_TRUST)}
+                       'resuming it. ' + TOOLS_READY + NATIVE_TRUST
+                       + ' To start listening when every session opens, run codex features disable mcp_lazy_stdio_startup. '
+                       'This starts every stdio MCP server of that Codex home when a session opens. '
+                       'To restore lazy startup, run codex features enable mcp_lazy_stdio_startup.')}
 UNINSTALL_NOTICE = ('Open sessions stop listening after their current receive or notice attempt ends; '
                     'their channels tools then report the removal. Unconfirmed messages stay recorded under '
                     'unconfirmed: reinstalling and resuming that session continues them.')

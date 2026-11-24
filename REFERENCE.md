@@ -235,7 +235,7 @@ Tell the operator install's next_step and resume_command.
 | Client | Next step |
 |--------|-----------|
 | Claude Code | Start a new session in this project, or resume this one. After a client update, a resumed Claude conversation keeps previously loaded tool definitions; run /compact there to load the updated definitions. That session finds the channels tools by name and needs no further setup. A running client does not load new tools. Accept the client's own folder trust prompt. Never write native trust records yourself. Send the new session one operator message before leaving it idle so Claude Code supplies the channel instructions and tool names. |
-| Codex | Start a new session in this project. Codex applies project settings when it loads a session, so a session still loaded on its shared server can keep its old settings: close it and wait about a minute before resuming it. That session finds the channels tools by name and needs no further setup. A running client does not load new tools. Accept the client's own folder trust prompt. Never write native trust records yourself. |
+| Codex | Start a new session in this project. Codex applies project settings when it loads a session, so a session still loaded on its shared server can keep its old settings: close it and wait about a minute before resuming it. That session finds the channels tools by name and needs no further setup. A running client does not load new tools. Accept the client's own folder trust prompt. Never write native trust records yourself. To start listening when every session opens, run codex features disable mcp_lazy_stdio_startup. This starts every stdio MCP server of that Codex home when a session opens. To restore lazy startup, run codex features enable mcp_lazy_stdio_startup. |
 
 Derived from [harness.setup_help](src/polyagent_channels/harness.py) and
 [setup.NEXT_STEP](src/polyagent_channels/setup.py).
@@ -544,15 +544,19 @@ The woken model follows the [agent message-handling policy](#agent-tools).
 
 A notice that arrives during a turn is handled after that turn.
 
-A Codex session starts listening after its first channels tool call. Claude listens
-from the start of the session. claude -p in an installed project can wait for its
+A Codex session starts listening when its tool server starts, or at its first
+channels tool call if the server has not started at session open. With
+mcp_lazy_stdio_startup enabled, Codex 0.172.0 starts the tool server at session
+open only for the first session of its app server. A sub-agent thread starts
+listening only at its own channels tool call. Claude listens from the start of
+the session. claude -p in an installed project can wait for its
 receiver's first notice before it answers and does not exit while the receiver listens; add
 --settings '{"disableAllHooks": true}' for headless runs.
 
 | Situation | Claude Code | Codex |
 |-----------|-------------|-------|
 | New session left idle | Follow the [client-specific next step](#client-installation) | — |
-| After resume | Gets the notice for unconfirmed work at once | Needs one operator input, because Codex gives an MCP server its thread ID only with a tool call |
+| After resume | Gets the notice for unconfirmed work at once | Gets one notice for unconfirmed work when it starts listening |
 | Window closes | A closed session has no receiver | A running turn finishes first. A queued notice stays with Codex and appears only if the session is resumed |
 | Operator interrupts the turn a notice started | No `Stop` hook runs; listens again after the next turn | No queued turn starts until the next user turn |
 | `/clear` | New session ID: the earlier receiver stops, the tools follow the new ID and [Reception](#reception) applies to the new session | — |
@@ -618,6 +622,7 @@ Topic commands accept an optional `channel` and `--conversation-id`; `peers` and
 | `close` | Stop receiving a channel or conversation for this project. Use only when the operator asks to leave it. |
 | `wait [--cursor ID] [--timeout SECONDS]` | Block for one peer message after `--cursor` (default `0-0`). `--timeout 0`, the default, waits without limit; changes no saved state |
 | `listen [--cursor ID] [--timeout SECONDS]` | Follow a WebSocket subscription from `--cursor` (default `0-0`), across all conversations unless `--conversation-id` is given. `--timeout 0`, the default, follows until stopped; otherwise follows for that many seconds. Changes no saved state |
+| `codex-listen` | Read each loaded Codex thread and request channels/status once if the read succeeds and the thread is not a sub-agent. Print a JSON object mapping each asked thread ID to whether the call was answered. |
 | `status` | Report service access, whether this session is listening, and what to do if not. See below |
 
 `publish` and `receive` never join a topic. The client adapters run `watch`, `hook` and `mcp`; they are not
