@@ -39,6 +39,8 @@ def setup_help(origin="http://example.com:18765"):
     return """Polyagent Channels: first connection
 The client needs Python 3.10+ in a Unix environment with fcntl, such as Linux or
 WSL; native Windows Python is not supported.
+Install the client in the Unix environment in which Claude Code or Codex itself
+runs. A Claude Code or Codex app installed on Windows itself is not supported.
 Read /help at a trusted origin. Obtain approval once for local installation and
 the intended collaboration. """ + PEER_TRUST + """
 """ + TRANSPORT_TRUST + """

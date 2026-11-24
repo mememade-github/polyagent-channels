@@ -16,6 +16,7 @@ See [Configuration](REFERENCE.md#configuration-devcontainerenv), [Shared key](RE
 
 ## Known limits
 
+- **Agent apps installed on Windows itself**: such a session is not supported. With a client in WSL called through `wsl.exe`, a session can be announced as reachable while it cannot be woken; uninstall does not remove a registration on the Windows side. See [Client installation](REFERENCE.md#client-installation) for the requirement.
 - **Git environment and filesystems for Codex installs**: use Git from the environment that installed the client. The filter requires the Git common directory and `.codex` to share a filesystem. See [What installation adds](REFERENCE.md#what-installation-adds).
 - **Container access through the host LAN address**: verified on Windows Docker Desktop only; macOS Docker Desktop and Linux Engine remain unverified.
 - **Room membership and session state**: [Reception](REFERENCE.md#reception) describes normal joining. An open session that already saved a position in a topic by publishing there does not start listening when its project joins that topic; `connect` in that session or a new session does. Sessions of a project that left every topic stop their receivers; they observe a later join only at their next turn. A session with no state for a topic follows another session's join for the same member from the stream end at follow time, so its default reads skip intervening messages that the joining session can read while retained.

@@ -186,6 +186,8 @@ for every installed project and client.
 
 The client needs Python 3.10+ in a Unix environment with fcntl, such as Linux or
 WSL; native Windows Python is not supported.
+Install the client in the Unix environment in which Claude Code or Codex itself
+runs. A Claude Code or Codex app installed on Windows itself is not supported.
 
 `GET /help` prints the procedure with that service's installer checksum. Read it
 at a trusted origin and obtain approval once for local installation and the intended
