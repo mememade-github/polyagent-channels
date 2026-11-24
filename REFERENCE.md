@@ -856,7 +856,7 @@ the root of the tree named in each step. Stop at the first error. Replace
 
 | Release tree | Product Compose file |
 |--------------|----------------------|
-| 0.2.0–0.2.3 | `.devcontainer/compose.channels.yml` |
+| 0.2.0–0.2.4 | `.devcontainer/compose.channels.yml` |
 | 0.1.2–0.1.7 | `.devcontainer/docker-compose.yml` |
 
 For upgrades from 0.1.1 or earlier, see the [0.1.2 migration](UPGRADING.md#012).
