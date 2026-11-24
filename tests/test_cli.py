@@ -1317,6 +1317,28 @@ def test_confirmation_of_my_answer_asks_for_no_further_reply(connection_client):
     assert rows['thanks']['for_you'] is True and 'expected' not in rows['thanks'] and 'expected' not in rows['question']
 
 
+@pytest.mark.parametrize('address', [{}, {'to': '검사 agent'}, {'to': 'native-self'}],
+                         ids=['broadcast', 'reader-name', 'reader-session-id'])
+def test_explicit_history_marks_own_new_message_as_not_for_you(named_connection_client, address):
+    session = named_connection_client
+    session.invoke('connect')
+    session.messages.append({'id': '2-0', 'session_id': 'native-self',
+                             'conversation_id': 'main', 'text': 'my message', **address})
+    rows = session.invoke('receive', '--cursor', '0-0', '--timeout', '0')['messages']
+    assert [row['for_you'] for row in rows if row['id'] == '2-0'] == [False]
+
+
+def test_explicit_history_marks_own_reply_as_not_for_you_and_keeps_expected(connection_client):
+    session = connection_client
+    session.invoke('connect')
+    session.messages.extend([
+        {'id': '2-0', 'session_id': 'native-self', 'conversation_id': 'main', 'text': 'my request'},
+        {'id': '3-0', 'session_id': 'native-self', 'conversation_id': 'main', 'text': 'my reply', 'reply_to': '2-0'}])
+    rows = session.invoke('receive', '--cursor', '0-0', '--timeout', '0')['messages']
+    assert [(row['for_you'], row.get('expected')) for row in rows if row['id'] == '3-0'] == [
+        (False, cli.CONFIRMATION_HINT)]
+
+
 def test_explicit_history_read_never_moves_the_saved_position(connection_client):
     session = connection_client
     session.invoke('connect')
