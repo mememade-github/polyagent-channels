@@ -1,5 +1,5 @@
 {
-  "pin": "ced3edc19484ebc8ba2505c0ca71c4c83a6bf512",
+  "pin": "69d63702c56849c879e8f11f0bec58a6e11e372c",
   "blobs": {
     ".agents/hooks.json": "2c1cbdbccb48e4489514e0ffc7ac5844ec831c59",
     ".agents/hooks/claude-hooks-adapter.sh": "3e9d5363ea37333d46636b6bdf35a7206019e1e9",
@@ -51,8 +51,8 @@
     ".gitattributes": "f788cd24e4adf09dea66867a2298ec5fe0314532",
     ".vscode/launch.json": "d4cdc31b714590903547506ee5d779d7bab4fd3e",
     ".vscode/settings.json": "ad0ace03c484decad3f54c29046e4b366fd0c634",
-    "AGENTS.md": "66bb52109654af2bd85467f806d8e71041b42cf1",
-    "CLAUDE.md": "54e06d30c297e83cf43ff258888127485b73b3ce",
+    "AGENTS.md": "0146ddc1942136770d38375a93247764dab8f511",
+    "CLAUDE.md": "a06b39dee18e26aac3e6ae1dc9d189ccdb686618",
     "scripts/git/git-status.sh": "885f0cf2142c6d454d4300c41587ad3079723fc9",
     "scripts/meta/completion-checker.sh": "2b075ded3f02526c6b1aea13b7fff99b0cbed8e3",
     "scripts/meta/karpathy-consistency-check.sh": "03e0e93c6eff1646225aec27233012f4c301002a",

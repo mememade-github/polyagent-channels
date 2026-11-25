@@ -15,7 +15,10 @@ The container and its host-mounted `docker.sock` are not a security sandbox (see
 
 - At session start, check `MEMORY.md`; if the hook reports WIP and the current request permits resuming saved work, read the relevant WIP `README.md` and continue its first actionable item. Otherwise follow the current request, and wait only if no task has been supplied.
 - The request or approved plan sets scope. Keep changes surgical; report unrelated issues. Commit tests only when requested or customary here; keep scratch checks outside the repository.
-- Every claim must be verified by execution; this does not expand the request's check scope or repository-defined tier timing.
+- Base judgments, actions, and reports on actual facts relevant to authorized requirements; substantiate behavioral claims by executing the relevant behavior and observing results at the claimed boundary. Substantiate structural claims (path, symbol, reference) by reading the source. This does not expand the request's check scope or repository-defined tier timing.
+- String searches, pattern/byte/count comparisons, syntax passes, and completed checklists establish only the properties actually checked; do not substitute these formal results for evidence of meaning, compliance, or behavior they did not examine.
+- Create, retain, or enforce checks only to obtain relevant evidence for authorized requirements, and make them gates only when those requirements are prerequisites for the work they block.
+- On failure, distinguish an actual requirement violation, a faulty or inapplicable check, and missing evidence; act within scope on what is established, and report what remains unobserved.
 - Ground progress and completion claims in tool results from this session. State failed or skipped checks plainly.
 - Get explicit approval before `rm -rf`, overwriting `mv`/`cp`, `git push --force`, `git reset --hard`, or database `DROP`/`DELETE`.
 - Fix root causes — diagnose across infra/config/deploy/code; no workarounds.
