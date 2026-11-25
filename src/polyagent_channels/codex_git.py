@@ -1,4 +1,5 @@
 """Install the clone-local Git driver for a tracked Codex project binding."""
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 import hashlib
@@ -9,9 +10,16 @@ import shlex
 import shutil
 import subprocess
 import sys
+from tempfile import NamedTemporaryFile
+from time import monotonic, sleep
 import zipfile
 
 from polyagent_channels.codex_config import SetupError, has_registration
+
+
+INDEX_POLL_INTERVAL = 0.05
+INDEX_WAIT_LIMIT = 2
+NANOSECONDS_PER_SECOND = 1_000_000_000
 
 
 TRACKED_ATTRIBUTES = '.codex/.gitattributes is tracked.'
@@ -282,6 +290,7 @@ class CodexGit:
     def refresh(self):
         if not self.run('diff-files', '--name-only', '-z', '--', literal(self.name)).stdout:
             return
+        self.wait_for_index_timestamp()
         raw = self.run('rev-parse', '--path-format=absolute', '--git-path', 'index').stdout
         index = Path(os.fsdecode(raw.removesuffix(b'\n')))
         lock = index.with_name(index.name + '.lock')
@@ -299,6 +308,11 @@ class CodexGit:
             lock.unlink(missing_ok=True)
             raise
         lock.unlink()
+
+    def wait_for_index_timestamp(self):
+        with suppress(OSError), NamedTemporaryFile(dir=self.common, prefix=self.metadata_prefix) as probe:
+            config_second = (self.worktree / self.name).stat().st_mtime_ns // NANOSECONDS_PER_SECOND
+            wait_for_later_second(probe.fileno(), config_second)
 
     def reset_cached_stat(self, lock):
         # Work on the snapshot taken under Git's real index lock. Publishing the
@@ -324,6 +338,17 @@ class CodexGit:
         self.run('status', '--porcelain', '--untracked-files=no', '--ignore-submodules=all',
                  '--', literal(self.name), index_file=lock)
         return True
+
+
+def wait_for_later_second(probe, config_second):
+    deadline = monotonic() + INDEX_WAIT_LIMIT
+    while monotonic() < deadline and write_probe_second(probe) <= config_second:
+        sleep(INDEX_POLL_INTERVAL)
+
+
+def write_probe_second(probe):
+    os.write(probe, b'\0')
+    return os.fstat(probe).st_mtime_ns // NANOSECONDS_PER_SECOND
 
 
 def filter_argument(argument):

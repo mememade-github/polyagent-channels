@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from time import monotonic, sleep, time
 import tomllib
 from types import SimpleNamespace
 import zipfile
@@ -472,6 +473,33 @@ def test_unchanged_add_can_reuse_cached_stat_with_missing_required_program(artif
     next((project / '.git').glob('polyagent-channels-*.pyz')).unlink()
     added = git(project, 'add', '--', CONFIG, check=False)
     assert (added.returncode, index_object(project)) == (0, original)
+
+
+@pytest.mark.parametrize('previous', [(), ('install', 'uninstall')], ids=['first', 'update'])
+def test_first_status_after_install_needs_no_filter(artifact, tmp_path, previous):
+    project = repository(tmp_path / 'project')
+    root = tmp_path / 'client'
+    for action in previous:
+        setup(artifact, project, root, action)
+    # Give a fast installer a full timestamp tick to write the config and index.
+    sleep(1 - time() % 1)
+    setup(artifact, project, root)
+    moved = project.rename(tmp_path / 'moved')
+    status = git(moved, 'status', '--porcelain', check=False)
+    assert (status.returncode, status.stdout) == (0, b'')
+
+
+def test_refresh_succeeds_with_future_config_mtime(tmp_path):
+    project = repository(tmp_path / 'project')
+    path = project / CONFIG
+    future = time() + 60
+    os.utime(path, (future, future))
+    binding = CodexGit(project, project / '.git', project, tmp_path / 'client/bin/channels')
+    started = monotonic()
+    binding.refresh()
+    elapsed = monotonic() - started
+    status = git(project, 'status', '--porcelain')
+    assert (1.8 <= elapsed < 4, status.stdout) == (True, b'')
 
 
 def test_filter_archive_retains_product_license(artifact, tmp_path):
