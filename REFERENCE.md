@@ -546,8 +546,9 @@ A notice that arrives during a turn is handled after that turn.
 
 A Codex session starts listening when its tool server starts, or at its first
 channels tool call if the server has not started at session open. With
-mcp_lazy_stdio_startup enabled, Codex 0.172.0 starts the tool server at session
-open only for the first session of its app server. A sub-agent thread starts
+mcp_lazy_stdio_startup enabled, Codex 0.172.0 does not start the tool server at
+session open when it reuses the tool list from an earlier start of that
+server. A sub-agent thread starts
 listening only at its own channels tool call. Claude listens from the start of
 the session. claude -p in an installed project can wait for its
 receiver's first notice before it answers and does not exit while the receiver listens; add
