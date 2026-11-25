@@ -3,14 +3,14 @@
 # additionalContext JSON. Context-only: never blocks a session (always exit 0).
 
 INPUT=$(cat)
-SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
+SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null) || SOURCE="startup"  # fallback outside $(): never appended to partial output
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 ACTUAL_ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$PROJECT_DIR")
 CONTEXT=""
 
 # 1. Git status summary
 if command -v git &>/dev/null && [ -e "$PROJECT_DIR/.git" ]; then
-  BRANCH=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  BRANCH=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null) || BRANCH="unknown"
   DIRTY=$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null | wc -l)
   CONTEXT="${CONTEXT}Git branch: ${BRANCH} (${DIRTY} uncommitted changes)\n"
 fi

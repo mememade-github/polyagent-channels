@@ -4,7 +4,7 @@
 set -u
 
 INPUT=$(cat)
-SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
+SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null) || SOURCE="startup"  # fallback outside $(): never appended to partial output
 PROJECT_DIR="${CODEX_PROJECT_DIR:-.}"
 STATE_DIR="$PROJECT_DIR/.codex/state"
 GIT_ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$PROJECT_DIR")
@@ -13,7 +13,7 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # 1. Git status summary
 if command -v git >/dev/null 2>&1 && [ -e "$GIT_ROOT/.git" ]; then
-  BRANCH=$(git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  BRANCH=$(git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null) || BRANCH="unknown"
   DIRTY=$(git -C "$GIT_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
   CONTEXT="${CONTEXT}Git branch: ${BRANCH} (${DIRTY} uncommitted changes)\n"
 fi

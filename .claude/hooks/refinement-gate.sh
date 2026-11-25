@@ -5,7 +5,7 @@
 # the following call can block again. Fails open; never exits non-zero.
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
-BRANCH=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+BRANCH=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null) || BRANCH="unknown"  # unborn branch prints "HEAD" then fails
 BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
 
 # Loop prevention: consume the marker; if younger than 120s, allow this Stop.

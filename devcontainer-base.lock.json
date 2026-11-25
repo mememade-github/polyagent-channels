@@ -1,5 +1,5 @@
 {
-  "pin": "a5147c8f35119755df83d6538d2520d680721fb1",
+  "pin": "ced3edc19484ebc8ba2505c0ca71c4c83a6bf512",
   "blobs": {
     ".agents/hooks.json": "2c1cbdbccb48e4489514e0ffc7ac5844ec831c59",
     ".agents/hooks/claude-hooks-adapter.sh": "3e9d5363ea37333d46636b6bdf35a7206019e1e9",
@@ -21,8 +21,8 @@
     ".claude/agents/wip-manager.md": "ba5d8b096d53b11a598df39ac91130e037f9c840",
     ".claude/hooks/pre-commit-gate.sh": "4fa83c523ef485cb2cef5389f4ee1c72d45ebd1b",
     ".claude/hooks/pre-push-gate.sh": "26ea5fa9371a5a08365bd89f1fb5e78a4c1ecbb5",
-    ".claude/hooks/refinement-gate.sh": "06593109dcb1f8b67337e6b2c553cdf14490ca13",
-    ".claude/hooks/session-start.sh": "9246966bdb1883ae464338e00aa8c7a5e5f06cf0",
+    ".claude/hooks/refinement-gate.sh": "e4f470f76c11c70b4c0b2135872980c03b88adff",
+    ".claude/hooks/session-start.sh": "77da7e9f746da209fbe7e7d86776f6db2a970dea",
     ".claude/rules/behavioral-core.md": "ee5dc68173f23e7d4a54d099b257b5a40a689f4b",
     ".claude/rules/devcontainer-patterns.md": "eb22668b3f994ac3621b662672cf44a98ec59f7d",
     ".claude/rules/project/.gitkeep": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
@@ -39,8 +39,8 @@
     ".codex/hooks.json": "3444db70330570fbfeef991dd73d45e4d6b6b6ef",
     ".codex/hooks/pre-commit-gate.sh": "9546bf743d48300b5f6d74d03089c87b51b2ebe8",
     ".codex/hooks/pre-push-gate.sh": "d508d6a05e20315eef26abdb4762cd052cbe97db",
-    ".codex/hooks/refinement-gate.sh": "51cceba6acc313a8cb1d4d4c8000f990b48db21f",
-    ".codex/hooks/session-start.sh": "eb371fe979f959f33702cb7e83ad73c361663846",
+    ".codex/hooks/refinement-gate.sh": "4fe857b84ff91436646aa54caf76f65a0f667ee0",
+    ".codex/hooks/session-start.sh": "963a7a21f32b9228369c14ec480af491c98208ea",
     ".codex/state/.gitkeep": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
     ".devcontainer/Dockerfile": "4e413da61655c1332eea0342a048eccf9ca26fac",
     ".devcontainer/codex-launcher.sh": "868e517f887fafb693da6ea8c9f2ddcf6fd7323e",
