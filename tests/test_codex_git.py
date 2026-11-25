@@ -502,6 +502,25 @@ def test_refresh_succeeds_with_future_config_mtime(tmp_path):
     assert (1.8 <= elapsed < 4, status.stdout) == (True, b'')
 
 
+def test_refresh_preserves_unrelated_racy_edit(tmp_path):
+    project = repository(tmp_path / 'project')
+    git(project, 'config', 'core.trustctime', 'false')
+    peer = project / 'peer'
+    peer.write_bytes(b'old')
+    os.utime(peer, (1, 1))
+    timestamp = peer.stat().st_mtime_ns
+    git(project, 'add', '--', 'peer')
+    index = project / '.git/index'
+    os.utime(index, ns=(timestamp, timestamp))
+    peer.write_bytes(b'new')
+    os.utime(peer, ns=(timestamp, timestamp))
+    os.utime(project / CONFIG, (1, 1))
+
+    CodexGit(project, project / '.git', project, tmp_path / 'client/bin/channels').refresh()
+
+    assert git(project, 'diff-files', '--name-only', '--', 'peer').stdout == b'peer\n'
+
+
 def test_filter_archive_retains_product_license(artifact, tmp_path):
     project = repository(tmp_path / 'project')
     setup(artifact, project, tmp_path / 'client')

@@ -301,6 +301,7 @@ class CodexGit:
         try:
             with target, index.open('rb') as source:
                 shutil.copyfileobj(source, target)
+            os.utime(lock, ns=(index.stat().st_atime_ns, index.stat().st_mtime_ns))
             if self.reset_cached_stat(lock):
                 os.replace(lock, index)
                 return
