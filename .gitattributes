@@ -8,3 +8,10 @@ LICENSE text eol=lf
 .devcontainer/Dockerfile text eol=lf
 .devcontainer/*.sh text eol=lf
 .devcontainer/.env.example text eol=lf
+
+# Agent and container configuration is read inside Linux containers.
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf

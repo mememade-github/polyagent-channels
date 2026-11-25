@@ -30,6 +30,8 @@ elif [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
   AGENT_VENDOR=claude
 elif [ -n "${CODEX_PROJECT_DIR:-}" ] || [ "${CODEX_CI:-}" = "1" ] || [ -n "${CODEX_THREAD_ID:-}" ]; then
   AGENT_VENDOR=codex
+elif [ "${CLAUDECODE:-}" = "1" ]; then
+  AGENT_VENDOR=claude
 elif [ "${AGENT_VENDOR:-}" != "claude" ] && [ "${AGENT_VENDOR:-}" != "codex" ] && [ "${AGENT_VENDOR:-}" != "antigravity" ]; then
   echo "ERROR: cannot identify Claude, Codex, or Antigravity host; set AGENT_VENDOR=claude|codex|antigravity" >&2
   exit 2
@@ -47,7 +49,10 @@ OUTPUT="$STATE_DIR/.refine-output"; EVAL_JSON="$STATE_DIR/.refine-eval.json"
 ```
 
 `CODEX_PROJECT_DIR` is optional in real Codex sessions, so `CODEX_CI` and
-`CODEX_THREAD_ID` are also authoritative host signals. Antigravity's
+`CODEX_THREAD_ID` are also authoritative host signals. Claude Code's Bash tool
+sets `CLAUDECODE=1` but not `CLAUDE_PROJECT_DIR`, so `CLAUDECODE` also selects
+Claude; it is checked after the Codex signals because a Codex process started
+from a Claude session inherits it. Antigravity's
 `run_command` sets `ANTIGRAVITY_AGENT=1` and can also inherit a parent's Codex or
 Claude variables, so that signal is checked first and the project is the git
 root of the current directory. Antigravity shares the Claude state paths, which

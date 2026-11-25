@@ -38,7 +38,8 @@ get_repo_status() {
         return 1
     fi
 
-    local branch=$(git -C "$repo_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "N/A")
+    local branch
+    branch=$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>/dev/null) || branch="HEAD"
     local remote=$(git -C "$repo_path" remote get-url origin 2>/dev/null | sed 's/.*@//' | sed 's/github_pat_[^@]*@//' || echo "N/A")
     local last_commit_hash=$(git -C "$repo_path" rev-parse --short HEAD 2>/dev/null || echo "N/A")
     local last_commit_msg=$(git -C "$repo_path" log -1 --format='%s' 2>/dev/null || echo "N/A")
