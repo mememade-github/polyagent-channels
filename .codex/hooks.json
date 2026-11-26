@@ -28,17 +28,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "CODEX_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/refinement-gate.sh\"",
-            "timeout": 10
-          }
-        ]
-      }
     ]
   }
 }

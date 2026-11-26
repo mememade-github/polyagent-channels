@@ -36,8 +36,7 @@ ENV_ISSUES=""
 [ -n "$ENV_ISSUES" ] && CONTEXT="${CONTEXT}Environment issues:\n${ENV_ISSUES}"
 
 # 4. Stale markers: existence+age semantics — prune anything older than 7 days.
-find "$ACTUAL_ROOT/.claude" -maxdepth 1 \( -name '.last-verification.*' \
-  -o -name '.refinement-active' -o -name '.stop-blocked-refinement.*' \) \
+find "$ACTUAL_ROOT/.claude" -maxdepth 1 -name '.last-verification.*' \
   -type f -mtime +7 -delete 2>/dev/null
 
 # 5. Environment info

@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
     build-essential git git-lfs curl wget less procps sudo ca-certificates gnupg2 openssh-client \
     ripgrep fd-find fzf tree htop vim nano zsh tmux jq unzip zip man-db gh \
-    # Python — general development (project code, refinement loop verification)
+    # Python — general development
     python3 python3-pip python3-venv \
     # bubblewrap — Codex CLI sandbox runtime (DevContainer kernel blocks namespaces;
     # vendored fallback used at runtime, but installation removes the PATH warning)
@@ -56,9 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose \
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-# Python tools — refinement loop verification (project scorer dependency, e.g. .refine/score.sh)
-# ruff/pytest/mypy provide deterministic reward signals for the refinement loop.
-# Without them, score=0 (loop becomes meaningless).
+# Python development tools — linting, testing, and type checking
 # --break-system-packages: required since pip 23.0+; Ubuntu 22.04 default pip (22.x) does not need it.
 RUN pip3 install --no-cache-dir $(pip3 install --help 2>&1 | grep -q break-system-packages && echo "--break-system-packages") \
     ruff pytest mypy

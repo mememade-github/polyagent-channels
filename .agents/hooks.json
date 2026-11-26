@@ -18,13 +18,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "type": "command",
-        "command": "bash hooks/claude-hooks-adapter.sh stop",
-        "timeout": 15
-      }
     ]
   }
 }

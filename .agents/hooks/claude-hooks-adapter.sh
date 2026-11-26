@@ -6,7 +6,7 @@
 # the Claude hook contract, calls the unmodified .claude/hooks/*.sh, and
 # translates the result back. It never executes the tool command itself.
 #
-# Usage: bash hooks/claude-hooks-adapter.sh <session-start|pre-tool-use|stop>
+# Usage: bash hooks/claude-hooks-adapter.sh <session-start|pre-tool-use>
 # Event mapping is documented in REFERENCE.md, section Hooks.
 # For pre-tool-use, an empty {} blocks commands; emit ask on a non-denial.
 #
@@ -18,7 +18,6 @@ EVENT="${1:-}"
 fallback() {
   case "$EVENT" in
     pre-tool-use) printf '%s\n' '{"decision":"ask"}' ;;
-    stop) printf '%s\n' '{"decision":"allow"}' ;;
     session-start) printf '%s\n' '{"injectSteps":[]}' ;;
     *) printf '%s\n' '{}' ;;
   esac
@@ -53,15 +52,6 @@ case "$EVENT" in
       fi
     done
     fallback
-    ;;
-  stop)
-    REASON=$(printf '%s' "$INPUT" | jq -r '.terminationReason // empty' 2>/dev/null) || fallback
-    [ "$REASON" = "NO_TOOL_CALL" ] || fallback
-    [ -f "$HOOKS/refinement-gate.sh" ] || fallback
-    OUT=$(cd "$ROOT" && CLAUDE_PROJECT_DIR="$ROOT" timeout 10 bash "$HOOKS/refinement-gate.sh" </dev/null 2>/dev/null)
-    DECISION=$(printf '%s' "$OUT" | jq -r '.decision // empty' 2>/dev/null) || fallback
-    [ "$DECISION" = "block" ] || fallback
-    printf '%s' "$OUT" | jq -c '{decision: "continue", reason: (.reason // "")}' 2>/dev/null || fallback
     ;;
   session-start)
     [ -f "$HOOKS/session-start.sh" ] || fallback

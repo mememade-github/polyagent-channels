@@ -1019,7 +1019,7 @@ docker compose --env-file .devcontainer/.env -f "<old-compose-file>" up -d --no-
 
 ## DevContainer lifecycle
 
-See the [upstream lifecycle reference](https://github.com/mememade-github/polyagent-devcontainer/blob/69d63702c56849c879e8f11f0bec58a6e11e372c/REFERENCE.md#devcontainer-lifecycle) for the base.
+See the [upstream lifecycle reference](https://github.com/mememade-github/polyagent-devcontainer/blob/bd27e6da4c28ea7dbeb789dc6074528883339fba/REFERENCE.md#devcontainer-lifecycle) for the base.
 Create/Reopen (or `devcontainer up`) uses `initializeCommand` to build the
 local base image before building the Channels service. A direct
 `devcontainer build` requires the local base image to be built first. If the

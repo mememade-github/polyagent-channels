@@ -29,10 +29,6 @@ yarn-error.log*
 # -----------------------------------------------------------------------------
 .claude/.last-verification*
 .claude/.allow-force-push*
-.claude/.stop-blocked*
-.claude/.refinement-active
-.claude/.refine-output
-.claude/.refine-eval.json
 .claude/settings.local.json
 .claude/worktrees/
 .mcp.json
@@ -42,11 +38,6 @@ yarn-error.log*
 # -----------------------------------------------------------------------------
 .codex/state/last-verification*
 .codex/state/allow-force-push*
-.codex/state/stop-blocked*
-.codex/state/refinement-active
-.codex/state/.refine-output
-.codex/state/.refine-eval.json
-.codex/state/refinement/
 
 # -----------------------------------------------------------------------------
 # Misc
@@ -58,7 +49,6 @@ Thumbs.db
 *.temp
 *.bak
 *~
-.claude/agent-memory/refinement/
 
 # Serena MCP — per-project state (auto-generated, do not track)
 .serena/

@@ -26,14 +26,14 @@ Codex command hooks run only after project trust and `/hooks` review; changed ho
 - Get explicit approval before `rm -rf`, overwriting `mv`/`cp`, `git push --force`, `git reset --hard`, or database `DROP`/`DELETE`.
 - Fix root causes — diagnose across infra/config/deploy/code; no workarounds.
 - Explicit failure — every operation must succeed or fail visibly.
-- Use the `refine` skill for meaningful changes and direct editing for trivial ones. Evaluation never runs in the modifier's context. On Codex, run it through `scripts/meta/run-isolated-role.sh` in a fresh `codex exec --ephemeral` context with the exact Contract/diff-only evidence channel. On Antigravity, run it in a fresh built-in `self` subagent given only the evaluator role body and the permitted evidence.
+- Before a meaningful change, state the authorized requirement and acceptance conditions; make trivial edits directly. For that change, have an evaluator in a fresh context, never the modifier's, judge the actual diff against those conditions using observed evidence and the permitted inputs in `.agents/skills/evaluator/SKILL.md`, using `scripts/meta/run-isolated-role.sh evaluate` on Codex or a fresh built-in `self` subagent on Antigravity. Repeat only for an evidenced gap in the authorized outcome; no count, score, or pass rate decides acceptance.
 - Invoke `status` for repository/worktree/WIP/upstream/marker state, `verify` for pre-commit checks, and `karpathy-guidelines` when writing, reviewing, or refactoring code.
 - For work likely to span sessions, load `.agents/skills/wip-manager/SKILL.md` and use it to manage the work at `wip/task-YYYYMMDD-description/README.md`; delete the WIP directory when complete.
 - Before an agent-issued commit, `bash scripts/meta/completion-checker.sh` must pass; it is environment-independent across fresh clones, CI, and temp checkouts. Never bypass verification. Run the docker-backed `.devcontainer/verify-template.sh` on demand and in CI, not per commit.
 
 ## Antigravity
 
-Keep `trigger: always_on` frontmatter on source rules; `.agents/rules.json` registers `.agents/rules/project`, and any deeper rule folder must be registered there. `/refine` runs Audit, Modify, and Evaluate in separate fresh built-in `self` subagents that retain repository rules and hooks without the parent conversation.
+Keep `trigger: always_on` frontmatter on source rules; `.agents/rules.json` registers `.agents/rules/project`, and any deeper rule folder must be registered there.
 
 ## Mirror and communication
 
