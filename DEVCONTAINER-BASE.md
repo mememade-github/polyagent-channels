@@ -33,8 +33,6 @@ base files, preserving the registration when the new configuration accepts it.
 | `workspaceFolder`, `remoteUser` | Retain `/workspaces` and `vscode` to match the Compose bind and service user. |
 | `shutdownAction` | Retains `stopCompose` for editor shutdown. |
 | `containerEnv` | Omitted. The base Dockerfile supplies `DEVCONTAINER=true`, `LANG=en_US.UTF-8` and `LC_ALL=en_US.UTF-8` to both entry paths, and startup setup exports the locale for its own commands. Channels runs Python and leaves Node tools on their normal heap defaults, so the upstream `NODE_OPTIONS` override is omitted. |
-| `remoteEnv` | Omitted. Claude follows its own environment and settings without the upstream IDE-only `CLAUDE_CODE_DISABLE_AUTO_MEMORY=0` override. |
-| `features` | Omitted because the upstream object is empty and tooling comes from the images. |
 | `customizations` | Omitted. Format-on-save, formatter, indentation, encoding, line endings, whitespace and final newline settings, the Bash profile, watcher exclusions, and the ESLint, Prettier, GitLens and Docker extensions are editor choices independent of the service. |
 | `postCreateCommand`, `postStartCommand`, `waitFor` | Omitted. On every start the inherited entrypoint calls `setup-env.sh` before executing the image command. Setup applies `core.filemode=false` to discovered workspace Git repositories. The entrypoint orders setup and Compose tracks HTTP health, so the post-create wait is unnecessary. |
 | `updateRemoteUserUID` | Omitted as an explicit setting. Automatic UID adjustment follows the DevContainer client's defaults. Plain Compose uses the image's `vscode` identity. |
@@ -133,11 +131,11 @@ PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 \
   /tmp/channels-test-venv/bin/python -m pytest -p no:cacheprovider tests/test_devcontainer_base.py tests/test_documents.py
 ```
 
-Run the upstream `.devcontainer/verify-template.sh` with Docker unavailable and
+Run the upstream `.devcontainer/verify-template.sh` and
 follow the [product verification procedure](REFERENCE.md#verification). Check
 a cold product Compose build and a cold DevContainer Create/Reopen (or `devcontainer up`) in an isolated
 checkout and confirm the product's effective runtime settings before starting
 an isolated stack.
 
 Before committing, run `bash scripts/meta/completion-checker.sh` in the product
-checkout. On success it writes ignored per-branch completion markers.
+checkout.

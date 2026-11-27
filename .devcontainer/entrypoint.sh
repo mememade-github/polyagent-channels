@@ -6,8 +6,9 @@
 # "Reopen in Container" path through this script, so environment setup is
 # always applied.
 #
-# VS Code additionally runs postCreateCommand (setup-env.sh) once, but
-# setup-env.sh is idempotent — running it twice is safe.
+# VS Code additionally runs postCreateCommand (setup-env.sh) once when the
+# container is created. The two runs can overlap in time; only the Codex
+# update is serialized (codex-launcher's flock).
 # =============================================================================
 
 # Run environment setup (non-fatal if it errors out)

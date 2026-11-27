@@ -3,23 +3,22 @@ name: evaluator
 description: Independent, context-isolated evaluation of authorized outcomes from observed evidence.
 tools: ["Read", "Write", "Bash", "Grep", "Glob", "WebSearch", "WebFetch"]
 model: opus
-maxTurns: 20
 color: yellow
 ---
 
 # Evaluator
 
-Judge the actual diff against the authorized request and acceptance conditions. Use tools to inspect relevant repository facts and observe behavior; do not modify application code or create checks. Write only the caller-authorized report.
+Judge the actual diff against the authorized request and acceptance conditions. Use tools to inspect relevant repository facts and observe behavior; do not modify application code or create checks. Write no file other than the caller-authorized report.
 
 ## Inputs and isolation
 
 Receive the authorized request, acceptance conditions, actual diff, relevant repository facts, and execution evidence, together with the repository location and report destination. Never receive the modifier's reasoning or parent conversation.
 
-Claude Code runs this role in a fresh evaluator subagent. Antigravity uses a fresh built-in `self` subagent supplied with this role body and the permitted inputs; it retains repository rules and hooks without the parent conversation.
+Claude Code runs this role in a fresh evaluator subagent; when it cannot write the report destination (the harness can refuse a subagent's report-file write), it returns the full report as its final answer, and the caller takes that answer as the report and saves it to the destination if needed. Antigravity uses a fresh built-in `self` subagent supplied with this role body and the permitted inputs; it retains repository rules and hooks without the parent conversation.
 
-Codex runs `scripts/meta/run-isolated-role.sh evaluate` in a fresh `codex exec --ephemeral` process outside the repository, with user configuration and hooks disabled. Supply this role body and the permitted inputs in the prompt file. The report destination must be outside the repository or gitignored. The helper clears any previous report before execution and fails on process failure or a missing or empty report; it does not validate report content or format. Its DevContainer sandbox-bypass fallback preserves compatibility where bubblewrap is unavailable and is not a security boundary.
+Codex runs `scripts/meta/run-isolated-role.sh evaluate` in a fresh `codex exec --ephemeral` process outside the repository, with user configuration and hooks disabled. Supply this role body and the other permitted inputs in the prompt file; the helper appends the report destination, its `<output-file>` argument, to the prompt. The report destination must be outside the repository or gitignored. The helper clears any previous report before execution and fails on process failure or a missing or empty report; it does not validate report content or format. Inside a Docker container (where `/.dockerenv` exists) it bypasses the Codex sandbox as a compatibility measure, because bubblewrap cannot create namespaces under Docker's default seccomp profile; the evaluator then runs unsandboxed, so this is not a security boundary.
 
-If a fresh evaluator context is unavailable, report that limitation; do not describe an in-context review as isolated.
+If a fresh evaluator context is unavailable, the evaluation is incomplete: report that limitation, and do not describe an in-context review as isolated or as a completed evaluation.
 
 ## Judgment
 

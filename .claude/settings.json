@@ -1,7 +1,4 @@
 {
-  "env": {
-    "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -18,11 +15,6 @@
       {
         "matcher": "Bash",
         "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-commit-gate.sh",
-            "timeout": 5
-          },
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push-gate.sh",

@@ -32,7 +32,23 @@ step "Setting permissions..."
 if [ -S /var/run/docker.sock ]; then
     SOCK_GID=$(stat -c %g /var/run/docker.sock 2>/dev/null || true)
     DOCKER_GROUP_GID=$(getent group docker 2>/dev/null | cut -d: -f3 || true)
-    if [ -n "$SOCK_GID" ] && [ "$SOCK_GID" != "0" ] && [ "$SOCK_GID" != "$DOCKER_GROUP_GID" ]; then
+    if [ -z "$SOCK_GID" ]; then
+        echo "      WARN: could not read the group of docker.sock; docker access via the socket may be unavailable" >&2
+    elif [ "$SOCK_GID" = "0" ]; then
+        # Compatibility measure for a daemon that hands over its socket with
+        # group 0 (root), which the container user is not in. Applies only
+        # when the socket's group is 0; another group is matched by groupmod
+        # below and the socket is left alone. Limits: the socket is shared, so
+        # this changes its group for every container that mounts it and, where
+        # it is the host's own socket file, for the host, where this group
+        # number may belong to another group or to none; it is set only when
+        # this script runs, so a socket recreated later or changed by another
+        # container is not corrected until the next start; the mode is not
+        # changed, so a socket without group write permission stays unusable.
+        if ! sudo chgrp docker /var/run/docker.sock 2>/dev/null; then
+            echo "      WARN: could not set the group of docker.sock to docker; docker access via the socket may be unavailable" >&2
+        fi
+    elif [ "$SOCK_GID" != "$DOCKER_GROUP_GID" ]; then
         if ! sudo groupmod -g "$SOCK_GID" docker 2>/dev/null; then
             echo "      WARN: could not align docker group with docker.sock GID; docker access via the socket may be unavailable" >&2
         fi
@@ -43,7 +59,10 @@ WS="/workspaces"
 if ! workspace_marker_ok "$WS"; then
     echo "      ERROR: /workspaces has no project marker; set HOST_WORKSPACE_PATH for docker compose entrypoints"
 fi
-# 9p/drvfs: prevent dubious-ownership warnings on root:root mounts
+# Compatibility measure for mounts whose files appear owned by a user other
+# than the container user (e.g. root:root on 9p/drvfs), where Git refuses the
+# repository for dubious ownership. Limit: '*' turns Git's ownership check off
+# for every directory this user opens, on any filesystem, not only those mounts.
 git config --global safe.directory '*' 2>/dev/null || true
 
 # Include linked worktrees and nested application repos; skip dependency trees.
@@ -83,9 +102,8 @@ fi
 # =============================================================================
 # 3. Claude CLI — idempotent latest-version sync
 # =============================================================================
-# Run `claude update` on every container start to prevent CLI version drift
-# from the image-build snapshot. Failure is soft (does not block startup).
-# Skip with SKIP_CLAUDE_UPDATE=1.
+# Skip with SKIP_CLAUDE_UPDATE=1. REFERENCE.md §Tool versioning policy states
+# the output and failure handling of steps 3, 4 and 6.
 step "Claude CLI version..."
 if ! command -v claude &>/dev/null; then
     echo "      WARN: claude CLI not installed — skipping update"
@@ -93,22 +111,26 @@ elif [ "${SKIP_CLAUDE_UPDATE:-}" = "1" ]; then
     echo "      Skipped (SKIP_CLAUDE_UPDATE=1), current: $(claude --version 2>/dev/null)"
 else
     BEFORE=$(claude --version 2>/dev/null | awk '{print $1}')
-    claude update >/dev/null 2>&1 || true
-    AFTER=$(claude --version 2>/dev/null | awk '{print $1}')
-    if [ "$BEFORE" = "$AFTER" ]; then
-        echo "      $AFTER (already latest)"
+    CLAUDE_UPDATE_LOG=$(mktemp)
+    if claude update >"$CLAUDE_UPDATE_LOG" 2>&1; then
+        AFTER=$(claude --version 2>/dev/null | awk '{print $1}')
+        if [ "$BEFORE" = "$AFTER" ]; then
+            echo "      $AFTER (already latest)"
+        else
+            echo "      $BEFORE -> $AFTER"
+        fi
     else
-        echo "      $BEFORE -> $AFTER"
+        AFTER=$(claude --version 2>/dev/null | awk '{print $1}')
+        echo "      WARN: claude update failed; continuing with ${AFTER:-unknown}"
+        tail -20 "$CLAUDE_UPDATE_LOG" | sed 's/^/      claude: /'
     fi
+    rm -f "$CLAUDE_UPDATE_LOG"
 fi
 
 # =============================================================================
 # 4. Codex CLI — idempotent latest-version sync
 # =============================================================================
-# Parity with Claude (step 3): keep the Codex CLI current on each container
-# start instead of frozen at the image-build snapshot. Failure is soft (does
-# not block startup). Skip with SKIP_CODEX_UPDATE=1.
-#
+# Skip with SKIP_CODEX_UPDATE=1.
 # Do NOT use `codex update`: its built-in updater runs `npm install -g
 # @openai/codex` against the default global prefix, which the unprivileged
 # vscode user cannot write. The Dockerfile installs Codex to ~/.npm-global, so
@@ -146,22 +168,39 @@ elif [ "${SKIP_CODEX_UPDATE:-}" = "1" ]; then
 else
     BEFORE=$(codex_version)
     CODEX_UPDATE_LOG=$(mktemp)
-    if "$CODEX_LAUNCHER" --update-only >"$CODEX_UPDATE_LOG" 2>&1; then
-        AFTER=$(codex_version)
-        if [ "$BEFORE" = "$AFTER" ]; then
-            echo "      $AFTER (already latest)"
-        else
-            echo "      $BEFORE → $AFTER"
-        fi
-    else
-        echo "      WARN: Codex update failed; continuing with ${BEFORE:-unknown}"
+    # Status codes are defined in codex-launcher.sh above codex_update_if_needed.
+    CODEX_UPDATE_STATUS=0
+    "$CODEX_LAUNCHER" --update-only >"$CODEX_UPDATE_LOG" 2>&1 || CODEX_UPDATE_STATUS=$?
+    AFTER=$(codex_version)
+    case "$CODEX_UPDATE_STATUS" in
+        0)
+            if [ "$BEFORE" = "$AFTER" ]; then
+                echo "      $AFTER (already latest)"
+            else
+                echo "      $BEFORE → $AFTER"
+            fi
+            ;;
+        3)
+            echo "      WARN: could not check the latest Codex version (npm missing or registry unreachable); continuing with ${AFTER:-unknown}"
+            ;;
+        4)
+            echo "      WARN: Codex reinstall failed; restored previous ${AFTER:-unknown}"
+            ;;
+        5)
+            echo "      WARN: Codex reinstall failed; no working codex is installed"
+            ;;
+        *)
+            echo "      WARN: Codex update failed (status $CODEX_UPDATE_STATUS); continuing with ${AFTER:-unknown}"
+            ;;
+    esac
+    if [ "$CODEX_UPDATE_STATUS" != 0 ] && [ "$CODEX_UPDATE_STATUS" != 3 ]; then
         tail -20 "$CODEX_UPDATE_LOG" | sed 's/^/      npm: /'
     fi
     rm -f "$CODEX_UPDATE_LOG"
 fi
 
 # =============================================================================
-# 5. Codex CLI — project-local config validation
+# 5. Codex CLI — obsolete-key warnings and legacy config-link removal
 # =============================================================================
 # Current Codex loads a trusted project's .codex/config.toml directly. Never
 # copy project policy into ~/.codex/config.toml: that user file is persistent,
@@ -194,11 +233,7 @@ fi
 # =============================================================================
 # 6. Antigravity CLI — idempotent latest-version sync
 # =============================================================================
-# Parity with Claude (step 3): try `agy update` on every container start so the
-# CLI is not frozen at the image-build snapshot. Failure is soft (does not
-# block startup) but visible, as in step 4: a warning and the output tail.
-# Skip with SKIP_AGY_UPDATE=1. The CLI also updates in the background during
-# sessions, independently of this startup step.
+# Skip with SKIP_AGY_UPDATE=1.
 step "Antigravity CLI version..."
 if ! command -v agy &>/dev/null; then
     echo "      WARN: agy CLI not installed — skipping update"

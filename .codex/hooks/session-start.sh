@@ -1,15 +1,13 @@
 #!/bin/bash
-# SessionStart hook: inject project context (branch, memory, WIP, environment).
+# SessionStart hook: inject project context (branch, WIP, environment).
 # Context-only: never blocks a session (always exit 0).
 set -u
 
 INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null) || SOURCE="startup"  # fallback outside $(): never appended to partial output
 PROJECT_DIR="${CODEX_PROJECT_DIR:-.}"
-STATE_DIR="$PROJECT_DIR/.codex/state"
 GIT_ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$PROJECT_DIR")
 CONTEXT=""
-mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # 1. Git status summary
 if command -v git >/dev/null 2>&1 && [ -e "$GIT_ROOT/.git" ]; then
@@ -18,12 +16,7 @@ if command -v git >/dev/null 2>&1 && [ -e "$GIT_ROOT/.git" ]; then
   CONTEXT="${CONTEXT}Git branch: ${BRANCH} (${DIRTY} uncommitted changes)\n"
 fi
 
-# 2. Known issues from auto memory
-if [ -f "$GIT_ROOT/MEMORY.md" ]; then
-  CONTEXT="${CONTEXT}Known issues from MEMORY.md:\n$(head -20 "$GIT_ROOT/MEMORY.md" | sed 's/^/  /')\n"
-fi
-
-# 3. Active WIP tasks — resume only when the current request permits
+# 2. Active WIP tasks — resume only when the current request permits
 if [ -d "$GIT_ROOT/wip" ]; then
   WIP_DIRS=("$GIT_ROOT"/wip/*/)
   if [ -d "${WIP_DIRS[0]}" ]; then
@@ -36,18 +29,14 @@ if [ -d "$GIT_ROOT/wip" ]; then
   fi
 fi
 
-# 4. Environment quick check
+# 3. Environment quick check
 ENV_ISSUES=""
 [ ! -S /var/run/docker.sock ] && ENV_ISSUES="${ENV_ISSUES}  - Docker socket not available\n"
 [ ! -f "$GIT_ROOT/.devcontainer/.env" ] && ENV_ISSUES="${ENV_ISSUES}  - .devcontainer/.env missing (copy .devcontainer/.env.example)\n"
 [ -f /.dockerenv ] && ! command -v agy >/dev/null 2>&1 && ENV_ISSUES="${ENV_ISSUES}  - agy not found in container; see UPGRADING.md\n"
 [ -n "$ENV_ISSUES" ] && CONTEXT="${CONTEXT}Environment issues:\n${ENV_ISSUES}"
 
-# 5. Stale markers: existence+age semantics — prune anything older than 7 days.
-find "$STATE_DIR" -maxdepth 1 -name 'last-verification.*' \
-  -type f -mtime +7 -delete 2>/dev/null
-
-# 6. Environment info
+# 4. Environment info
 if [ -f /.dockerenv ]; then
   OS_INFO=$(. /etc/os-release 2>/dev/null && echo "$NAME $VERSION_ID" || echo "Linux")
   CONTEXT="${CONTEXT}Environment: Dev Container (${OS_INFO})\n"

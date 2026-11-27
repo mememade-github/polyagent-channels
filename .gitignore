@@ -6,8 +6,7 @@
 # Environment configuration (sensitive)
 # -----------------------------------------------------------------------------
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 
 # -----------------------------------------------------------------------------
@@ -25,19 +24,11 @@ yarn-error.log*
 *.code-workspace
 
 # -----------------------------------------------------------------------------
-# Claude Code (runtime markers — never committed)
+# Claude Code (local files — never committed)
 # -----------------------------------------------------------------------------
-.claude/.last-verification*
-.claude/.allow-force-push*
 .claude/settings.local.json
 .claude/worktrees/
 .mcp.json
-
-# -----------------------------------------------------------------------------
-# Codex CLI (runtime markers — never committed; keep only .gitkeep)
-# -----------------------------------------------------------------------------
-.codex/state/last-verification*
-.codex/state/allow-force-push*
 
 # -----------------------------------------------------------------------------
 # Misc
@@ -52,14 +43,6 @@ Thumbs.db
 
 # Serena MCP — per-project state (auto-generated, do not track)
 .serena/
-
-# -----------------------------------------------------------------------------
-# GitLab CI pull-mirror template — local-only (not shipped tracked)
-# -----------------------------------------------------------------------------
-# Its scheduled pipeline force-resets to an upstream and force-pushes, which
-# would overwrite any consumer repo that registers a Runner + schedule. Kept
-# locally for manual mirror wiring; never tracked/pushed. See PROJECT.md.
-/.gitlab-ci.yml
 
 # Session state belongs to the local workspace, never the template history.
 /wip/

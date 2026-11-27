@@ -2,6 +2,8 @@
 # Run Codex evaluation in a fresh context outside the repository.
 # Reports must be outside the repository or gitignored.
 # Clear prior report contents before execution.
+# The evaluator receives the prompt file followed by one line naming the report
+# path, so the caller need not repeat it in the prompt.
 set -euo pipefail
 
 ROLE="${1:-}"
@@ -60,13 +62,18 @@ ARGS=(
 )
 
 if [ -f /.dockerenv ]; then
-    # Existing DevContainer compatibility fallback: bubblewrap unavailable.
+    # Compatibility measure: under Docker's default seccomp profile bubblewrap
+    # cannot create namespaces, so inside a container the evaluator runs
+    # unsandboxed with the container's access. /.dockerenv marks any Docker
+    # container; one that would allow bubblewrap is bypassed as well.
     ARGS+=(--dangerously-bypass-approvals-and-sandbox)
 else
     ARGS+=(--sandbox workspace-write --add-dir "$(dirname "$OUTPUT_FILE")")
 fi
 
-if "$CODEX_BIN" "${ARGS[@]}" - < "$PROMPT_FILE" >/dev/null; then
+if { cat "$PROMPT_FILE" &&
+     printf '\nWrite the evaluation report to %s. This path overrides any other report path given above.\n' "$OUTPUT_FILE"; } |
+    "$CODEX_BIN" "${ARGS[@]}" - >/dev/null; then
     :
 else
     STATUS=$?

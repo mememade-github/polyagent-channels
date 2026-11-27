@@ -18,11 +18,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CODEX_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/pre-commit-gate.sh\"",
-            "timeout": 5
-          },
-          {
-            "type": "command",
             "command": "CODEX_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/pre-push-gate.sh\"",
             "timeout": 5
           }

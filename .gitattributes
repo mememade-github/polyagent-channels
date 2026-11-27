@@ -6,7 +6,6 @@
 *.toml text eol=lf
 LICENSE text eol=lf
 .devcontainer/Dockerfile text eol=lf
-.devcontainer/*.sh text eol=lf
 .devcontainer/.env.example text eol=lf
 
 # Agent and container configuration is read inside Linux containers.

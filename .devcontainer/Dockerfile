@@ -8,7 +8,9 @@
 #   Claude Code — native binary (~/.local/bin/claude, auto-updated)
 #   Codex CLI   — npm global (~/.npm-global/bin/codex)
 #   Antigravity — native binary (~/.local/bin/agy, self-updating)
-#   Node.js     — Node 22 LTS for Codex CLI infrastructure
+#   Node.js     — Node 22 LTS; Codex runs on the first node on PATH, the project
+#                 Node in interactive bash when PROJECT_NODE_VERSION is set
+#                 (REFERENCE §Runtime layout)
 #   Python      — system python3 + uv (general development)
 #   Project Node.js can be installed via PROJECT_NODE_VERSION
 # =============================================================================
@@ -39,8 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep fd-find fzf tree htop vim nano zsh tmux jq unzip zip man-db gh \
     # Python — general development
     python3 python3-pip python3-venv \
-    # bubblewrap — Codex CLI sandbox runtime (DevContainer kernel blocks namespaces;
-    # vendored fallback used at runtime, but installation removes the PATH warning)
+    # bubblewrap — Codex CLI sandbox runtime (cannot create namespaces under Docker's default seccomp profile;
+    # see REFERENCE.md §Codex sandbox bypass)
     bubblewrap \
     docker.io \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
@@ -152,7 +154,7 @@ RUN curl -LsSf https://astral.sh/uv/0.6.0/install.sh | sh
 # =============================================================================
 # Volume mount points must exist in the image so new named volumes are
 # created vscode-owned (a missing mount point yields a root-owned volume).
-RUN mkdir -p ${HOME}/.claude ${HOME}/.config/nano ${HOME}/.gemini ${HOME}/.config/antigravity
+RUN mkdir -p ${HOME}/.claude ${HOME}/.codex ${HOME}/.config/nano ${HOME}/.gemini ${HOME}/.config/antigravity
 
 # .bashrc
 RUN echo 'export LANG=en_US.UTF-8' >> ${HOME}/.bashrc \

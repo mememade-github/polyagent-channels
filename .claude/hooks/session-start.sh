@@ -35,11 +35,7 @@ ENV_ISSUES=""
 [ -f /.dockerenv ] && ! command -v agy >/dev/null 2>&1 && ENV_ISSUES="${ENV_ISSUES}  - agy not found in container; see UPGRADING.md\n"
 [ -n "$ENV_ISSUES" ] && CONTEXT="${CONTEXT}Environment issues:\n${ENV_ISSUES}"
 
-# 4. Stale markers: existence+age semantics — prune anything older than 7 days.
-find "$ACTUAL_ROOT/.claude" -maxdepth 1 -name '.last-verification.*' \
-  -type f -mtime +7 -delete 2>/dev/null
-
-# 5. Environment info
+# 4. Environment info
 if [ -f /.dockerenv ]; then
   OS_INFO=$(. /etc/os-release 2>/dev/null && echo "$NAME $VERSION_ID" || echo "Linux")
   CONTEXT="${CONTEXT}Environment: Dev Container (${OS_INFO})\n"
